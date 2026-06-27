@@ -52,3 +52,6 @@ coverage/
 .env
 .env.local
 application-local.yml
+
+# Project-local Maven settings (mirror override, user-specific)
+settings.xml
