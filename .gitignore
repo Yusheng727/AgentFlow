@@ -1,0 +1,54 @@
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+.mvn/timing.properties
+.mvn/wrapper/maven-wrapper.properties
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+hs_err_pid*
+replay_pid*
+
+# IDE - IntelliJ
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# IDE - Eclipse
+.classpath
+.project
+.settings/
+bin/
+
+# IDE - VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Spring Boot
+ HELP.md
+build/
+
+# Test/coverage
+coverage/
+*.exec
+.jacoco/
+
+# Claude Code worktrees (ce-work parallel isolation)
+.claude/worktrees/
+
+# Local env / secrets
+.env
+.env.local
+application-local.yml
