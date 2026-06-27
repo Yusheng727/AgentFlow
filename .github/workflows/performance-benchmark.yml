@@ -1,0 +1,49 @@
+name: Performance Benchmark
+
+# Week 1 建立基线，Week 7 对比回归（>10% 回归 → CI 警告）。
+# JMH 实际执行在 U2（BSP 引擎）引入 jmh-maven-plugin 后启用；
+# 当前为骨架，仅 workflow_dispatch / 周一调度触发，不在 push 上跑。
+
+on:
+  schedule:
+    - cron: '0 2 * * 1'  # 每周一 UTC 2:00
+  workflow_dispatch:
+    inputs:
+      compare_baseline:
+        description: '与 Week-1 基线对比（>10% 回归失败）'
+        required: false
+        default: 'false'
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: 检查 JMH benchmark profile 是否就绪
+        id: ready
+        run: |
+          if mvn -B -ntp help:evaluate -Dexpression=benchmark -q -DforceStdout | grep -q true; then
+            echo "ready=true" >> $GITHUB_OUTPUT
+          else
+            echo "ready=false" >> $GITHUB_OUTPUT
+            echo "::warning::JMH benchmark profile 尚未就绪（U2 落地后启用），跳过"
+          fi
+      - name: Run JMH benchmarks
+        if: steps.ready.outputs.ready == 'true'
+        run: mvn -B -ntp -pl agentflow-core verify -Pbenchmark -Dbenchmark.format=json
+      - name: Upload benchmark results
+        if: steps.ready.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: '**/target/jmh-results.json'
+      - name: 性能回归对比（>10%）
+        if: steps.ready.outputs.ready == 'true' && (github.event_name == 'schedule' || inputs.compare_baseline == 'true')
+        run: |
+          echo "TODO U2: 对比 Week-1 基线（存为 artifact），>10% 回归 exit 1"

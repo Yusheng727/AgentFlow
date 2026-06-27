@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+    branches: [main]
+  schedule:
+    # 每天 UTC 2:00（北京 10:00）跑回归 + 性能检测
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+
+# job 级 env，供 step 的 if 条件判断（secrets 不能直接进 if）
+env:
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: agentflow
+          POSTGRES_PASSWORD: agentflow
+          POSTGRES_DB: agentflow
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U agentflow"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # SonarQube blame 需要完整历史
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Maven verify（compile + 单元 + 集成 + JaCoCo 80% 门禁）
+        run: mvn -B -ntp verify
+        env:
+          SPRING_DATASOURCE_URL: jdbc:postgresql://localhost:5432/agentflow
+          SPRING_DATASOURCE_USERNAME: agentflow
+          SPRING_DATASOURCE_PASSWORD: agentflow
+          SPRING_DATA_REDIS_HOST: localhost
+          SPRING_DATA_REDIS_PORT: '6379'
+      - name: SonarQube scan（有 token 才跑）
+        if: ${{ env.SONAR_TOKEN != '' }}
+        run: mvn -B -ntp org.jacoco:jacoco-maven-plugin:report sonar:sonar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      - name: Build Docker image（Dockerfile 在 U13 落地前跳过）
+        if: hashFiles('Dockerfile') != ''
+        run: docker build -t ghcr.io/${{ github.repository }}/agentflow:${{ github.sha }} .
+      - name: Push to GHCR（main 推送且 Dockerfile 存在时）
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && hashFiles('Dockerfile') != ''
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker push ghcr.io/${{ github.repository }}/agentflow:${{ github.sha }}
