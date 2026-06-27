@@ -1,0 +1,87 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agentflow.dev/workflow-schema.json",
+  "title": "AgentFlow Workflow Definition",
+  "description": "AgentFlow YAML DSL schema — IDE 自动补全与实时校验用",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "agentflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "SemVer 版本号（R14），缺失默认 1.0",
+          "default": "1.0"
+        }
+      },
+      "required": ["version"]
+    },
+    "channels": {
+      "type": "object",
+      "description": "channel 声明（R6），key 为 channel 名",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": { "type": "string", "description": "v1.1 完整类型 schema 预留" },
+          "reducer": {
+            "type": "string",
+            "enum": ["overwrite", "concat", "max", "custom"],
+            "description": "并发写入冲突合并策略"
+          }
+        },
+        "required": ["reducer"]
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "description": "节点（Agent 调用单元）列表",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string", "description": "节点唯一 id" },
+          "agent": { "type": "string", "description": "AgentFunction bean 名" },
+          "prompt_template": { "type": "string", "description": "含 ${channel.field} SpEL 占位符的 prompt 模板" },
+          "tools": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "节点级 @Tool bean 名列表"
+          },
+          "timeout": { "type": "string", "description": "节点超时，如 120s（R4）" },
+          "retry": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "max_attempts": { "type": "integer", "minimum": 0 },
+              "initial_backoff": { "type": "string" }
+            },
+            "required": ["max_attempts", "initial_backoff"]
+          },
+          "output_schema": {
+            "type": "object",
+            "description": "LLM 输出 JSON Schema（U3 OutputSchemaValidator 校验）"
+          },
+          "mock_response": { "type": "string", "description": "Mock 模式预设响应（R13）" }
+        },
+        "required": ["id", "agent"]
+      }
+    },
+    "edges": {
+      "type": "array",
+      "description": "依赖边列表（R1 拓扑）",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "from": { "type": "string" },
+          "to": { "type": "string" }
+        },
+        "required": ["from", "to"]
+      }
+    }
+  },
+  "required": ["nodes"]
+}
