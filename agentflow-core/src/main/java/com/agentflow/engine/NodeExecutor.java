@@ -44,7 +44,14 @@ public final class NodeExecutor {
      * 执行单节点（阻塞当前线程直到完成或超时）。并行由调用方在多个线程/Virtual Thread 上调用实现。
      */
     public NodeResult execute(NodeDefinition node, AgentInput input) {
-        AgentFunction agent = agentResolver.apply(node.agent());
+        AgentFunction agent;
+        try {
+            agent = agentResolver.apply(node.agent());
+        } catch (RuntimeException ex) {
+            // resolver 抛异常不应破坏 no-throw 不变量（NodeExecutor 是 public API，接受任意 Function）
+            return new NodeResult.Failure(node.id(),
+                    new AgentExecutionException("agent 解析失败: " + node.agent(), ex));
+        }
         if (agent == null) {
             return new NodeResult.Failure(node.id(),
                     new AgentExecutionException("未注册 agent: " + node.agent()));
@@ -54,10 +61,15 @@ public final class NodeExecutor {
         Duration timeout = parseTimeout(node.timeout());
         try {
             AgentOutput output = future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            if (output == null) {
+                // agent 契约要求返回非 null AgentOutput；null 视为失败，防 barrier 阶段 NPE
+                cancelNode(future, agent, input);
+                return new NodeResult.Failure(node.id(),
+                        new AgentExecutionException("agent 返回 null output: " + node.agent()));
+            }
             return new NodeResult.Success(node.id(), output);
         } catch (TimeoutException e) {
-            future.cancel(true);      // 中断 Virtual Thread（FutureTask.cancel(true) 真中断）
-            agent.cancel(input);       // 适配器级 HTTP abort（KTD-6 v4.3）
+            cancelNode(future, agent, input);
             return new NodeResult.Failure(node.id(), e);
         } catch (ExecutionException e) {
             // agent.execute 抛出的异常被包成 ExecutionException，取 cause
@@ -65,9 +77,21 @@ public final class NodeExecutor {
             return new NodeResult.Failure(node.id(), cause);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            future.cancel(true);
-            agent.cancel(input);
+            cancelNode(future, agent, input);
             return new NodeResult.Failure(node.id(), e);
+        }
+    }
+
+    /**
+     * 中断在飞调用 + 触发适配器级 cancel。cancel() 自身抛异常不向上传播——
+     * 主失败（timeout/interrupt）已记录，secondary cancel 失败不可阻塞引擎（KTD-6 best-effort 止损）。
+     */
+    private void cancelNode(Future<?> future, AgentFunction agent, AgentInput input) {
+        future.cancel(true);      // 中断 Virtual Thread（FutureTask.cancel(true) 真中断）
+        try {
+            agent.cancel(input);   // 适配器级 HTTP abort（KTD-6 v4.3）
+        } catch (RuntimeException cancelEx) {
+            // best-effort 止损，吞掉 secondary exception
         }
     }
 
@@ -80,23 +104,29 @@ public final class NodeExecutor {
             return DEFAULT_TIMEOUT;
         }
         String t = spec.trim().toLowerCase();
+        Duration parsed;
         try {
             if (t.endsWith("ms")) {
-                return Duration.ofMillis(Long.parseLong(t.substring(0, t.length() - 2)));
+                parsed = Duration.ofMillis(Long.parseLong(t.substring(0, t.length() - 2)));
+            } else if (t.endsWith("s")) {
+                parsed = Duration.ofSeconds(Long.parseLong(t.substring(0, t.length() - 1)));
+            } else if (t.endsWith("m")) {
+                parsed = Duration.ofMinutes(Long.parseLong(t.substring(0, t.length() - 1)));
+            } else if (t.endsWith("h")) {
+                parsed = Duration.ofHours(Long.parseLong(t.substring(0, t.length() - 1)));
+            } else {
+                // 裸数字 → 秒
+                parsed = Duration.ofSeconds(Long.parseLong(t));
             }
-            if (t.endsWith("s")) {
-                return Duration.ofSeconds(Long.parseLong(t.substring(0, t.length() - 1)));
-            }
-            if (t.endsWith("m")) {
-                return Duration.ofMinutes(Long.parseLong(t.substring(0, t.length() - 1)));
-            }
-            if (t.endsWith("h")) {
-                return Duration.ofHours(Long.parseLong(t.substring(0, t.length() - 1)));
-            }
-            // 裸数字 → 秒
-            return Duration.ofSeconds(Long.parseLong(t));
         } catch (NumberFormatException e) {
+            // 非法格式静默降级为默认——U1 SemanticValidator 后续可加 timeout 格式校验提前拦截
             return DEFAULT_TIMEOUT;
         }
+        // 零或负超时会导致 Future.get 抛 IllegalArgumentException（崩溃）或立即 TimeoutException，
+        // 一律降级为默认
+        if (parsed.isZero() || parsed.isNegative()) {
+            return DEFAULT_TIMEOUT;
+        }
+        return parsed;
     }
 }

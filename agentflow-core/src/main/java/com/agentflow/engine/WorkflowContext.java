@@ -74,6 +74,12 @@ public final class WorkflowContext {
     /**
      * 生成只读快照（KTD-1）。基于 {@code Map.copyOf}，任何写入尝试抛
      * {@link UnsupportedOperationException}。供同 super-step 内并行节点读取。
+     *
+     * <p><b>隔离范围（已知限制）</b>：{@code Map.copyOf} 只保证<b>结构级</b>不可变（不能 put/remove），
+     * channel 值对象本身是共享引用。Agent 不得向 channel 写入可变对象（如 ArrayList/HashMap），
+     * 否则节点可通过快照 mutate 全局 context、破坏 BSP 互不可见语义。v1 channel 值应为不可变类型
+     * （String / record / 不可变集合）；ChannelReducer 的 CONCAT 已新建 List 缓解常见路径。
+     * 深度拷贝留给 v1.1（性能权衡，见审查残留风险）。
      */
     public WorkflowContext readOnlySnapshot() {
         return new WorkflowContext(Map.copyOf(values), true);

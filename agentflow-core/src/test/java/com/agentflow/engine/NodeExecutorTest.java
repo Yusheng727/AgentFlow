@@ -115,4 +115,70 @@ class NodeExecutorTest {
         // 非法 → 默认
         assertThat(NodeExecutor.parseTimeout("abc")).isEqualTo(Duration.ofSeconds(120));
     }
+
+    @Test
+    @DisplayName("parseTimeout：零/负值降级为默认（防 Future.get IAE 崩溃 / 立即超时）")
+    void parseTimeoutZeroAndNegativeClamped() {
+        assertThat(NodeExecutor.parseTimeout("0s")).isEqualTo(Duration.ofSeconds(120));
+        assertThat(NodeExecutor.parseTimeout("0ms")).isEqualTo(Duration.ofSeconds(120));
+        assertThat(NodeExecutor.parseTimeout("0")).isEqualTo(Duration.ofSeconds(120));
+        assertThat(NodeExecutor.parseTimeout("-5s")).isEqualTo(Duration.ofSeconds(120));
+        assertThat(NodeExecutor.parseTimeout("-100ms")).isEqualTo(Duration.ofSeconds(120));
+    }
+
+    @Test
+    @DisplayName("agent 返回 null AgentOutput → Failure（防 barrier NPE）")
+    void nullOutputReturnsFailure() {
+        try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
+            NodeExecutor ne = new NodeExecutor(name -> in -> null, exec);
+            NodeResult r = ne.execute(node("A", "a", null), input("A"));
+            assertThat(r).isInstanceOf(NodeResult.Failure.class);
+            assertThat(((NodeResult.Failure) r).error())
+                    .isInstanceOf(com.agentflow.agent.AgentExecutionException.class)
+                    .hasMessageContaining("null output");
+        }
+    }
+
+    @Test
+    @DisplayName("agentResolver 抛 RuntimeException → Failure（保持 no-throw 不变量）")
+    void resolverThrowsReturnsFailure() {
+        try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
+            NodeExecutor ne = new NodeExecutor(name -> {
+                throw new IllegalStateException("resolver boom");
+            }, exec);
+            NodeResult r = ne.execute(node("A", "a", null), input("A"));
+            assertThat(r).isInstanceOf(NodeResult.Failure.class);
+            assertThat(((NodeResult.Failure) r).error())
+                    .isInstanceOf(com.agentflow.agent.AgentExecutionException.class)
+                    .hasMessageContaining("agent 解析失败");
+        }
+    }
+
+    @Test
+    @DisplayName("agent.cancel() 抛 RuntimeException → 不传播，仍返回 Failure(TimeoutException)")
+    void cancelThrowingDoesNotPropagate() {
+        AgentFunction slow = new AgentFunction() {
+            @Override
+            public AgentOutput execute(AgentInput input) {
+                try {
+                    Thread.sleep(2000);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return AgentOutput.of("late");
+            }
+
+            @Override
+            public void cancel(AgentInput input) {
+                throw new RuntimeException("cancel itself failed");
+            }
+        };
+        try (var exec = Executors.newVirtualThreadPerTaskExecutor()) {
+            NodeExecutor ne = new NodeExecutor(name -> slow, exec);
+            NodeResult r = ne.execute(node("A", "a", "100ms"), input("A"));
+            assertThat(r).isInstanceOf(NodeResult.Failure.class);
+            assertThat(((NodeResult.Failure) r).error())
+                    .isInstanceOf(java.util.concurrent.TimeoutException.class);
+        }
+    }
 }

@@ -11,6 +11,9 @@ import com.agentflow.dsl.WorkflowDefinition;
 import com.agentflow.engine.checkpoint.CheckpointManager;
 import com.agentflow.engine.checkpoint.NoopCheckpointManager;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +44,8 @@ import java.util.concurrent.Executors;
  * <p>静态 DAG only（KTD-9）：无条件分支，留给 v2。
  */
 public final class BspEngine {
+
+    private static final Logger log = LoggerFactory.getLogger(BspEngine.class);
 
     private final DAGLayerer layerer;
 
@@ -83,14 +88,15 @@ public final class BspEngine {
         CheckpointManager cp = checkpoint;
         DAGraph dag = new DAGraph(def);
         List<SuperStep> steps = buildSuperSteps(layerer.computeSuperSteps(def));
-        WorkflowContext context = new WorkflowContext(inputs);
+        Map<String, Object> effInputs = inputs == null ? Map.of() : inputs;
+        WorkflowContext context = new WorkflowContext(effInputs);
 
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         NodeExecutor nodeExecutor = new NodeExecutor(agents::get, executor);
         try {
             for (SuperStep step : steps) {
                 WorkflowContext snapshot = context.readOnlySnapshot();
-                List<NodeResult> results = runSuperStep(step, dag, snapshot, nodeExecutor, cp, workflowId, executor);
+                List<NodeResult> results = runSuperStep(step, dag, snapshot, nodeExecutor, cp, workflowId, executor, effInputs);
                 applyBarrier(step, results, context, dag, def, reducer, cp, workflowId);
             }
             return context;
@@ -102,21 +108,33 @@ public final class BspEngine {
     /** 并行执行 super-step 内所有节点，barrier 等待全部完成。 */
     private List<NodeResult> runSuperStep(SuperStep step, DAGraph dag, WorkflowContext snapshot,
                                           NodeExecutor nodeExecutor, CheckpointManager cp, String workflowId,
-                                          ExecutorService executor) {
+                                          ExecutorService executor, Map<String, Object> inputs) {
         List<CompletableFuture<NodeResult>> futures = new ArrayList<>(step.nodeIds().size());
         for (String id : step.nodeIds()) {
             NodeDefinition node = dag.node(id);
-            AgentInput input = new AgentInput(id, node.agent(), node.promptTemplate(), snapshot, Map.of());
+            AgentInput input = new AgentInput(id, node.agent(), node.promptTemplate(), snapshot, inputs);
             // 并行执行 + 节点级 checkpoint（完成当下即持久化，R3）
             futures.add(CompletableFuture.supplyAsync(() -> {
-                NodeResult r = nodeExecutor.execute(node, input);
-                if (r instanceof NodeResult.Success s) {
-                    cp.saveNodeOutput(workflowId, step.index(), id, s.output());
+                try {
+                    NodeResult r = nodeExecutor.execute(node, input);
+                    if (r instanceof NodeResult.Success s) {
+                        // 节点级 checkpoint 失败不应崩溃工作流（U5 决定 fatal/non-fatal 策略）；
+                        // 降级 warn，主结果保留——recovery 可能因此重跑该节点（LLM 重复计费风险由 U5 兜底）
+                        try {
+                            cp.saveNodeOutput(workflowId, step.index(), id, s.output());
+                        } catch (RuntimeException ce) {
+                            log.warn("saveNodeOutput 失败 wf={} step={} node={}: {}",
+                                    workflowId, step.index(), id, ce.toString());
+                        }
+                    }
+                    return r;
+                } catch (RuntimeException ex) {
+                    // 防御性 catch-all：保持 no-throw 不变量，避免 allOf exceptional 丢失兄弟节点结果
+                    return new NodeResult.Failure(id, ex);
                 }
-                return r;
             }, executor));
         }
-        // barrier：等最慢的节点完成。NodeExecutor 不抛异常（包成 Failure），故 allOf 不会 exceptional
+        // barrier：等最慢的节点完成。lambda 内已 catch-all，故 allOf 不会 exceptional
         CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
         List<NodeResult> results = new ArrayList<>(futures.size());
         for (CompletableFuture<NodeResult> f : futures) {
@@ -125,7 +143,7 @@ public final class BspEngine {
         return results;
     }
 
-    /** Barrier 阶段：按声明序合并成功节点输出，收集失败，写 barrier checkpoint，失败则聚合抛出。 */
+    /** Barrier 阶段：按声明序合并成功节点输出，收集失败，失败则聚合抛出；仅成功 super-step 写 barrier checkpoint。 */
     private void applyBarrier(SuperStep step, List<NodeResult> results, WorkflowContext context,
                               DAGraph dag, WorkflowDefinition def, ChannelReducer reducer,
                               CheckpointManager cp, String workflowId) {
@@ -138,16 +156,22 @@ public final class BspEngine {
                 failures.add(f.error());
             }
         }
-        cp.saveBarrier(workflowId, step.index(), context);
         if (!failures.isEmpty()) {
             // U4 ErrorHandler 将在此前插入补偿（写 context.errorHandled=true 等）
+            // 失败 super-step 不写 barrier checkpoint——KTD-3：barrier checkpoint 记录"已完成"super-step，
+            // 失败层未完成；U5 Recovery 查 nextSuperStep 的节点级 COMPLETED 输出重跑失败节点
             throw new WorkflowExecutionException(step.index(), failures);
         }
+        cp.saveBarrier(workflowId, step.index(), context);
     }
 
     /** 把 AgentOutput 的 channelWrites 合并进全局 context（按 channel 的 Reducer）。 */
     private void applyOutput(WorkflowContext context, NodeDefinition node, AgentOutput output,
                              WorkflowDefinition def, ChannelReducer reducer) {
+        if (output == null) {
+            // 防御：NodeExecutor 已把 null output 转为 Failure，此处兜底
+            return;
+        }
         Map<String, Object> writes;
         if (output.channelWrites() != null && !output.channelWrites().isEmpty()) {
             writes = output.channelWrites();

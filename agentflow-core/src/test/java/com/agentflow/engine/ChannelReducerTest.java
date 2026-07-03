@@ -69,4 +69,32 @@ class ChannelReducerTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("missing");
     }
+
+    @Test
+    @DisplayName("CONCAT：List current + 标量 write → 扁平追加（不嵌套）")
+    void concatListPlusScalarFlattens() {
+        // 先 List+List 得到一个 List，再 + 标量
+        Object first = reducer.merge("Y", List.of("a", "b"), List.of("c"), Reducer.CONCAT);
+        assertThat(first).isEqualTo(List.of("a", "b", "c"));
+        // List current + 标量 write
+        assertThat(reducer.merge("Y", List.of("a", "b"), "c", Reducer.CONCAT))
+                .isEqualTo(List.of("a", "b", "c"));
+        // 跨 super-step：首层 List + 下层标量
+        Object acc = reducer.merge("Y", null, List.of(1, 2), Reducer.CONCAT);
+        acc = reducer.merge("Y", acc, 3, Reducer.CONCAT);
+        assertThat(acc).isEqualTo(List.of(1, 2, 3));
+    }
+
+    @Test
+    @DisplayName("MAX：Long > 2^53 精确比较（不丢精度）")
+    void maxLargeLongExact() {
+        long a = 9_007_199_254_740_993L; // 2^53 + 1，double 无法精确表示
+        long b = 9_007_199_254_740_992L; // 2^53
+        assertThat(reducer.merge("Z", a, b, Reducer.MAX)).isEqualTo(a);
+        assertThat(reducer.merge("Z", b, a, Reducer.MAX)).isEqualTo(a);
+        // Integer 同类型精确
+        assertThat(reducer.merge("Z", 1, 2, Reducer.MAX)).isEqualTo(2);
+        // 混合数值仍走 doubleValue
+        assertThat(reducer.merge("Z", 1.5, 2, Reducer.MAX)).isEqualTo(2);
+    }
 }

@@ -63,6 +63,13 @@ public final class ChannelReducer {
             merged.addAll(writeList);
             return merged;
         }
+        // List current + 标量 write → 追加（扁平，不嵌套）
+        if (current instanceof List<?> curList) {
+            List<Object> merged = new ArrayList<>(curList.size() + 1);
+            merged.addAll(curList);
+            merged.add(write);
+            return merged;
+        }
         // 双字符串 → 拼接
         if (current instanceof String curStr && write instanceof String writeStr) {
             return curStr + writeStr;
@@ -86,6 +93,13 @@ public final class ChannelReducer {
             return write;
         }
         if (current instanceof Number curNum && write instanceof Number writeNum) {
+            // 同类型整数精确比较，避免 doubleValue 对 Long > 2^53 的精度损失
+            if (curNum instanceof Long cl && writeNum instanceof Long wl) {
+                return cl >= wl ? cl : wl;
+            }
+            if (curNum instanceof Integer ci && writeNum instanceof Integer wi) {
+                return ci >= wi ? ci : wi;
+            }
             return curNum.doubleValue() >= writeNum.doubleValue() ? curNum : writeNum;
         }
         // 非数值 → 不定义顺序，保留后写（与 OVERWRITE 一致）

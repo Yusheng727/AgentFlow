@@ -364,6 +364,112 @@ class BspEngineTest {
                         .hasMessageContaining("ghost"));
     }
 
+    // ========== 审查修复回归 ==========
+
+    @Test
+    @DisplayName("inputs 透传到 AgentInput.inputs()（agent 可读启动入参）")
+    void inputsPropagatedToAgentInput() {
+        WorkflowDefinition def = wf(null,
+                List.of(node("A", "a")),
+                List.of());
+        AtomicReference<Map<String, Object>> seen = new AtomicReference<>();
+        AgentFunction reader = input -> {
+            seen.set(input.inputs());
+            return AgentOutput.of("ok");
+        };
+        engine.execute(def, Map.of("a", reader), Map.of("supplier", "Acme", "score", 88));
+        assertThat(seen.get()).containsEntry("supplier", "Acme").containsEntry("score", 88);
+    }
+
+    @Test
+    @DisplayName("agent 返回 null AgentOutput → 该节点 Failure + 聚合异常（不 NPE）")
+    void nullAgentOutputBecomesFailure() {
+        WorkflowDefinition def = wf(null,
+                List.of(node("A", "a")),
+                List.of());
+        Map<String, AgentFunction> agents = Map.of("a", input -> null);
+        assertThatThrownBy(() -> engine.execute(def, agents, Map.of()))
+                .isInstanceOf(WorkflowExecutionException.class)
+                .satisfies(ex -> assertThat(((WorkflowExecutionException) ex).failures().get(0))
+                        .hasMessageContaining("null output"));
+    }
+
+    @Test
+    @DisplayName("多 super-step 跨层失败中止：B 失败 → C 不执行，异常 superStep = B 所在层")
+    void crossLayerFailureAbort() {
+        // A(0)→B(1)→C(2) 串行
+        WorkflowDefinition def = wf(null,
+                List.of(node("A", "a"), node("B", "b"), node("C", "c")),
+                List.of(edge("A", "B"), edge("B", "C")));
+        AtomicInteger cRuns = new AtomicInteger();
+        Map<String, AgentFunction> agents = Map.of(
+                "a", input -> AgentOutput.of("a"),
+                "b", input -> { throw new FatalException("B failed"); },
+                "c", input -> { cRuns.incrementAndGet(); return AgentOutput.of("c"); });
+
+        assertThatThrownBy(() -> engine.execute(def, agents, Map.of()))
+                .isInstanceOf(WorkflowExecutionException.class)
+                .satisfies(ex -> assertThat(((WorkflowExecutionException) ex).superStep()).isEqualTo(1));
+        assertThat(cRuns.get()).isZero(); // 下游 super-step 未推进
+    }
+
+    @Test
+    @DisplayName("同 super-step 多节点失败：所有失败聚合，健康节点仍完成")
+    void multipleFailuresOneSuperStep() {
+        WorkflowDefinition def = wf(null,
+                List.of(node("A", "a"), node("B", "b"), node("C", "c")),
+                List.of()); // 单 super-step {A,B,C}
+        AtomicInteger cRuns = new AtomicInteger();
+        Map<String, AgentFunction> agents = Map.of(
+                "a", input -> { throw new FatalException("A failed"); },
+                "b", input -> { throw new TransientException("B failed"); },
+                "c", input -> { cRuns.incrementAndGet(); return AgentOutput.of("c"); });
+
+        assertThatThrownBy(() -> engine.execute(def, agents, Map.of()))
+                .isInstanceOf(WorkflowExecutionException.class)
+                .satisfies(ex -> assertThat(((WorkflowExecutionException) ex).failures()).hasSize(2));
+        assertThat(cRuns.get()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("空工作流（无节点）→ 返回空 context，不异常")
+    void emptyWorkflowReturnsEmptyContext() {
+        WorkflowDefinition def = wf(null, List.of(), null);
+        WorkflowContext result = engine.execute(def, Map.of(), Map.of());
+        assertThat(result.values()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("CUSTOM reducer 未注册 → IllegalStateException 逃逸（契约文档化，U5 可决定是否隔离）")
+    void customReducerNotRegisteredEscapesAsIllegalState() {
+        Map<String, ChannelDefinition> channels = Map.of("W", new ChannelDefinition(null, Reducer.CUSTOM));
+        WorkflowDefinition def = wf(channels,
+                List.of(node("A", "a"), node("B", "b")),
+                List.of(edge("A", "B")));
+        Map<String, AgentFunction> agents = Map.of(
+                "a", input -> AgentOutput.of(Map.of("W", "x")),
+                "b", input -> AgentOutput.of("done"));
+        // 当前契约：配置错误（CUSTOM 未注册）fail-fast，不聚合为 WorkflowExecutionException
+        assertThatThrownBy(() -> engine.execute(def, agents, Map.of(), new RecordingCheckpoint(),
+                new ChannelReducer(), "wf"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("W");
+    }
+
+    @Test
+    @DisplayName("失败 super-step 不写 barrier checkpoint（KTD-3：barrier 记录已完成层）")
+    void failedSuperStepDoesNotWriteBarrier() {
+        WorkflowDefinition def = wf(null,
+                List.of(node("A", "a")),
+                List.of());
+        Map<String, AgentFunction> agents = Map.of(
+                "a", input -> { throw new FatalException("boom"); });
+        RecordingCheckpoint cp = new RecordingCheckpoint();
+        assertThatThrownBy(() -> engine.execute(def, agents, Map.of(), cp, new ChannelReducer(), "wf"))
+                .isInstanceOf(WorkflowExecutionException.class);
+        assertThat(cp.barriers).isEmpty(); // 失败层未写 barrier
+    }
+
     // ========== 夹具：记录节点级 checkpoint ==========
 
     /** 记录 saveNodeOutput 调用，用于断言异常隔离场景下哪些节点真正完成。 */
