@@ -22,6 +22,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -33,12 +34,14 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class SpringAiAgentAdapterTest {
 
-    /** 可配置 stub ChatModel：返回固定 content + DefaultUsage，或抛指定异常；捕获收到的 prompt。 */
+    /** 可配置 stub ChatModel：返回固定 content + DefaultUsage，或抛指定异常；捕获收到的 prompt。
+     *  设 caller 后按 prompt 文本动态返回 content（schema 重试测试用）。 */
     static class StubChatModel implements ChatModel {
         String content = "stub-ok";
         int promptTokens = 10;
         int completionTokens = 20;
         RuntimeException throwOnCall;
+        java.util.function.Function<String, String> caller;
         volatile String capturedPrompt;
 
         @Override
@@ -48,8 +51,9 @@ class SpringAiAgentAdapterTest {
             if (throwOnCall != null) {
                 throw throwOnCall;
             }
+            String text = caller != null ? caller.apply(capturedPrompt) : content;
             return new ChatResponse(
-                    List.of(new Generation(new AssistantMessage(content))),
+                    List.of(new Generation(new AssistantMessage(text))),
                     ChatResponseMetadata.builder().usage(new DefaultUsage(promptTokens, completionTokens)).build()
             );
         }
@@ -104,16 +108,16 @@ class SpringAiAgentAdapterTest {
     }
 
     private static SpringAiAgentAdapter adapter(StubChatModel model) {
-        return new SpringAiAgentAdapter(client(model), passThroughAdvisors(), List.of(), null, Function.identity());
+        return new SpringAiAgentAdapter(client(model), passThroughAdvisors(), List.of(), null, Function.identity(), null);
     }
 
     private static SpringAiAgentAdapter adapter(StubChatModel model, ExecutionTrace trace) {
-        return new SpringAiAgentAdapter(client(model), passThroughAdvisors(), List.of(), trace, Function.identity());
+        return new SpringAiAgentAdapter(client(model), passThroughAdvisors(), List.of(), trace, Function.identity(), null);
     }
 
     private static SpringAiAgentAdapter adapter(StubChatModel model, ExecutionTrace trace,
                                                 Function<String, String> redactor) {
-        return new SpringAiAgentAdapter(client(model), passThroughAdvisors(), List.of(), trace, redactor);
+        return new SpringAiAgentAdapter(client(model), passThroughAdvisors(), List.of(), trace, redactor, null);
     }
 
     @Test
@@ -275,7 +279,7 @@ class SpringAiAgentAdapterTest {
                 new LoggingAdvisor(Function.identity(), logs::add));
         ExecutionTrace trace = new ExecutionTrace("wf-int");
         SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
-                ChatClient.create(model), advisors, List.of(), trace, Function.identity());
+                ChatClient.create(model), advisors, List.of(), trace, Function.identity(), null);
 
         AgentOutput out = adapter.execute(input("K", "hi", Map.of(), Map.of()));
 
@@ -292,5 +296,73 @@ class SpringAiAgentAdapterTest {
         // NodeTrace 由适配器写入 trace
         assertThat(trace.nodes()).hasSize(1);
         assertThat(trace.nodes().get(0).totalTokens()).isEqualTo(30);
+    }
+
+    @Test
+    @DisplayName("schema 校验：节点声明 output_schema，stub 返回合法 JSON → structuredOutput 填充")
+    void schemaValidationSuccess() throws Exception {
+        StubChatModel model = new StubChatModel();
+        model.content = "```json\n{\"riskLevel\": \"HIGH\", \"debtRatio\": 0.7}\n```";
+        Map<String, Object> schema = new java.util.LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", Map.of("riskLevel", Map.of("type", "string",
+                "enum", List.of("LOW", "MEDIUM", "HIGH"))));
+        schema.put("required", List.of("riskLevel"));
+        AgentInput in = new AgentInput("L", "test-agent", "分析风险", new WorkflowContext(),
+                Map.of(), List.of(), schema);
+        SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
+                client(model), passThroughAdvisors(), List.of(), null, Function.identity(),
+                new OutputSchemaValidator());
+
+        AgentOutput out = adapter.execute(in);
+
+        assertThat(out.structuredOutput()).containsEntry("riskLevel", "HIGH");
+        assertThat(out.structuredOutput()).containsEntry("debtRatio", 0.7);
+        assertThat(out.content()).contains("HIGH");
+    }
+
+    @Test
+    @DisplayName("schema 校验：stub 首次返回无 JSON，重试返回合法 → structuredOutput 填充（2 次调用）")
+    void schemaValidationRetrySuccess() throws Exception {
+        StubChatModel model = new StubChatModel();
+        AtomicInteger calls = new AtomicInteger();
+        model.caller = prompt -> {
+            int n = calls.incrementAndGet();
+            return n == 1 ? "无法生成" : "{\"riskLevel\": \"LOW\"}";
+        };
+        Map<String, Object> schema = new java.util.LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", Map.of("riskLevel", Map.of("type", "string",
+                "enum", List.of("LOW", "MEDIUM", "HIGH"))));
+        schema.put("required", List.of("riskLevel"));
+        AgentInput in = new AgentInput("M", "test-agent", "分析风险", new WorkflowContext(),
+                Map.of(), List.of(), schema);
+        SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
+                client(model), passThroughAdvisors(), List.of(), null, Function.identity(),
+                new OutputSchemaValidator());
+
+        AgentOutput out = adapter.execute(in);
+
+        assertThat(out.structuredOutput()).containsEntry("riskLevel", "LOW");
+        assertThat(calls.get()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("schema 校验：3 次尝试全失败 → FatalException")
+    void schemaValidationExhaustedThrowsFatal() {
+        StubChatModel model = new StubChatModel();
+        model.content = "no json ever";
+        Map<String, Object> schema = new java.util.LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("required", List.of("riskLevel"));
+        AgentInput in = new AgentInput("N", "test-agent", "分析风险", new WorkflowContext(),
+                Map.of(), List.of(), schema);
+        SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
+                client(model), passThroughAdvisors(), List.of(), null, Function.identity(),
+                new OutputSchemaValidator());
+
+        assertThatThrownBy(() -> adapter.execute(in))
+                .isInstanceOf(FatalException.class)
+                .hasMessageContaining("校验失败 3 次");
     }
 }

@@ -69,30 +69,34 @@ public class SpringAiAgentAdapter implements AgentFunction {
     private final SpelPromptResolver promptResolver = new SpelPromptResolver();
     private final Function<String, String> redactor;
     private final ExecutionTrace trace;
+    private final OutputSchemaValidator schemaValidator;
 
-    /** 便捷构造：无 advisor、无工具、无 trace、不脱敏（测试/最小用法）。 */
+    /** 便捷构造：无 advisor、无工具、无 trace、不脱敏、无 schema 校验（测试/最小用法）。 */
     public SpringAiAgentAdapter(ChatClient chatClient) {
-        this(chatClient, List.of(), List.of(), null, Function.identity());
+        this(chatClient, List.of(), List.of(), null, Function.identity(), null);
     }
 
     /**
-     * @param chatClient 已配置好的 ChatClient
-     * @param advisors   每次 call 注入的 Advisor（U3-4 注入 TokenCounting/Logging；
-     *                   Spring AI 2.0 零 advisor 时 .call() 抛 "No CallAdvisors"，故至少需 1 个）
-     * @param toolBeans  @Tool 注解 bean 列表，每次调用注册（可空）
-     * @param trace      执行追踪（可空；非空则每节点追加 NodeTrace，供 U6/U7 读）
-     * @param redactor   trace 摘要脱敏函数（U14 PromptRedactionFilter 注入；默认 identity）
+     * @param chatClient      已配置好的 ChatClient
+     * @param advisors        每次 call 注入的 Advisor（U3-4 注入 TokenCounting/Logging；
+     *                        Spring AI 2.0 零 advisor 时 .call() 抛 "No CallAdvisors"，故至少需 1 个）
+     * @param toolBeans       @Tool 注解 bean 列表，每次调用注册（可空）
+     * @param trace           执行追踪（可空；非空则每节点追加 NodeTrace，供 U6/U7 读）
+     * @param redactor        trace 摘要脱敏函数（U14 PromptRedactionFilter 注入；默认 identity）
+     * @param schemaValidator LLM 输出 schema 校验器（可空；非空且节点有 output_schema 时启用）
      */
     public SpringAiAgentAdapter(ChatClient chatClient,
                                 List<Advisor> advisors,
                                 List<Object> toolBeans,
                                 ExecutionTrace trace,
-                                Function<String, String> redactor) {
+                                Function<String, String> redactor,
+                                OutputSchemaValidator schemaValidator) {
         this.chatClient = Objects.requireNonNull(chatClient, "chatClient");
         this.advisors = advisors == null ? List.of() : List.copyOf(advisors);
         this.toolBeans = toolBeans == null ? List.of() : List.copyOf(toolBeans);
         this.trace = trace;
         this.redactor = redactor == null ? Function.identity() : redactor;
+        this.schemaValidator = schemaValidator;
     }
 
     @Override
@@ -113,44 +117,39 @@ public class SpringAiAgentAdapter implements AgentFunction {
         }
 
         // 2. 调用 LLM（advisors 每次 call 注入：U3-4 的 TokenCounting/Logging 在此入链）
-        ChatClient.ChatClientRequestSpec requestSpec = chatClient.prompt(resolvedPrompt);
-        if (!advisors.isEmpty()) {
-            requestSpec = requestSpec.advisors(advisors.toArray(new Advisor[0]));
-        }
-        if (!toolBeans.isEmpty()) {
-            requestSpec = requestSpec.tools(toolBeans.toArray());
-        }
-
-        ChatClient.CallResponseSpec callSpec;
-        ChatResponse chatResponse;
+        // 若节点声明了 output_schema 且配置了 schemaValidator → 带反馈重试校验（U3-5）
+        String content;
+        Map<String, Object> structuredOutput = Map.of();
+        long promptTokens;
+        long completionTokens;
         try {
-            // Spring AI 2.0：.chatResponse() / .content() 各自触发一次 advisor 链执行，
-            // 而 DefaultAroundAdvisorChain 的 callAdvisors deque 是 mutable（nextCall pop），
-            // 第二次执行会撞空 deque → "No CallAdvisors"。故只调一次 .chatResponse()，
-            // content + usage 都从同一 ChatResponse 取。
-            callSpec = requestSpec.call();
-            chatResponse = callSpec.chatResponse();
+            if (schemaValidator != null && !input.outputSchema().isEmpty()) {
+                // schema 校验 + 重试：validator 内部多次 callLlm，用 AtomicReference 捕获最后一次 usage
+                java.util.concurrent.atomic.AtomicReference<LlmResult> last = new java.util.concurrent.atomic.AtomicReference<>();
+                OutputSchemaValidator.ValidatedOutput vo = schemaValidator.validateWithRetry(
+                        resolvedPrompt, input.outputSchema(), p -> {
+                            LlmResult r = callLlm(p);
+                            last.set(r);
+                            return r.content();
+                        });
+                content = vo.content();
+                structuredOutput = vo.structuredOutput();
+                LlmResult lastResult = last.get();
+                promptTokens = lastResult == null ? 0 : lastResult.promptTokens();
+                completionTokens = lastResult == null ? 0 : lastResult.completionTokens();
+            } else {
+                LlmResult r = callLlm(resolvedPrompt);
+                content = r.content();
+                promptTokens = r.promptTokens();
+                completionTokens = r.completionTokens();
+            }
         } catch (RuntimeException e) {
             Throwable cause = (e.getCause() instanceof Exception) ? e.getCause() : e;
             nodeTrace.fail(cause.getMessage());
             throw mapException(cause);
         }
 
-        // 3. 构造 AgentOutput（content + metadata{tokens}，均取自同一 ChatResponse）
-        String content = null;
-        if (chatResponse != null && chatResponse.getResult() != null
-                && chatResponse.getResult().getOutput() != null) {
-            content = chatResponse.getResult().getOutput().getText();
-        }
-        long promptTokens = 0;
-        long completionTokens = 0;
-        if (chatResponse != null && chatResponse.getMetadata() != null) {
-            Usage usage = chatResponse.getMetadata().getUsage();
-            if (usage != null) {
-                promptTokens = usage.getPromptTokens();
-                completionTokens = usage.getCompletionTokens();
-            }
-        }
+        // 3. 构造 AgentOutput（content + metadata{tokens} + structuredOutput）
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("promptTokens", promptTokens);
         metadata.put("completionTokens", completionTokens);
@@ -159,7 +158,42 @@ public class SpringAiAgentAdapter implements AgentFunction {
         nodeTrace.succeed(redact(content), promptTokens, completionTokens);
         log.debug("agent executed: node={} agent={} tokens={}", input.nodeId(), input.agentName(),
                 promptTokens + completionTokens);
-        return new AgentOutput(content, Map.of(), Map.of(), Map.copyOf(metadata));
+        return new AgentOutput(content, Map.of(), structuredOutput, Map.copyOf(metadata));
+    }
+
+    /** 单次 LLM 调用结果（content + usage，避免共享可变字段，VT 安全）。 */
+    private record LlmResult(String content, long promptTokens, long completionTokens) {
+    }
+
+    /**
+     * 单次 LLM 调用（advisors + tools 注入）。返回 content + usage。
+     *
+     * <p>Spring AI 2.0：.chatResponse() / .content() 各自触发一次 advisor 链执行，
+     * callAdvisors deque 是 mutable（nextCall pop），故只调一次 .chatResponse()。
+     */
+    private LlmResult callLlm(String prompt) {
+        ChatClient.ChatClientRequestSpec spec = chatClient.prompt(prompt);
+        if (!advisors.isEmpty()) {
+            spec = spec.advisors(advisors.toArray(new Advisor[0]));
+        }
+        if (!toolBeans.isEmpty()) {
+            spec = spec.tools(toolBeans.toArray());
+        }
+        ChatResponse chatResponse = spec.call().chatResponse();
+        String content = null;
+        long promptTokens = 0;
+        long completionTokens = 0;
+        if (chatResponse != null) {
+            if (chatResponse.getResult() != null && chatResponse.getResult().getOutput() != null) {
+                content = chatResponse.getResult().getOutput().getText();
+            }
+            if (chatResponse.getMetadata() != null && chatResponse.getMetadata().getUsage() != null) {
+                Usage usage = chatResponse.getMetadata().getUsage();
+                promptTokens = usage.getPromptTokens() == null ? 0 : usage.getPromptTokens();
+                completionTokens = usage.getCompletionTokens() == null ? 0 : usage.getCompletionTokens();
+            }
+        }
+        return new LlmResult(content, promptTokens, completionTokens);
     }
 
     /** 把 WorkflowContext 的 ChannelValue 扁平成 channel 名 → 值，供 SpEL 根对象 context 视图。 */
