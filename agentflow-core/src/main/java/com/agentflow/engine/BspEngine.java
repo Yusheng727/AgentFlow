@@ -213,20 +213,18 @@ public final class BspEngine {
         CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
         Duration remaining = timeoutPolicy != null ? timeoutPolicy.remainingWorkflow(workflowStart) : null;
         if (remaining != null) {
-            // 工作流总超时：用 .get(remaining) 而非 .join()，超时则 cancel 所有在飞 future
-            if (remaining.isZero()) {
-                cancelAll(futures);
-                throw new WorkflowExecutionException(step.index(),
-                        List.of(new TimeoutException("workflow total timeout exceeded")));
-            }
+            // 工作流总超时：用 .get(remaining) 而非 .join()，超时/零剩余则抛 abort。
+            // 注意：CompletableFuture.cancel(true) 不会中断 supplyAsync 已在跑的 VT（CF.cancel 仅标记完成，
+            // 不传播 interrupt），真正中止在飞节点靠本方法抛出后 execute 的 finally { executor.shutdownNow(); }
+            // 中断所有 VT。U5 注意：PostgresCheckpointManager 下，超时后仍可能在飞节点完成并调
+            // cp.saveNodeOutput（写出 stray COMPLETED 记录到已 abort 的 super-step）——U5 Recovery 需
+            // 鉴别 abort 后的 stray 记录（按 workflow 状态过滤），非 U4 问题（NoopCheckpointManager 无此风险）。
             try {
                 allOf.get(remaining.toMillis(), TimeUnit.MILLISECONDS);
             } catch (TimeoutException te) {
-                cancelAll(futures);
                 throw new WorkflowExecutionException(step.index(), List.of(te));
             } catch (InterruptedException ie) {
                 Thread.currentThread().interrupt();
-                cancelAll(futures);
                 throw new WorkflowExecutionException(step.index(), List.of(ie));
             } catch (ExecutionException ee) {
                 // 不应发生（lambda catch-all），兜底解包
@@ -241,15 +239,6 @@ public final class BspEngine {
             results.add(f.join());
         }
         return results;
-    }
-
-    /** 取消所有在飞 future（best-effort，已完成的无害）。 */
-    private static void cancelAll(List<CompletableFuture<NodeResult>> futures) {
-        for (CompletableFuture<NodeResult> f : futures) {
-            if (!f.isDone()) {
-                f.cancel(true);
-            }
-        }
     }
 
     /** Barrier 阶段：按声明序合并成功节点输出，收集失败，失败则聚合抛出；仅成功 super-step 写 barrier checkpoint。 */

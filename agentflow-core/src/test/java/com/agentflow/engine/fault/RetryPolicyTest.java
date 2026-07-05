@@ -172,4 +172,24 @@ class RetryPolicyTest {
                 () -> new RetryPolicy(3, Duration.ofSeconds(1), 0.5, ErrorClassifier.defaultClassifier()))
                 .isInstanceOf(IllegalArgumentException.class);
     }
+
+    @Test
+    @DisplayName("小数倍率 backoff 不被截断：multiplier=1.5，3 次 attempt 耗尽，每次间隔递增（ce-code-review 修复）")
+    void fractionalMultiplierBackoffNotTruncated() {
+        // 用 1ns 初始退避 + 1.5 倍率，3 次 attempt（始终 TransientException 耗尽），
+        // 测总耗时 > 1 + 1.5 = 2.5ns（粗验：纳秒级精度难断言，改用 millis）
+        AtomicInteger calls = new AtomicInteger();
+        AgentFunction agent = flakyAgent(calls, 99, new TransientException("always"));
+        // initialBackoff=100ms, multiplier=1.5 → 期望 100ms + 150ms = 250ms 总退避（2 次间隔）
+        RetryPolicy policy = new RetryPolicy(3, Duration.ofMillis(100), 1.5, ErrorClassifier.defaultClassifier());
+
+        long start = System.nanoTime();
+        NodeResult r = policy.execute(executor(agent), node("A", "a"), input("A"));
+        long elapsedMs = (System.nanoTime() - start) / 1_000_000;
+
+        assertThat(r).isInstanceOf(NodeResult.Failure.class);
+        assertThat(calls.get()).isEqualTo(3);
+        // 两次退避 ~100ms + ~150ms = ~250ms；放宽下界到 200ms 防抖动，上界 600ms 防慢机
+        assertThat(elapsedMs).isBetween(200L, 600L);
+    }
 }

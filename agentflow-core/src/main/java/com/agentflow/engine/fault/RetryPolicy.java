@@ -16,30 +16,28 @@ import java.util.Objects;
  * fatal 或耗尽则返 {@link NodeResult.Failure}。
  *
  * <p>退避：{@code initialBackoff × multiplier^(attempt-1)}——默认 1s→2s→4s，最多 3 次 attempt
- * （plan U4）。仅在 attempt 间 sleep，最后一次不 sleep。
+ * （plan U4）。仅在 attempt 间 sleep，最后一次不 sleep。用纳秒精度计算，支持小数 multiplier
+ * （如 1.5：1×→1.5×→2.25×，ce-code-review 修复）。
  *
  * <p><b>retry 预算（plan v4.2）</b>：本类的 3 次 attempt × 每次 attempt 内
  * {@code SpringAiAgentAdapter.validateWithRetry} 的 ≤2 次 schema-retry = 最多 9 次 LLM 调用
  * （组合式，非共享计数器——schema-retry 嵌在 attempt 内，RetryPolicy 不感知它）。
  *
- * <p>线程安全：单次 execute 在单个 VT 上顺序跑（retry 不并发），无共享可变状态。
+ * <p>不可变值对象（record），线程安全：单次 execute 在单个 VT 上顺序跑（retry 不并发）。
  */
-public final class RetryPolicy {
+public final record RetryPolicy(
+        int maxAttempts,
+        Duration initialBackoff,
+        double multiplier,
+        ErrorClassifier classifier
+) {
 
     static final int DEFAULT_MAX_ATTEMPTS = 3;
     static final Duration DEFAULT_INITIAL_BACKOFF = Duration.ofSeconds(1);
     static final double DEFAULT_MULTIPLIER = 2.0;
 
-    private final int maxAttempts;
-    private final Duration initialBackoff;
-    private final double multiplier;
-    private final ErrorClassifier classifier;
-
-    public RetryPolicy() {
-        this(DEFAULT_MAX_ATTEMPTS, DEFAULT_INITIAL_BACKOFF, DEFAULT_MULTIPLIER, ErrorClassifier.defaultClassifier());
-    }
-
-    public RetryPolicy(int maxAttempts, Duration initialBackoff, double multiplier, ErrorClassifier classifier) {
+    /** 紧凑构造器：校验。 */
+    public RetryPolicy {
         if (maxAttempts < 1) {
             throw new IllegalArgumentException("maxAttempts 必须 >= 1: " + maxAttempts);
         }
@@ -50,10 +48,12 @@ public final class RetryPolicy {
         if (multiplier < 1.0) {
             throw new IllegalArgumentException("multiplier 必须 >= 1.0: " + multiplier);
         }
-        this.maxAttempts = maxAttempts;
-        this.initialBackoff = initialBackoff;
-        this.multiplier = multiplier;
-        this.classifier = Objects.requireNonNull(classifier, "classifier");
+        Objects.requireNonNull(classifier, "classifier");
+    }
+
+    /** 默认：3 attempt，1s 初始退避，2× 倍率，default classifier。 */
+    public RetryPolicy() {
+        this(DEFAULT_MAX_ATTEMPTS, DEFAULT_INITIAL_BACKOFF, DEFAULT_MULTIPLIER, ErrorClassifier.defaultClassifier());
     }
 
     /**
@@ -83,10 +83,10 @@ public final class RetryPolicy {
         return new NodeResult.Failure(node.id(), lastCause);
     }
 
-    /** attempt=1 → initialBackoff；attempt=2 → initialBackoff×multiplier；以此类推。 */
+    /** attempt=1 → initialBackoff；attempt=2 → initialBackoff×multiplier；以此类推。纳秒精度，支持小数倍率。 */
     private Duration backoffFor(int attempt) {
-        long mult = (long) Math.pow(multiplier, attempt - 1);
-        return initialBackoff.multipliedBy(mult);
+        double factor = Math.pow(multiplier, attempt - 1);
+        return Duration.ofNanos((long) (initialBackoff.toNanos() * factor));
     }
 
     /** 可中断的退避 sleep；被中断则恢复中断标志并抛 RuntimeException（不应在正常流程发生）。 */
@@ -100,17 +100,5 @@ public final class RetryPolicy {
             Thread.currentThread().interrupt();
             throw new RuntimeException("retry backoff 被中断", e);
         }
-    }
-
-    public int maxAttempts() {
-        return maxAttempts;
-    }
-
-    public Duration initialBackoff() {
-        return initialBackoff;
-    }
-
-    public double multiplier() {
-        return multiplier;
     }
 }

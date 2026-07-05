@@ -18,12 +18,10 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.expression.spel.SpelEvaluationException;
 
-import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 
 /**
@@ -230,15 +228,11 @@ public class SpringAiAgentAdapter implements AgentFunction {
     }
 
     private AgentExecutionException mapException(Throwable cause) {
-        // SpEL 解析失败在上面的独立 try 中已映射为 FatalException，不会到此；
-        // 此处仅分类 LLM 调用异常（U4 ErrorClassifier 将细化）。
-        if (cause instanceof IOException || cause instanceof TimeoutException
-                || cause instanceof InterruptedException) {
+        // SpEL 解析失败在上面的独立 try 中已映射为 FatalException，不会到此。
+        // 此处分类 LLM 调用异常：委托 com.agentflow.engine.fault.ErrorClassifier（U4 canonical
+        // 分类器，单一真相源——避免本类与 ErrorClassifier 重复维护 IOException/网络/超时规则）。
+        if (com.agentflow.engine.fault.ErrorClassifier.defaultClassifier().isTransient(cause)) {
             return new TransientException("Transient LLM 调用失败: " + cause.getMessage(), cause);
-        }
-        String cn = cause.getClass().getName();
-        if (cn.startsWith("java.net.") || cn.startsWith("org.springframework.web.client.")) {
-            return new TransientException("Transient 网络错误: " + cause.getMessage(), cause);
         }
         return new FatalException("LLM 调用失败: " + cause.getMessage(), cause);
     }
