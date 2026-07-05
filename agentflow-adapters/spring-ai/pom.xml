@@ -20,7 +20,11 @@
             <groupId>com.agentflow</groupId>
             <artifactId>agentflow-core</artifactId>
         </dependency>
-        <!-- Spring AI 2.0 依赖在 U3 引入（深度整合 ChatClient + Advisor Chain + @Tool） -->
+        <!-- Spring AI 2.0 GA：ChatClient + Advisor Chain + @Tool（KTD-7 窄表面收敛于此适配器） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

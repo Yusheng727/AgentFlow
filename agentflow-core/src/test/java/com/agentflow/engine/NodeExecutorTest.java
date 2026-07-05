@@ -23,7 +23,7 @@ class NodeExecutorTest {
     }
 
     private AgentInput input(String nodeId) {
-        return new AgentInput(nodeId, "a", null, new WorkflowContext(), java.util.Map.of());
+        return AgentInput.of(nodeId, "a", null, new WorkflowContext(), java.util.Map.of());
     }
 
     // 成功

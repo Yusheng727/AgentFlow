@@ -3,6 +3,7 @@ package com.agentflow.engine;
 import com.agentflow.agent.AgentFunction;
 import com.agentflow.agent.AgentInput;
 import com.agentflow.agent.AgentOutput;
+import com.agentflow.agent.NodeRegistry;
 import com.agentflow.dsl.ChannelDefinition;
 import com.agentflow.dsl.DAGLayerer;
 import com.agentflow.dsl.NodeDefinition;
@@ -57,7 +58,7 @@ public final class BspEngine {
         this.layerer = Objects.requireNonNull(layerer, "layerer");
     }
 
-    /** 便捷入口：无 checkpoint、无自定义 reducer（开发/测试）。 */
+    /** 便捷入口（Map 形式）：无 checkpoint、无自定义 reducer（开发/测试）。 */
     public WorkflowContext execute(WorkflowDefinition def,
                                    Map<String, AgentFunction> agents,
                                    Map<String, Object> inputs) {
@@ -65,10 +66,10 @@ public final class BspEngine {
     }
 
     /**
-     * 完整入口。
+     * 完整入口（Map 形式）。
      *
      * @param def        已校验的工作流定义
-     * @param agents     agent 名 → AgentFunction（U3 的 NodeRegistry 将作为该 Map 的来源）
+     * @param agents     agent 名 → AgentFunction（兼容老调用；新代码优先用 NodeRegistry 重载）
      * @param inputs     工作流启动入参
      * @param checkpoint 持久化 seam（U5 注入 PG 实现）
      * @param reducer    channel 合并器（含 CUSTOM reducer 注册）
@@ -81,8 +82,44 @@ public final class BspEngine {
                                    CheckpointManager checkpoint,
                                    ChannelReducer reducer,
                                    String workflowId) {
-        Objects.requireNonNull(def, "def");
         Objects.requireNonNull(agents, "agents");
+        return execute(def, agents::get, inputs, checkpoint, reducer, workflowId);
+    }
+
+    /** 便捷入口（NodeRegistry 形式，U3 起推荐）。 */
+    public WorkflowContext execute(WorkflowDefinition def,
+                                   NodeRegistry registry,
+                                   Map<String, Object> inputs) {
+        return execute(def, registry, inputs, new NoopCheckpointManager(), new ChannelReducer(), null);
+    }
+
+    /**
+     * 完整入口（resolver 形式，U3 起推荐）。
+     *
+     * <p>接受 {@link NodeRegistry}（implements {@code Function<String,AgentFunction>}）
+     * 或任意自定义 resolver，作为 BSP 引擎的 agent 来源。
+     */
+    public WorkflowContext execute(WorkflowDefinition def,
+                                   NodeRegistry registry,
+                                   Map<String, Object> inputs,
+                                   CheckpointManager checkpoint,
+                                   ChannelReducer reducer,
+                                   String workflowId) {
+        Objects.requireNonNull(registry, "registry");
+        return execute(def, registry::apply, inputs, checkpoint, reducer, workflowId);
+    }
+
+    /**
+     * resolver 形式核心实现（Map/NodeRegistry 重载最终都汇到此处）。
+     */
+    private WorkflowContext execute(WorkflowDefinition def,
+                                    java.util.function.Function<String, AgentFunction> agentResolver,
+                                    Map<String, Object> inputs,
+                                    CheckpointManager checkpoint,
+                                    ChannelReducer reducer,
+                                    String workflowId) {
+        Objects.requireNonNull(def, "def");
+        Objects.requireNonNull(agentResolver, "agentResolver");
         Objects.requireNonNull(checkpoint, "checkpoint");
         Objects.requireNonNull(reducer, "reducer");
         CheckpointManager cp = checkpoint;
@@ -92,7 +129,7 @@ public final class BspEngine {
         WorkflowContext context = new WorkflowContext(effInputs);
 
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
-        NodeExecutor nodeExecutor = new NodeExecutor(agents::get, executor);
+        NodeExecutor nodeExecutor = new NodeExecutor(agentResolver, executor);
         try {
             for (SuperStep step : steps) {
                 WorkflowContext snapshot = context.readOnlySnapshot();
@@ -112,7 +149,8 @@ public final class BspEngine {
         List<CompletableFuture<NodeResult>> futures = new ArrayList<>(step.nodeIds().size());
         for (String id : step.nodeIds()) {
             NodeDefinition node = dag.node(id);
-            AgentInput input = new AgentInput(id, node.agent(), node.promptTemplate(), snapshot, inputs);
+            AgentInput input = new AgentInput(id, node.agent(), node.promptTemplate(), snapshot, inputs,
+                    node.tools(), node.outputSchema());
             // 并行执行 + 节点级 checkpoint（完成当下即持久化，R3）
             futures.add(CompletableFuture.supplyAsync(() -> {
                 try {
