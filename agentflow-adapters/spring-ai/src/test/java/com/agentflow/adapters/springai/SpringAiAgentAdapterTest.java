@@ -262,4 +262,35 @@ class SpringAiAgentAdapterTest {
         // trace 摘要脱敏
         assertThat(trace.nodes().get(0).outputSummary()).isEqualTo("secret sk-***");
     }
+
+    @Test
+    @DisplayName("集成：TokenCountingAdvisor + LoggingAdvisor 经适配器 per-call 注入链路跑通")
+    void realAdvisorsIntegrated() throws Exception {
+        StubChatModel model = new StubChatModel();
+        io.micrometer.core.instrument.simple.SimpleMeterRegistry registry =
+                new io.micrometer.core.instrument.simple.SimpleMeterRegistry();
+        java.util.List<String> logs = new java.util.ArrayList<>();
+        List<org.springframework.ai.chat.client.advisor.api.Advisor> advisors = List.of(
+                new TokenCountingAdvisor(registry, "test-agent"),
+                new LoggingAdvisor(Function.identity(), logs::add));
+        ExecutionTrace trace = new ExecutionTrace("wf-int");
+        SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
+                ChatClient.create(model), advisors, List.of(), trace, Function.identity());
+
+        AgentOutput out = adapter.execute(input("K", "hi", Map.of(), Map.of()));
+
+        // 适配器主路径正常
+        assertThat(out.content()).isEqualTo("stub-ok");
+        assertThat(out.metadata()).containsEntry("totalTokens", 30L);
+        // LoggingAdvisor 输出了 start + end 两行（证明 before/after 在链中跑了）
+        assertThat(logs).hasSize(2);
+        assertThat(logs.get(0)).contains("call.start");
+        assertThat(logs.get(1)).contains("call.end");
+        // TokenCountingAdvisor 记了指标
+        assertThat(registry.counter(TokenCountingAdvisor.COUNTER_NAME,
+                "agent", "test-agent", "model", "unknown").count()).isEqualTo(30.0);
+        // NodeTrace 由适配器写入 trace
+        assertThat(trace.nodes()).hasSize(1);
+        assertThat(trace.nodes().get(0).totalTokens()).isEqualTo(30);
+    }
 }
