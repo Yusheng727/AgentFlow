@@ -11,17 +11,25 @@ import com.agentflow.dsl.Reducer;
 import com.agentflow.dsl.WorkflowDefinition;
 import com.agentflow.engine.checkpoint.CheckpointManager;
 import com.agentflow.engine.checkpoint.NoopCheckpointManager;
+import com.agentflow.engine.fault.ErrorHandler;
+import com.agentflow.engine.fault.RetryPolicy;
+import com.agentflow.engine.fault.TimeoutPolicy;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * BSP 执行引擎（KTD-1 核心）。
@@ -49,13 +57,31 @@ public final class BspEngine {
     private static final Logger log = LoggerFactory.getLogger(BspEngine.class);
 
     private final DAGLayerer layerer;
+    /** U4 容错：可空（null = 不重试，backward compat with U2）。 */
+    private final RetryPolicy retryPolicy;
+    /** U4 补偿：可空（null = 不调 ErrorHandler）。 */
+    private final ErrorHandler errorHandler;
+    /** U4 超时策略：可空（null = 无工作流总超时）。 */
+    private final TimeoutPolicy timeoutPolicy;
 
     public BspEngine() {
         this(new DAGLayerer());
     }
 
     public BspEngine(DAGLayerer layerer) {
+        this(layerer, null, null, null);
+    }
+
+    /**
+     * U4 容错入口：注入 RetryPolicy / ErrorHandler / TimeoutPolicy。
+     * 任一为 null 表示该层不启用（如 retryPolicy=null → 不重试，与 U2 行为一致）。
+     */
+    public BspEngine(DAGLayerer layerer, RetryPolicy retryPolicy,
+                     ErrorHandler errorHandler, TimeoutPolicy timeoutPolicy) {
         this.layerer = Objects.requireNonNull(layerer, "layerer");
+        this.retryPolicy = retryPolicy;
+        this.errorHandler = errorHandler;
+        this.timeoutPolicy = timeoutPolicy;
     }
 
     /** 便捷入口（Map 形式）：无 checkpoint、无自定义 reducer（开发/测试）。 */
@@ -130,10 +156,17 @@ public final class BspEngine {
 
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         NodeExecutor nodeExecutor = new NodeExecutor(agentResolver, executor);
+        Instant workflowStart = Instant.now();
         try {
             for (SuperStep step : steps) {
+                // 工作流总超时：super-step 间检查（超时则 abort，不推进下游）
+                if (timeoutPolicy != null && timeoutPolicy.isWorkflowExceeded(workflowStart)) {
+                    throw new WorkflowExecutionException(step.index(),
+                            List.of(new TimeoutException("workflow total timeout exceeded")));
+                }
                 WorkflowContext snapshot = context.readOnlySnapshot();
-                List<NodeResult> results = runSuperStep(step, dag, snapshot, nodeExecutor, cp, workflowId, executor, effInputs);
+                List<NodeResult> results = runSuperStep(step, dag, snapshot, nodeExecutor, cp, workflowId,
+                        executor, effInputs, workflowStart);
                 applyBarrier(step, results, context, dag, def, reducer, cp, workflowId);
             }
             return context;
@@ -145,7 +178,8 @@ public final class BspEngine {
     /** 并行执行 super-step 内所有节点，barrier 等待全部完成。 */
     private List<NodeResult> runSuperStep(SuperStep step, DAGraph dag, WorkflowContext snapshot,
                                           NodeExecutor nodeExecutor, CheckpointManager cp, String workflowId,
-                                          ExecutorService executor, Map<String, Object> inputs) {
+                                          ExecutorService executor, Map<String, Object> inputs,
+                                          Instant workflowStart) {
         List<CompletableFuture<NodeResult>> futures = new ArrayList<>(step.nodeIds().size());
         for (String id : step.nodeIds()) {
             NodeDefinition node = dag.node(id);
@@ -154,7 +188,10 @@ public final class BspEngine {
             // 并行执行 + 节点级 checkpoint（完成当下即持久化，R3）
             futures.add(CompletableFuture.supplyAsync(() -> {
                 try {
-                    NodeResult r = nodeExecutor.execute(node, input);
+                    // U4：retryPolicy 包在 NodeExecutor 外层（null = 不重试，backward compat）
+                    NodeResult r = retryPolicy != null
+                            ? retryPolicy.execute(nodeExecutor, node, input)
+                            : nodeExecutor.execute(node, input);
                     if (r instanceof NodeResult.Success s) {
                         // 节点级 checkpoint 失败不应崩溃工作流（U5 决定 fatal/non-fatal 策略）；
                         // 降级 warn，主结果保留——recovery 可能因此重跑该节点（LLM 重复计费风险由 U5 兜底）
@@ -173,7 +210,30 @@ public final class BspEngine {
             }, executor));
         }
         // barrier：等最慢的节点完成。lambda 内已 catch-all，故 allOf 不会 exceptional
-        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+        CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+        Duration remaining = timeoutPolicy != null ? timeoutPolicy.remainingWorkflow(workflowStart) : null;
+        if (remaining != null) {
+            // 工作流总超时：用 .get(remaining) 而非 .join()，超时/零剩余则抛 abort。
+            // 注意：CompletableFuture.cancel(true) 不会中断 supplyAsync 已在跑的 VT（CF.cancel 仅标记完成，
+            // 不传播 interrupt），真正中止在飞节点靠本方法抛出后 execute 的 finally { executor.shutdownNow(); }
+            // 中断所有 VT。U5 注意：PostgresCheckpointManager 下，超时后仍可能在飞节点完成并调
+            // cp.saveNodeOutput（写出 stray COMPLETED 记录到已 abort 的 super-step）——U5 Recovery 需
+            // 鉴别 abort 后的 stray 记录（按 workflow 状态过滤），非 U4 问题（NoopCheckpointManager 无此风险）。
+            try {
+                allOf.get(remaining.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (TimeoutException te) {
+                throw new WorkflowExecutionException(step.index(), List.of(te));
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new WorkflowExecutionException(step.index(), List.of(ie));
+            } catch (ExecutionException ee) {
+                // 不应发生（lambda catch-all），兜底解包
+                Throwable cause = ee.getCause() != null ? ee.getCause() : ee;
+                throw new WorkflowExecutionException(step.index(), List.of(cause));
+            }
+        } else {
+            allOf.join();
+        }
         List<NodeResult> results = new ArrayList<>(futures.size());
         for (CompletableFuture<NodeResult> f : futures) {
             results.add(f.join());
@@ -195,7 +255,17 @@ public final class BspEngine {
             }
         }
         if (!failures.isEmpty()) {
-            // U4 ErrorHandler 将在此前插入补偿（写 context.errorHandled=true 等）
+            // U4 ErrorHandler：转 FAILED 前 context 补偿（写 errorHandled=true 等；
+            // 写全局 context，非 agent 只读快照，保 BSP 互不可见）
+            if (errorHandler != null) {
+                for (Throwable cause : failures) {
+                    try {
+                        errorHandler.handle(context, cause);
+                    } catch (RuntimeException he) {
+                        log.warn("ErrorHandler 抛异常，忽略（best-effort 补偿）: {}", he.toString());
+                    }
+                }
+            }
             // 失败 super-step 不写 barrier checkpoint——KTD-3：barrier checkpoint 记录"已完成"super-step，
             // 失败层未完成；U5 Recovery 查 nextSuperStep 的节点级 COMPLETED 输出重跑失败节点
             throw new WorkflowExecutionException(step.index(), failures);
