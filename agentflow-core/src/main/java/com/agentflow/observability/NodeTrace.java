@@ -5,10 +5,12 @@ import java.time.Duration;
 /**
  * 单节点执行追踪（U3 引入，KTD-可观测）。
  *
- * <p>由 {@code LoggingAdvisor}（U3）在 {@code before()}/{@code after()} 钩子中写入：
+ * <p>由 {@code SpringAiAgentAdapter}（U3）在 {@code execute()} 中写入：
  * 构造时记 start，{@link #succeed} / {@link #fail} 时记 end + 状态 + token + 摘要。
+ * 适配器持有 nodeId + chatResponse.usage，是 NodeTrace 的唯一写入者（OQ-3 决议，
+ * 避免并行 VT 共享可变状态；LoggingAdvisor 只做结构化日志，不写 NodeTrace）。
  *
- * <p>线程安全：单节点 trace 由执行该节点的单个 Virtual Thread 写入（Advisor Chain 同步在该 VT 上跑），
+ * <p>线程安全：单节点 trace 由执行该节点的单个 Virtual Thread 写入，
  * 字段用 volatile 保证 barrier 后跨线程读可见。多节点并行追加由
  * {@link ExecutionTrace} 的 CopyOnWriteArrayList 承载。
  */

@@ -23,7 +23,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 
@@ -71,8 +70,6 @@ public class SpringAiAgentAdapter implements AgentFunction {
     private final Function<String, String> redactor;
     private final ExecutionTrace trace;
     private final OutputSchemaValidator schemaValidator;
-    /** nodeId → 在飞 LLM 调用所在 VT，供 cancel() 中断（best-effort HTTP abort，KTD-6 v4.3） */
-    private final Map<String, Thread> inFlight = new ConcurrentHashMap<>();
 
     /** 便捷构造：无 advisor、无工具、无 trace、不脱敏、无 schema 校验（测试/最小用法）。 */
     public SpringAiAgentAdapter(ChatClient chatClient) {
@@ -131,7 +128,7 @@ public class SpringAiAgentAdapter implements AgentFunction {
                 java.util.concurrent.atomic.AtomicReference<LlmResult> last = new java.util.concurrent.atomic.AtomicReference<>();
                 OutputSchemaValidator.ValidatedOutput vo = schemaValidator.validateWithRetry(
                         resolvedPrompt, input.outputSchema(), p -> {
-                            LlmResult r = callLlm(p, input.nodeId());
+                            LlmResult r = callLlm(p);
                             last.set(r);
                             return r.content();
                         });
@@ -141,11 +138,16 @@ public class SpringAiAgentAdapter implements AgentFunction {
                 promptTokens = lastResult == null ? 0 : lastResult.promptTokens();
                 completionTokens = lastResult == null ? 0 : lastResult.completionTokens();
             } else {
-                LlmResult r = callLlm(resolvedPrompt, input.nodeId());
+                LlmResult r = callLlm(resolvedPrompt);
                 content = r.content();
                 promptTokens = r.promptTokens();
                 completionTokens = r.completionTokens();
             }
+        } catch (FatalException e) {
+            // schema 校验耗尽等 Fatal：nodeTrace 终态化后原样抛出（FatalException 是 checked，
+            // 不被下面的 RuntimeException catch 捕获；若不在此终态化，NodeTrace 永留 RUNNING）
+            nodeTrace.fail(e.getMessage());
+            throw e;
         } catch (RuntimeException e) {
             Throwable cause = (e.getCause() instanceof Exception) ? e.getCause() : e;
             nodeTrace.fail(cause.getMessage());
@@ -173,63 +175,47 @@ public class SpringAiAgentAdapter implements AgentFunction {
      *
      * <p>Spring AI 2.0：.chatResponse() / .content() 各自触发一次 advisor 链执行，
      * callAdvisors deque 是 mutable（nextCall pop），故只调一次 .chatResponse()。
-     *
-     * <p>注册当前 VT 到 inFlight（按 nodeId），供 {@link #cancel(AgentInput)} 中断（KTD-6 v4.3）。
      */
-    private LlmResult callLlm(String prompt, String nodeId) {
-        Thread current = Thread.currentThread();
-        inFlight.put(nodeId, current);
-        try {
-            ChatClient.ChatClientRequestSpec spec = chatClient.prompt(prompt);
-            if (!advisors.isEmpty()) {
-                spec = spec.advisors(advisors.toArray(new Advisor[0]));
-            }
-            if (!toolBeans.isEmpty()) {
-                spec = spec.tools(toolBeans.toArray());
-            }
-            ChatResponse chatResponse = spec.call().chatResponse();
-            String content = null;
-            long promptTokens = 0;
-            long completionTokens = 0;
-            if (chatResponse != null) {
-                if (chatResponse.getResult() != null && chatResponse.getResult().getOutput() != null) {
-                    content = chatResponse.getResult().getOutput().getText();
-                }
-                if (chatResponse.getMetadata() != null && chatResponse.getMetadata().getUsage() != null) {
-                    Usage usage = chatResponse.getMetadata().getUsage();
-                    promptTokens = usage.getPromptTokens() == null ? 0 : usage.getPromptTokens();
-                    completionTokens = usage.getCompletionTokens() == null ? 0 : usage.getCompletionTokens();
-                }
-            }
-            return new LlmResult(content, promptTokens, completionTokens);
-        } finally {
-            inFlight.remove(nodeId, current);
+    private LlmResult callLlm(String prompt) {
+        ChatClient.ChatClientRequestSpec spec = chatClient.prompt(prompt);
+        if (!advisors.isEmpty()) {
+            spec = spec.advisors(advisors.toArray(new Advisor[0]));
         }
+        if (!toolBeans.isEmpty()) {
+            spec = spec.tools(toolBeans.toArray());
+        }
+        ChatResponse chatResponse = spec.call().chatResponse();
+        String content = null;
+        if (chatResponse != null && chatResponse.getResult() != null
+                && chatResponse.getResult().getOutput() != null) {
+            content = chatResponse.getResult().getOutput().getText();
+        }
+        UsageTokens tokens = UsageTokens.from(chatResponse);
+        return new LlmResult(content, tokens.promptTokens(), tokens.completionTokens());
     }
 
     /**
      * 中止在飞 LLM 调用（KTD-6 v4.3，超时触发时真正停止 token 计费）。
      *
      * <p><b>Spring AI 2.0 限制</b>：{@code ChatClient.call()} 同步阻塞，无公共 HTTP abort 钩子
-     * （RestClient/ChatModel 不暴露在飞请求句柄）。故本实现降级为 <b>VT 中断</b>：按 nodeId 取出
-     * 在飞 VT 并 {@code interrupt()}——底层 HTTP client（Apache HttpClient / RestClient）若响应
-     * 线程中断则中止在飞 HTTP 请求、停止 token 流式与计费；若不响应则仅停止调度（best-effort）。
-     * v1.1 若 Spring AI 引入 abort 钩子，在此接入。
+     * （RestClient/ChatModel 不暴露在飞请求句柄）。本适配器曾尝试用 {@code inFlight nodeId→Thread}
+     * 表做适配器级中断，但适配器是 Spring 单例，并发执行同 nodeId 工作流时 put 覆盖会让 cancel
+     * 中断错误线程——race 风险大于收益，故移除。
      *
-     * <p>与 {@link com.agentflow.engine.NodeExecutor} 的 {@code future.cancel(true)} 互补：
-     * NodeExecutor 中断 Future（VT），本方法做适配器级补充中断（同语义，冗余但无害）。
+     * <p><b>实际中止机制</b>：由 {@link com.agentflow.engine.NodeExecutor} 的 {@code future.cancel(true)}
+     * 中断执行该节点的 VT——这是 per-execution 的 Future，无 race。底层 HTTP client（Apache HttpClient /
+     * RestClient）若响应线程中断则中止在飞 HTTP 请求、停止 token 流式与计费；若不响应则仅停止调度
+     * （best-effort）。本 override 仅记 warn 表明适配器已无更深的 HTTP abort 可做；v1.1 若 Spring AI
+     * 引入 abort 钩子，在此接入。
      */
     @Override
     public void cancel(AgentInput input) {
         if (input == null) {
             return;
         }
-        Thread t = inFlight.get(input.nodeId());
-        if (t != null && t.isAlive()) {
-            log.warn("cancel: 中断在飞 LLM 调用 nodeId={} agent={}（best-effort VT interrupt）",
-                    input.nodeId(), input.agentName());
-            t.interrupt();
-        }
+        log.warn("cancel: Spring AI 2.0 ChatClient 无公共 HTTP abort 钩子；依赖 NodeExecutor future.cancel(true) "
+                + "中断 VT（best-effort，HTTP client 响应中断则止 token 计费）nodeId={} agent={}",
+                input.nodeId(), input.agentName());
     }
 
 
@@ -244,9 +230,8 @@ public class SpringAiAgentAdapter implements AgentFunction {
     }
 
     private AgentExecutionException mapException(Throwable cause) {
-        if (cause instanceof SpelEvaluationException) {
-            return new FatalException("SpEL 解析失败: " + cause.getMessage(), cause);
-        }
+        // SpEL 解析失败在上面的独立 try 中已映射为 FatalException，不会到此；
+        // 此处仅分类 LLM 调用异常（U4 ErrorClassifier 将细化）。
         if (cause instanceof IOException || cause instanceof TimeoutException
                 || cause instanceof InterruptedException) {
             return new TransientException("Transient LLM 调用失败: " + cause.getMessage(), cause);

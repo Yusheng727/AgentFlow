@@ -365,4 +365,28 @@ class SpringAiAgentAdapterTest {
                 .isInstanceOf(FatalException.class)
                 .hasMessageContaining("校验失败 3 次");
     }
+
+    @Test
+    @DisplayName("schema 校验耗尽：NodeTrace 终态化为 FAILED（不永留 RUNNING，ce-code-review 修复）")
+    void schemaExhaustTerminalizesNodeTrace() {
+        StubChatModel model = new StubChatModel();
+        model.content = "no json ever";
+        Map<String, Object> schema = new java.util.LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("required", List.of("riskLevel"));
+        AgentInput in = new AgentInput("O", "test-agent", "分析风险", new WorkflowContext(),
+                Map.of(), List.of(), schema);
+        ExecutionTrace trace = new ExecutionTrace("wf-exhaust");
+        SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
+                client(model), passThroughAdvisors(), List.of(), trace, Function.identity(),
+                new OutputSchemaValidator());
+
+        assertThatThrownBy(() -> adapter.execute(in)).isInstanceOf(FatalException.class);
+
+        assertThat(trace.nodes()).hasSize(1);
+        NodeTrace node = trace.nodes().get(0);
+        assertThat(node.status()).isEqualTo(NodeTrace.Status.FAILED);
+        assertThat(node.isTerminal()).isTrue();
+        assertThat(node.error()).contains("校验失败 3 次");
+    }
 }

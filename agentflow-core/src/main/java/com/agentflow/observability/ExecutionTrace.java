@@ -7,8 +7,10 @@ import java.util.concurrent.CopyOnWriteArrayList;
 /**
  * 执行追踪树（U3 引入，KTD-可观测）。
  *
- * <p>根（workflow 级）+ 子（每节点执行 {@link NodeTrace}）。首个消费者是 {@code LoggingAdvisor}（U3 写入），
- * 后续 {@code DiagnosisService}（U6 分析 5 类问题）、Micrometer 指标（U7 接入）读取。
+ * <p>根（workflow 级）+ 子（每节点执行 {@link NodeTrace}）。NodeTrace 由 {@code SpringAiAgentAdapter}
+ * （U3）在 execute() 中写入（OQ-3 决议：适配器持 nodeId + chatResponse，是唯一写入者；
+ * LoggingAdvisor 只做结构化日志不写 trace）。后续 {@code DiagnosisService}（U6 分析 5 类问题）、
+ * Micrometer 指标（U7 接入）读取。
  *
  * <p>线程安全：同 super-step 多节点并行追加子 trace 由 {@link CopyOnWriteArrayList} 承载；
  * 根级 end/status 用 volatile 保证 barrier 后跨线程读可见。

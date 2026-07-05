@@ -82,10 +82,9 @@ public class LoggingAdvisor implements BaseAdvisor {
                 content = safeText(response.chatResponse().getResult().getOutput().getText());
             }
             if (response.chatResponse().getMetadata() != null) {
-                if (response.chatResponse().getMetadata().getUsage() != null) {
-                    promptTokens = response.chatResponse().getMetadata().getUsage().getPromptTokens();
-                    completionTokens = response.chatResponse().getMetadata().getUsage().getCompletionTokens();
-                }
+                UsageTokens tokens = UsageTokens.from(response.chatResponse());
+                promptTokens = tokens.promptTokens();
+                completionTokens = tokens.completionTokens();
                 if (response.chatResponse().getMetadata().getModel() != null) {
                     model = response.chatResponse().getMetadata().getModel();
                 }

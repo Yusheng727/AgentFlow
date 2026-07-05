@@ -7,7 +7,6 @@ import org.springframework.ai.chat.client.ChatClientRequest;
 import org.springframework.ai.chat.client.ChatClientResponse;
 import org.springframework.ai.chat.client.advisor.api.AdvisorChain;
 import org.springframework.ai.chat.client.advisor.api.BaseAdvisor;
-import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.core.Ordered;
 
 /**
@@ -61,17 +60,13 @@ public class TokenCountingAdvisor implements BaseAdvisor {
                 || response.chatResponse().getMetadata().getUsage() == null) {
             return response;
         }
-        Usage usage = response.chatResponse().getMetadata().getUsage();
-        // getTotalTokens() 在某些 DefaultUsage 构造路径下可能返回 null，故从 prompt+completion 安全累加
-        Integer pt = usage.getPromptTokens();
-        Integer ct = usage.getCompletionTokens();
-        long total = (pt == null ? 0 : pt) + (ct == null ? 0 : ct);
+        UsageTokens tokens = UsageTokens.from(response.chatResponse());
         String model = response.chatResponse().getMetadata().getModel();
         // getModel() 在未设置时可能返回 null 或空串，统一归为 "unknown"
         String agentTag = (agentName == null || agentName.isBlank()) ? "unknown" : agentName;
         String modelTag = (model == null || model.isBlank()) ? "unknown" : model;
         Tags tags = Tags.of("agent", agentTag).and("model", modelTag);
-        meterRegistry.counter(COUNTER_NAME, tags).increment(total);
+        meterRegistry.counter(COUNTER_NAME, tags).increment(tokens.total());
         return response;
     }
 }

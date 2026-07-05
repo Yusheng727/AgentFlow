@@ -1,7 +1,6 @@
 package com.agentflow.adapters.springai;
 
 import com.agentflow.agent.AgentInput;
-import com.agentflow.agent.FatalException;
 import com.agentflow.engine.WorkflowContext;
 
 import org.junit.jupiter.api.DisplayName;
@@ -17,6 +16,9 @@ import org.springframework.ai.chat.prompt.Prompt;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -24,13 +26,11 @@ import java.util.function.Function;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * SpringAiAgentAdapter cancel() 测试（U3-6，KTD-6 v4.3）。
+ * SpringAiAgentAdapter cancel/中断 测试（U3-6，KTD-6 v4.3）。
  *
- * <p>验证适配器 cancel(AgentInput) 真正中断在飞 LLM 调用——用阻塞 stub ChatModel
- * （CountDownLatch.await 模拟慢 HTTP），cancel() 后 VT 被中断、await 抛 InterruptedException。
- *
- * <p>Spring AI 2.0 无公共 HTTP abort 钩子，故本测试验证 VT 中断（best-effort）；
- * 生产中底层 HTTP client 响应中断则真中止 HTTP 请求 + 停止 token 计费。
+ * <p>Spring AI 2.0 ChatClient.call() 同步阻塞、无公共 HTTP abort 钩子——适配器 cancel() 为
+ * best-effort no-op（记 warn），实际中止由 NodeExecutor 的 future.cancel(true) 中断 VT 完成。
+ * 本测试验证：(1) cancel() 自身安全；(2) 适配器的阻塞 LLM 调用响应 VT 中断（生产中止路径）。
  */
 class SpringAiAgentAdapterCancelTest {
 
@@ -62,7 +62,7 @@ class SpringAiAgentAdapterCancelTest {
                 Map.of(), List.of(), Map.of());
     }
 
-    private static SpringAiAgentAdapter adapter(BlockingChatModel model) {
+    private static SpringAiAgentAdapter adapter(ChatModel model) {
         return new SpringAiAgentAdapter(
                 org.springframework.ai.chat.client.ChatClient.create(model),
                 List.of(new SpringAiAgentAdapterTest.NoOpBaseAdvisor()),
@@ -70,56 +70,51 @@ class SpringAiAgentAdapterCancelTest {
     }
 
     @Test
-    @DisplayName("cancel() 中断在飞 LLM 调用：阻塞 stub 被中断，execute 抛 FatalException")
-    void cancelInterruptsInFlightCall() throws Exception {
+    @DisplayName("cancel() 安全：null input 与无在飞调用均不抛（best-effort no-op）")
+    void cancelIsSafeNoOp() {
+        SpringAiAgentAdapter adapter = adapter(new BlockingChatModel());
+        adapter.cancel(null);                      // null input
+        adapter.cancel(input("nonexistent"));      // 无在飞调用
+    }
+
+    @Test
+    @DisplayName("VT 中断中止在飞 LLM 调用：future.cancel(true) → 阻塞 stub 被中断 → execute 抛 Transient")
+    void vtInterruptAbortsInFlightCall() throws Exception {
         BlockingChatModel model = new BlockingChatModel();
         SpringAiAgentAdapter adapter = adapter(model);
 
         AtomicReference<Throwable> execError = new AtomicReference<>();
-        // VT 跑 execute（阻塞在 stub 的 await）
-        Thread vt = Thread.startVirtualThread(() -> {
-            try {
-                adapter.execute(input("A"));
-            } catch (Throwable e) {
-                execError.set(e);
+        // 模拟 NodeExecutor：把 agent.execute 提交到 VT executor，拿 Future
+        try (ExecutorService exec = Executors.newVirtualThreadPerTaskExecutor()) {
+            Future<?> future = exec.submit(() -> {
+                try {
+                    adapter.execute(input("A"));
+                } catch (Throwable e) {
+                    execError.set(e);
+                }
+            });
+
+            // 等 stub 进入 call
+            assertThat(model.entered.await(2, TimeUnit.SECONDS))
+                    .as("stub ChatModel.call 应被进入").isTrue();
+
+            // NodeExecutor 超时路径：future.cancel(true) 中断 VT
+            future.cancel(true);
+
+            // VT 应已退出（stub.await 抛 InterruptedException → RuntimeException → mapException → Transient）
+            long deadline = System.currentTimeMillis() + 5000;
+            while (execError.get() == null && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20);
             }
-        });
+        }
 
-        // 等 stub 进入 call
-        assertThat(model.entered.await(2, TimeUnit.SECONDS))
-                .as("stub ChatModel.call 应被进入").isTrue();
-
-        // cancel 应中断在飞 VT
-        adapter.cancel(input("A"));
-
-        vt.join(5000);
-        assertThat(vt.isAlive()).as("VT 应已退出").isFalse();
-        assertThat(model.interrupted).as("在飞 LLM 调用应被中断").isTrue();
-        // 中断 → RuntimeException → 适配器 mapException(InterruptedException) → Transient
+        assertThat(model.interrupted).as("在飞 LLM 调用应被 VT 中断").isTrue();
         assertThat(execError.get()).isInstanceOf(com.agentflow.agent.TransientException.class);
     }
 
     @Test
-    @DisplayName("cancel() 对无在飞调用的 nodeId 安全（no-op，不抛）")
-    void cancelNoInFlightIsSafe() {
-        BlockingChatModel model = new BlockingChatModel();
-        SpringAiAgentAdapter adapter = adapter(model);
-        // 未执行过，inFlight 为空
-        adapter.cancel(input("nonexistent"));
-    }
-
-    @Test
-    @DisplayName("cancel(null input) 安全（no-op）")
-    void cancelNullInputSafe() {
-        BlockingChatModel model = new BlockingChatModel();
-        SpringAiAgentAdapter adapter = adapter(model);
-        adapter.cancel(null);
-    }
-
-    @Test
-    @DisplayName("execute 完成后 inFlight 清理（cancel 不误中断已完成的节点）")
-    void inFlightClearedAfterCompletion() throws Exception {
-        // 用立即返回的 stub（复用 SpringAiAgentAdapterTest.StubChatModel 行为：固定 content）
+    @DisplayName("execute 完成后调用 cancel() 安全（不影响已完成节点）")
+    void cancelAfterCompletionSafe() throws Exception {
         SpringAiAgentAdapterTest.StubChatModel model = new SpringAiAgentAdapterTest.StubChatModel();
         SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
                 org.springframework.ai.chat.client.ChatClient.create(model),
@@ -127,8 +122,6 @@ class SpringAiAgentAdapterCancelTest {
                 List.of(), null, Function.identity(), null);
 
         adapter.execute(input("B"));
-
-        // 完成后 cancel 不应抛、也不应中断任何线程
-        adapter.cancel(input("B"));
+        adapter.cancel(input("B"));  // 完成后 cancel，不抛、不误中断
     }
 }
