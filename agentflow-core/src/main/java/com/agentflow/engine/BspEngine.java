@@ -112,7 +112,8 @@ public final class BspEngine {
         List<CompletableFuture<NodeResult>> futures = new ArrayList<>(step.nodeIds().size());
         for (String id : step.nodeIds()) {
             NodeDefinition node = dag.node(id);
-            AgentInput input = new AgentInput(id, node.agent(), node.promptTemplate(), snapshot, inputs);
+            AgentInput input = new AgentInput(id, node.agent(), node.promptTemplate(), snapshot, inputs,
+                    node.tools(), node.outputSchema());
             // 并行执行 + 节点级 checkpoint（完成当下即持久化，R3）
             futures.add(CompletableFuture.supplyAsync(() -> {
                 try {
