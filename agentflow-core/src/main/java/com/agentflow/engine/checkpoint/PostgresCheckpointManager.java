@@ -187,14 +187,14 @@ public final class PostgresCheckpointManager implements CheckpointManager {
     // ─────────────────── 工作流生命周期 ───────────────────
 
     @Override
-    public void initWorkflow(String workflowId, String workflowName, String version) {
+    public void initWorkflow(String workflowId, String workflowName, String version, String createdBy) {
         jdbc.update(
                 """
-                INSERT INTO workflow_executions (id, workflow_name, workflow_version, status)
-                VALUES (?, ?, ?, 'PENDING')
+                INSERT INTO workflow_executions (id, workflow_name, workflow_version, status, created_by)
+                VALUES (?, ?, ?, 'PENDING', ?)
                 ON CONFLICT (id) DO NOTHING
                 """,
-                workflowId, workflowName, version != null ? version : "1.0");
+                workflowId, workflowName, version != null ? version : "1.0", createdBy);
     }
 
     @Override
@@ -217,6 +217,18 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                 (rs, rowNum) -> WorkflowStatus.valueOf(rs.getString("status")),
                 workflowId);
         return results.isEmpty() ? Optional.empty() : Optional.of(results.getFirst());
+    }
+
+    @Override
+    public Optional<String> findCreatedBy(String workflowId) {
+        List<String> results = jdbc.query(
+                """
+                SELECT created_by FROM workflow_executions WHERE id = ?
+                """,
+                (rs, rowNum) -> rs.getString("created_by"),
+                workflowId);
+        return results.isEmpty() || results.getFirst() == null
+                ? Optional.empty() : Optional.of(results.getFirst());
     }
 
     // ──────────────────────── 辅助方法 ────────────────────────

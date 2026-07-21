@@ -1,6 +1,6 @@
 # AgentFlow — 接手指南（给 Claude Code）
 
-> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-07-21（U5 实现完成，待 mvn verify 验证）。
+> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-07-27（U5 已合 main + U14 接口对齐 rebase 完成，均 mvn verify 绿）。
 
 ## 这是什么项目
 
@@ -24,7 +24,8 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 | U2 | BSP 执行引擎：`com.agentflow.agent`（AgentFunction/AgentInput/AgentOutput + 异常合约）+ `com.agentflow.engine`（BspEngine/NodeExecutor/WorkflowContext/ChannelReducer/DAGraph/SuperStep/NodeResult）+ `engine.checkpoint` seam（CheckpointManager + Noop，U5 提供 PG 实现）。Virtual Threads 并行 + CompletableFuture.allOf barrier + 只读快照 + Reducer 确定性合并 + 异常隔离。经 8 人 ce-code-review + 11 修复（null output/inputs 透传/catch-all/cancel 守卫/parseTimeout 零负值/CONCAT 扁平/MAX 精度/失败层不写 barrier） | 57 tests pass，JaCoCo 80% 达标，`mvn verify` 5 模块 SUCCESS |
 | U3 | Agent 适配器层：bump Spring Boot 3.4→4.1.0（Spring AI 2.0 需 Spring Framework 7 + Jackson 3）+ spring-ai-bom 2.0.0 + spring-ai-starter-model-openai。`SpringAiAgentAdapter`（AgentFunction 实现：SpEL 解析 `${...}` + ChatClient.call + 异常 Transient/Fatal 映射 + cancel best-effort）+ `SpelPromptResolver`（SimpleEvaluationContext forPropertyAccessors + DataBindingPropertyAccessor + MapAccessor，禁 T()）+ `TokenCountingAdvisor`/`LoggingAdvisor`（BaseAdvisor）+ `OutputSchemaValidator`（networknt 3.x，带反馈重试 ≤2）+ `NodeRegistry` + `ExecutionTrace`/`NodeTrace`。AgentInput 加 tools/outputSchema、AgentOutput 加 structuredOutput/metadata。经 ce-code-review + 3 correctness 修复（LoggingAdvisor NPE / schema 耗尽 NodeTrace 永留 RUNNING / inFlight cancel race） | 110 tests pass（71 core + 39 adapter），JaCoCo 80% 达标，`mvn verify` 5 模块 SUCCESS |
 | U4 | 容错机制：`com.agentflow.engine.fault`（ErrorClassifier/RetryPolicy/TimeoutPolicy/ErrorHandler，全 record）。三层链路 Timeout→ErrorClassifier→Retry（指数退避 1s→2s→4s，max 3，仅 transient）→ErrorHandler（abort 前 context 补偿）。BspEngine 新构造注入 RetryPolicy/ErrorHandler/TimeoutPolicy；runSuperStep 用 retryPolicy 包 NodeExecutor + allOf.get(remaining) 工作流总超时；applyBarrier 抛前调 ErrorHandler。失败传播：节点耗尽/fatal → 工作流 FAILED abort。retry 预算组合式（3 attempt × 内含 schema-retry ≤2 = 9 上限）。adapter.mapException 委托 ErrorClassifier（单一真相源）。经 ce-code-review + 1 correctness（backoffFor 小数倍率截断）+ 4 cleanup 修复 | 136 tests pass（97 core + 39 adapter），JaCoCo 80% 达标，`mvn verify` 5 模块 SUCCESS |
-| U5 | 两级 Checkpoint 持久化 + Recovery：`com.agentflow.engine.checkpoint` 包。CheckpointManager 接口扩展（U2 seam 落地：查询方法 + 工作流生命周期）+ `InMemoryCheckpointManager`（ConcurrentHashMap，开发测试）+ `PostgresCheckpointManager`（JdbcTemplate + Flyway 迁移 + Semaphore(20) 限流 + ON CONFLICT 幂等 upsert）+ `RecoveryProtocol`（崩溃恢复，off-by-one 修复：查 nextSuperStep 而非 nextSuperStep-1）。数据 record：NodeOutputStore / BarrierCheckpoint / ExecutionState + NodeStatus / WorkflowStatus 枚举。DB 迁移 V1__checkpoint_schema.sql（3 表 + 2 索引）。**待 mvn verify 验证（环境无 Maven）** | 20 tests 已编写（待跑），`feat/u5-checkpoint` 分支 |
+| U5 | 两级 Checkpoint 持久化 + Recovery：`com.agentflow.engine.checkpoint` 包。CheckpointManager 接口扩展（U2 seam 落地：查询方法 + 工作流生命周期 + U14 加 findCreatedBy 所有权查询）+ `InMemoryCheckpointManager`（ConcurrentHashMap，开发测试）+ `PostgresCheckpointManager`（JdbcTemplate + Flyway 迁移 + Semaphore(20) 限流 + ON CONFLICT 幂等 upsert）+ `RecoveryProtocol`（崩溃恢复，off-by-one 修复：查 nextSuperStep）+ `BspEngine.recoverAndExecute`（U5 P0 修复新增：replayOutputs 重放崩溃层输出 + stray COMPLETED 防护）。数据 record：NodeOutputStore / BarrierCheckpoint / ExecutionState + NodeStatus / WorkflowStatus 枚举。DB 迁移 V1__checkpoint_schema.sql（3 表 + 2 索引 + barrier UNIQUE 约束）。经 ce-code-review 10 reviewer + 2 个 P0 修复（ADV-1 崩溃层 channel 丢失 / ADV-2 stray 防护未实现，4 reviewer 独立确认） | 131 core tests pass，JaCoCo 80% 达标，`mvn verify` 5 模块 SUCCESS，已合 main |
+| U14 | API 鉴权 + 凭证管理：`ApiKeyAuthFilter`（OncePerRequestFilter，SHA-256 hash）+ `WorkflowOwnershipChecker`（防 IDOR）+ `CallerToolAllowlist`（per-caller tool 授权）+ `CredentialManager`（LLM 凭证从 env 读取，禁止 yml 硬编码）+ `PromptRedactionFilter`（正则脱敏 API Key/手机号/身份证）+ `WorkflowController`（POST /api/workflows → 202 异步执行 + GET status + POST retry）+ DB migration V2（workflow_executions.created_by）。接口对齐：U14 弱类型 Optional<?> 改 U5 强类型 + WorkflowStatus 枚举 + initWorkflow 4 参(createdBy) + findCreatedBy | api 测试 8 个（含补的 WorkflowControllerTest）+ core 22，JaCoCo 80% 达标，`mvn verify` 5 模块 SUCCESS，`feat/u14-api-security` 分支（已 rebase 到含 U5 的 main） |
 
 **OQ-2 决议**：plan 当初猜 Spring AI 2.0 要 Boot 3.5——实际不够。3.5 仍带 Jackson 2.19，而 Spring AI 2.0.0 的 @Tool schema 路径用 Jackson 3（`tools.jackson.core`，需 `JsonSerializeAs`）。**正确版本是 Spring Boot 4.1.0 GA**（自带 Jackson 3.1.4 + Spring Framework 7）。U3 起全仓升 Boot 4.1。
 
@@ -38,7 +39,12 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 > **U3 详细接手清单**：[`docs/handoff/u3-spring-ai-adapter.md`](docs/handoff/u3-spring-ai-adapter.md) — 已完成，留作 U3 实现决策的历史记录。
 
 **后续顺序**（按 `05-implementation-units.md` 的 Unit Priority 矩阵 P0 先行）：
-U3（Agent 适配器）→ U4（容错）→ U5（Checkpoint+Recovery）→ U10（主 Demo）→ U13（Starter）→ U14（安全）。P1/P2（U6/U7/U8/U9/U11/U12）跟进。
+U3（Agent 适配器）✅ → U4（容错）✅ → U5（Checkpoint+Recovery）🔄 → U14（API 鉴权）🔄 → U10（主 Demo）→ U13（Starter）。P1/P2（U6/U7/U8/U9/U11/U12）跟进。
+
+> **当前状态**：
+> - `feat/u5-checkpoint`：代码完成，12 文件 + 20 tests，待验证合并
+> - `feat/u14-api-security`：代码完成，16 文件 + 30 tests，待验证
+> - U5 和 U14 的 CheckpointManager 接口有冲突（U14 改了方法签名），合并时需手动 resolve
 
 > **当前状态**：U5 代码已完成（`feat/u5-checkpoint` 分支），12 文件 + 20 tests，待有 Maven 环境跑 `mvn verify` 验证后合并 main。
 

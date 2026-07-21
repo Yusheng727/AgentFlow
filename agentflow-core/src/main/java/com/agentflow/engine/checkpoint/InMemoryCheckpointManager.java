@@ -40,6 +40,7 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
     private final ConcurrentHashMap<String, List<BarrierCheckpoint>> barriers = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, WorkflowStatus> workflowStatuses = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String[]> workflowMeta = new ConcurrentHashMap<>(); // [name, version]
+    private final ConcurrentHashMap<String, String> workflowCreatedBy = new ConcurrentHashMap<>(); // U14 所有权校验
 
     // ──────────────────────────── 写入 ────────────────────────────
 
@@ -90,9 +91,12 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
     // ─────────────────── 工作流生命周期 ───────────────────
 
     @Override
-    public void initWorkflow(String workflowId, String workflowName, String version) {
+    public void initWorkflow(String workflowId, String workflowName, String version, String createdBy) {
         workflowMeta.put(workflowId, new String[]{workflowName, version});
         workflowStatuses.put(workflowId, WorkflowStatus.PENDING);
+        if (createdBy != null) {
+            workflowCreatedBy.put(workflowId, createdBy);
+        }
     }
 
     @Override
@@ -103,6 +107,11 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
     @Override
     public Optional<WorkflowStatus> findStatus(String workflowId) {
         return Optional.ofNullable(workflowStatuses.get(workflowId));
+    }
+
+    @Override
+    public Optional<String> findCreatedBy(String workflowId) {
+        return Optional.ofNullable(workflowCreatedBy.get(workflowId));
     }
 
     // ──────────────────────── 辅助方法 ────────────────────────

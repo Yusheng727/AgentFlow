@@ -58,7 +58,7 @@ class BspEngineRecoveryTest {
                 List.of(edge("A", "B"), edge("B", "C")));
 
         InMemoryCheckpointManager cp = new InMemoryCheckpointManager();
-        cp.initWorkflow("wf", "test", "1.0");
+        cp.initWorkflow("wf", "test", "1.0", null);
 
         // 模拟崩溃前状态：super-step 0（A）已 barrier 完成，channel A="a-out"
         // 用真实引擎跑 step 0 产生 barrier
@@ -75,7 +75,7 @@ class BspEngineRecoveryTest {
         // （即 B 完成了、saveNodeOutput 写了，但崩溃在 barrier 之前）
         // —— 用一个新的 checkpoint 模拟这个中间态
         InMemoryCheckpointManager crashCp = new InMemoryCheckpointManager();
-        crashCp.initWorkflow("wf2", "test", "1.0");
+        crashCp.initWorkflow("wf2", "test", "1.0", null);
         // step 0 barrier（A 完成）
         crashCp.saveBarrier("wf2", 0, new WorkflowContext(Map.of("A", "a-out")));
         // step 1 的 B 已 COMPLETED（saveNodeOutput 已写），但 barrier 未写——崩溃窗口
@@ -111,7 +111,7 @@ class BspEngineRecoveryTest {
                 List.of(edge("A", "B")));
 
         InMemoryCheckpointManager cp = new InMemoryCheckpointManager();
-        cp.initWorkflow("wf", "test", "1.0");
+        cp.initWorkflow("wf", "test", "1.0", null);
         // step 0 barrier 完成
         cp.saveBarrier("wf", 0, new WorkflowContext(Map.of("A", "a-out")));
         // 引擎 abort → 标记 FAILED
@@ -139,7 +139,7 @@ class BspEngineRecoveryTest {
     void recoveryCompletesToSuccess() {
         WorkflowDefinition def = wf(List.of(node("A", "a")), List.of());
         InMemoryCheckpointManager cp = new InMemoryCheckpointManager();
-        cp.initWorkflow("wf", "test", "1.0");
+        cp.initWorkflow("wf", "test", "1.0", null);
         // 无 barrier，无已完成节点 → 从 step 0 开始
         cp.updateStatus("wf", WorkflowStatus.RUNNING);
 

@@ -499,7 +499,7 @@ class BspEngineTest {
         }
 
         @Override
-        public void initWorkflow(String workflowId, String workflowName, String version) {
+        public void initWorkflow(String workflowId, String workflowName, String version, String createdBy) {
             // noop
         }
 
@@ -510,6 +510,11 @@ class BspEngineTest {
 
         @Override
         public java.util.Optional<com.agentflow.engine.checkpoint.WorkflowStatus> findStatus(String workflowId) {
+            return java.util.Optional.empty();
+        }
+
+        @Override
+        public java.util.Optional<String> findCreatedBy(String workflowId) {
             return java.util.Optional.empty();
         }
     }

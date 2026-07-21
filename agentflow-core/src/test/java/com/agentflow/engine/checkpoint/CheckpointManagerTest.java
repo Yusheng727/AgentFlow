@@ -141,7 +141,7 @@ class CheckpointManagerTest {
         @Test
         @DisplayName("initWorkflow → visible in internal state")
         void initWorkflow() {
-            cm.initWorkflow("wf-1", "supplier-risk", "1.0");
+            cm.initWorkflow("wf-1", "supplier-risk", "1.0", null);
             // 通过 status update + query 间接验证（API 无直接读 status 方法）
             // Noop — 生命周期 API 仅写，不暴露读；verify 通过后续 save 正常验证
         }

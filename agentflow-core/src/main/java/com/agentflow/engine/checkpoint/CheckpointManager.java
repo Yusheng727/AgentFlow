@@ -11,7 +11,8 @@ import java.util.Optional;
  *
  * <p>U2 引入此接口作为 BSP 循环的持久化 seam；U5 扩展查询方法 + 工作流生命周期 +
  * 提供具体实现：{@code PostgresCheckpointManager}（生产）、{@code InMemoryCheckpointManager}（开发测试）、
- * {@code RecoveryProtocol}（崩溃恢复，按 nextSuperStep 查 COMPLETED 节点）+ DB migration。
+ * {@code RecoveryProtocol}（崩溃恢复，按 nextSuperStep 查 COMPLETED 节点）+ DB migration；
+ * U14 扩展 {@link #initWorkflow} 加 createdBy 参数 + 新增 {@link #findCreatedBy} 所有权查询。
  *
  * <h3>写入（U2 已定义，U5 实现）</h3>
  * <ul>
@@ -27,10 +28,12 @@ import java.util.Optional;
  *   <li>{@link #findCompletedNodes} — 查指定 super-step 中状态为 COMPLETED 的节点，恢复时跳过这些节点</li>
  * </ul>
  *
- * <h3>工作流生命周期（U5 新增）</h3>
+ * <h3>工作流生命周期（U5 新增，U14 扩展）</h3>
  * <ul>
- *   <li>{@link #initWorkflow} — 创建工作流执行实例记录</li>
+ *   <li>{@link #initWorkflow} — 创建工作流执行实例记录（U14 加 createdBy 参数供所有权校验）</li>
  *   <li>{@link #updateStatus} — 更新工作流状态（PENDING → RUNNING → SUCCESS | FAILED）</li>
+ *   <li>{@link #findStatus} — 查工作流状态（U5 P0 修复新增，Recovery 据 FAILED 鉴别 stray COMPLETED）</li>
+ *   <li>{@link #findCreatedBy} — U14 新增：查工作流创建者（API Key SHA-256 hash，所有权校验）</li>
  * </ul>
  *
  * <p>实现必须是线程安全的（节点级调用来自并行 Virtual Thread；U5 用 HikariCP + Semaphore(20) 限流）。
@@ -72,10 +75,17 @@ public interface CheckpointManager {
      */
     List<NodeOutputStore> findCompletedNodes(String workflowId, int superStep);
 
-    // ─────────────────── 工作流生命周期（U5 新增） ───────────────────
+    // ─────────────────── 工作流生命周期（U5 新增，U14 扩展） ───────────────────
 
-    /** 创建工作流执行实例记录（状态 = PENDING）。 */
-    void initWorkflow(String workflowId, String workflowName, String version);
+    /**
+     * 创建工作流执行实例记录（状态 = PENDING）。
+     *
+     * @param workflowId   工作流实例 id
+     * @param workflowName 工作流名（用于版本管理 U8）
+     * @param version      工作流版本
+     * @param createdBy    创建者 API Key 的 SHA-256 hash（U14 新增，可空——U5 调用方传 null 兼容）
+     */
+    void initWorkflow(String workflowId, String workflowName, String version, String createdBy);
 
     /** 更新工作流执行状态。 */
     void updateStatus(String workflowId, WorkflowStatus status);
@@ -90,4 +100,14 @@ public interface CheckpointManager {
      * @return 工作流状态，若不存在则返回 {@code Optional.empty()}
      */
     Optional<WorkflowStatus> findStatus(String workflowId);
+
+    /**
+     * U14 新增：查询工作流创建者的 SHA-256 hash（所有权校验用）。
+     *
+     * <p>{@code WorkflowOwnershipChecker} 据此校验请求方的 API Key hash 与工作流创建者一致，
+     * 不一致返回 403（防 IDOR）。
+     *
+     * @return 创建者 hash，若不存在（U5 未设 createdBy）则返回 {@code Optional.empty()}
+     */
+    Optional<String> findCreatedBy(String workflowId);
 }

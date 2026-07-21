@@ -6,6 +6,49 @@
 
 ---
 
+## U14 — API 鉴权 + 凭证管理（接口对齐）
+
+### Bug-6: U14 与 U5 的 CheckpointManager 接口设计冲突（合并阻塞）
+
+**Situation**: U5 和 U14 两个 feature 分支并行开发，都改了 U2 引入的 `CheckpointManager` SPI 接口，且做了**不兼容的两套设计**。合并时冲突。
+**Task**: 把 U14 rebase 到含 U5 的 main 上，接口对齐——保留 U5 的强类型（正确形态），U14 适配并融入其新能力（createdBy 所有权）。
+**Action**:
+- **冲突面**（3 处）：
+  | 方法 | U5 形态（强类型，正确） | U14 形态（弱类型） | 对齐决策 |
+  |:---|:---|:---|:---|
+  | `findLatestBarrier` | `Optional<BarrierCheckpoint>` | `Optional<?>` | 用 U5 强类型 |
+  | `findCompletedNodes` | `List<NodeOutputStore>` | `List<?>` | 用 U5 强类型 |
+  | `updateStatus` | `(id, WorkflowStatus)` 枚举 | `(id, String)` | 用 U5 枚举（类型安全） |
+  | `initWorkflow` | 3 参 | 4 参（+createdBy） | 用 U14 4 参（U5 调用方传 null） |
+  | `findStatus` | `Optional<WorkflowStatus>` | `Optional<String>` | 用 U5 强类型 |
+  | `findCreatedBy` | ❌ 无 | `Optional<String>` | 新增（U14 所有权校验） |
+
+- **根因**：U14 用 `Optional<?>`/`List<?>` 是为了「不依赖 U5 还没合的 BarrierCheckpoint/NodeOutputStore record」——但 U5 的 RecoveryProtocol 强依赖这两个具体类型（`.nodeId()` 方法调用）。两分支不能直接合并：先合 U14，U5 的 RecoveryProtocol 编译不过；先合 U5（已做），U14 接口要全部改回强类型。
+- **对齐改动**（6 个文件）：
+  - `CheckpointManager.java`：重写为合并版（强类型 + U14 的 createdBy/findCreatedBy）
+  - `NoopCheckpointManager.java`：实现全部 8 个方法（强类型 + findCreatedBy）
+  - `InMemoryCheckpointManager.java`：initWorkflow 3→4 参 + 加 findCreatedBy（用新 ConcurrentHashMap 存）
+  - `PostgresCheckpointManager.java`：initWorkflow 4 参 + INSERT 加 created_by 列 + findCreatedBy 查 created_by
+  - `WorkflowController.java`：6 处 updateStatus(String)→updateStatus(WorkflowStatus)，2 处 findStatus().orElse→.map(WorkflowStatus::name).orElse
+  - 3 个测试 stub（BspEngineTest/WorkflowOwnershipCheckerTest/CheckpointManagerTest）：补全新方法 + 强类型
+
+**Result**: 接口统一为强类型 + U14 新能力融入，编译通过。**教训**：并行 feature 分支改同一 SPI 接口是高风险——要么接口扩展用 default method（Java 8+）避免破 implementors，要么分支约定接口改动只能一个分支做。这次靠 rebase 手动对齐，代价是 6 文件改动。
+
+---
+
+### Bug-7: `WorkflowController` 调 `e.getSuperStep()` 但实际访问器是 `e.superStep()`
+
+**Situation**: U14 接口对齐编译时暴露。
+**Task**: 修复编译错误。
+**Action**:
+- 错误：`WorkflowController.java:151` 调 `e.getSuperStep()`，但 `WorkflowExecutionException` 的访问器是 `superStep()`（record 风格，无 get 前缀）。
+- 根因：U14 原代码就有这个 bug，但之前没编译过（CLAUDE.md 标注「待 mvn verify」），所以没暴露。接口对齐后第一次编译 api 模块才显现。
+- 修复：`e.getSuperStep()` → `e.superStep()`。
+
+**Result**: 编译通过。**教训**：「待 verify」的代码一定有未暴露的编译错误——早 verify 早发现。U14 写完后没跑过编译，这次对齐一次性暴露了 getSuperStep + 接口签名两类问题。
+
+---
+
 ## U5 — 两级 Checkpoint 持久化 + Recovery
 
 ### Bug-1: `jackson-datatype-jsr310` 依赖缺失导致编译失败
