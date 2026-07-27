@@ -10,7 +10,10 @@ import com.agentflow.dsl.NodeDefinition;
 import com.agentflow.dsl.Reducer;
 import com.agentflow.dsl.WorkflowDefinition;
 import com.agentflow.engine.checkpoint.CheckpointManager;
+import com.agentflow.engine.checkpoint.ExecutionState;
 import com.agentflow.engine.checkpoint.NoopCheckpointManager;
+import com.agentflow.engine.checkpoint.RecoveryProtocol;
+import com.agentflow.engine.checkpoint.WorkflowStatus;
 import com.agentflow.engine.fault.ErrorHandler;
 import com.agentflow.engine.fault.RetryPolicy;
 import com.agentflow.engine.fault.TimeoutPolicy;
@@ -170,12 +173,129 @@ public final class BspEngine {
                 applyBarrier(step, results, context, dag, def, reducer, cp, workflowId);
             }
             return context;
+        } catch (WorkflowExecutionException we) {
+            // U5 P0 修复（ADV-2）：abort 前显式标记 FAILED——RecoveryProtocol 据此鉴别崩溃层可能含
+            // timeout 后在飞 VT 写出的 stray COMPLETED 记录，整体重跑该层，避免读到未经 barrier
+            // 合并的孤立 channel 输出。best-effort：状态写入失败不掩盖原始 abort 异常。
+            try {
+                cp.updateStatus(workflowId, com.agentflow.engine.checkpoint.WorkflowStatus.FAILED);
+            } catch (RuntimeException se) {
+                log.warn("abort 时 updateStatus(FAILED) 失败 wf={}: {}", workflowId, se.toString());
+            }
+            throw we;
         } finally {
             executor.shutdownNow();
         }
     }
 
-    /** 并行执行 super-step 内所有节点，barrier 等待全部完成。 */
+    /**
+     * 崩溃恢复 + 续跑入口（U5 KTD-3 Recovery，P0 修复 ADV-1/ADV-2 的消费端）。
+     *
+     * <p>调用 {@link RecoveryProtocol#recover} 取 {@link ExecutionState}，然后：
+     * <ol>
+     *   <li>用 {@code channelSnapshot} 重建 WorkflowContext（上一 barrier 的 channel 状态）</li>
+     *   <li><b>重放 {@code replayOutputs}</b>：崩溃层已完成节点的 channelWrites 未进上一 barrier，
+     *       按 Reducer 合并进 context，恢复崩溃前的 channel 状态（P0 修复 ADV-1）。
+     *       这些节点在 {@code completedNodeIds} 中，跳过不重跑 LLM</li>
+     *   <li>从 {@code nextSuperStep} 起跑剩余 super-step；崩溃层中不在 {@code completedNodeIds}
+     *       的节点正常执行（含 FAILED 重跑、未启动节点首跑）</li>
+     * </ol>
+     *
+     * <p>stray 防护（ADV-2）：若工作流状态为 FAILED（引擎 abort 显式标记），RecoveryProtocol 已把
+     * completedNodeIds 与 replayOutputs 置空，崩溃层整体重跑——本方法无需额外处理。
+     *
+     * @param recovery 已构造的 RecoveryProtocol（持有 CheckpointManager）
+     * @param def      工作流定义（用于 DAG 分层 + Reducer）
+     * @param agentResolver agent 来源
+     * @param reducer  channel Reducer
+     * @param workflowId 工作流实例 id
+     * @return 最终 WorkflowContext
+     */
+    public WorkflowContext recoverAndExecute(RecoveryProtocol recovery,
+                                             WorkflowDefinition def,
+                                             java.util.function.Function<String, AgentFunction> agentResolver,
+                                             ChannelReducer reducer,
+                                             String workflowId) {
+        Objects.requireNonNull(recovery, "recovery");
+        Objects.requireNonNull(def, "def");
+        Objects.requireNonNull(agentResolver, "agentResolver");
+        Objects.requireNonNull(reducer, "reducer");
+        Objects.requireNonNull(workflowId, "workflowId");
+
+        ExecutionState state = recovery.recover(workflowId);
+        log.info("recoverAndExecute wf={}: nextSuperStep={}, 跳过节点={}, 重放输出={}",
+                workflowId, state.nextSuperStep(), state.completedNodeIds(), state.replayOutputs().size());
+
+        // Step 1: 用 barrier 快照重建 context
+        WorkflowContext context = new WorkflowContext(state.channelSnapshot());
+
+        // Step 2: 重放崩溃层已完成节点的输出（ADV-1 修复核心）
+        // 这些节点的 channelWrites 未进上一 barrier，必须按 Reducer 合并进 context，
+        // 否则下游节点读到陈旧/null channel 值。跳过这些节点不重跑（completedNodeIds）。
+        DAGraph dag = new DAGraph(def);
+        for (AgentOutput replay : state.replayOutputs()) {
+            // replayOutputs 与 completedNodeIds 同序同源，输出对应的 nodeId 见 NodeOutputStore；
+            // 此处按 channelWrites 重放，不依赖 nodeId（applyOutput 需 NodeDefinition 仅取默认 channel 名）
+            applyReplayOutput(context, replay, def, reducer);
+        }
+
+        // Step 3: 从 nextSuperStep 起跑剩余 super-step
+        List<SuperStep> allSteps = buildSuperSteps(layerer.computeSuperSteps(def));
+        List<SuperStep> remaining = allSteps.subList(state.nextSuperStep(), allSteps.size());
+
+        CheckpointManager cp = recovery.checkpointManager();
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        NodeExecutor nodeExecutor = new NodeExecutor(agentResolver, executor);
+        Instant workflowStart = Instant.now();
+        try {
+            cp.updateStatus(workflowId, WorkflowStatus.RUNNING);
+            for (SuperStep step : remaining) {
+                if (timeoutPolicy != null && timeoutPolicy.isWorkflowExceeded(workflowStart)) {
+                    throw new WorkflowExecutionException(step.index(),
+                            List.of(new TimeoutException("workflow total timeout exceeded")));
+                }
+                WorkflowContext snapshot = context.readOnlySnapshot();
+                // 崩溃层（remaining 的第一个 = nextSuperStep）剔除已完成节点——它们的输出已在
+                // replayOutputs 阶段重放进 context，这里不重跑（防 LLM 重复计费 + 避免覆盖已重放 channel）。
+                // 非崩溃层或无已完成节点时原样执行。
+                SuperStep stepToRun = (step.index() == state.nextSuperStep() && !state.completedNodeIds().isEmpty())
+                        ? new SuperStep(step.index(), step.nodeIds().stream()
+                                .filter(id -> !state.completedNodeIds().contains(id))
+                                .toList())
+                        : step;
+                List<NodeResult> results = runSuperStep(stepToRun, dag, snapshot, nodeExecutor, cp, workflowId,
+                        executor, Map.of(), workflowStart);
+                applyBarrier(step, results, context, dag, def, reducer, cp, workflowId);
+            }
+            cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
+            return context;
+        } catch (WorkflowExecutionException we) {
+            try {
+                cp.updateStatus(workflowId, WorkflowStatus.FAILED);
+            } catch (RuntimeException se) {
+                log.warn("recoverAndExecute abort 时 updateStatus(FAILED) 失败 wf={}: {}",
+                        workflowId, se.toString());
+            }
+            throw we;
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    /** 重放崩溃层已完成节点的输出进 context（走 Reducer，与 applyOutput 同语义）。 */
+    private void applyReplayOutput(WorkflowContext context, AgentOutput output,
+                                   WorkflowDefinition def, ChannelReducer reducer) {
+        if (output == null || output.channelWrites() == null || output.channelWrites().isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, Object> e : output.channelWrites().entrySet()) {
+            Reducer r = channelReducer(def, e.getKey());
+            Object current = context.getValue(e.getKey());
+            Object merged = reducer.merge(e.getKey(), current, e.getValue(), r);
+            context.put(e.getKey(), merged);
+        }
+    }
+
     private List<NodeResult> runSuperStep(SuperStep step, DAGraph dag, WorkflowContext snapshot,
                                           NodeExecutor nodeExecutor, CheckpointManager cp, String workflowId,
                                           ExecutorService executor, Map<String, Object> inputs,

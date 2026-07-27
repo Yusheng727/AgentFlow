@@ -100,6 +100,11 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
         workflowStatuses.put(workflowId, status);
     }
 
+    @Override
+    public Optional<WorkflowStatus> findStatus(String workflowId) {
+        return Optional.ofNullable(workflowStatuses.get(workflowId));
+    }
+
     // ──────────────────────── 辅助方法 ────────────────────────
 
     private static String nodeKey(String workflowId, int superStep, String nodeId) {

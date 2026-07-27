@@ -79,6 +79,75 @@ class RecoveryProtocolTest {
         // nodeY（未写入）和 nodeZ（未写入）不在跳过集合 → 引擎会重执行
     }
 
+    // ─────────────────── P0 修复验证（ADV-1 / ADV-2）───────────────────
+
+    @Test
+    @DisplayName("P0 ADV-1: 崩溃层 COMPLETED 节点的输出进 replayOutputs，供引擎重放进 channel")
+    void replayOutputsCollectedForCrashLayerCompleted() {
+        // super-step 0 barrier 完成（channel: a=1）
+        cm.saveBarrier("wf-1", 0, new WorkflowContext(Map.of("a", 1)));
+        // 崩溃层（step=1）nodeX 已 COMPLETED，其 channelWrites 写了 b=2（未进 barrier）
+        cm.saveNodeOutput("wf-1", 1, "nodeX", new AgentOutput(
+                "x content",
+                Map.of("b", 2), // channelWrites —— 关键：这个未进 barrier，靠 replayOutputs 恢复
+                Map.of(), Map.of()));
+
+        ExecutionState state = protocol.recover("wf-1");
+
+        assertThat(state.nextSuperStep()).isEqualTo(1);
+        assertThat(state.completedNodeIds()).containsExactly("nodeX");
+        // 🔑 P0 ADV-1 修复：nodeX 的 AgentOutput 在 replayOutputs 中，引擎据此重放 b=2 进 channel
+        assertThat(state.replayOutputs()).hasSize(1);
+        assertThat(state.replayOutputs().getFirst().channelWrites()).containsEntry("b", 2);
+    }
+
+    @Test
+    @DisplayName("P0 ADV-2: 工作流状态=FAILED（abort）→ 崩溃层整体重跑，忽略 stray COMPLETED")
+    void abortedWorkflowIgnoresStrayCompleted() {
+        // super-step 0 barrier 完成
+        cm.saveBarrier("wf-1", 0, new WorkflowContext(Map.of("a", 1)));
+        // 引擎 abort 显式标记 FAILED
+        cm.updateStatus("wf-1", WorkflowStatus.FAILED);
+        // 崩溃层（step=1）有 stray COMPLETED（timeout 后在飞 VT 写出，未经 barrier 合并）
+        cm.saveNodeOutput("wf-1", 1, "strayNode", AgentOutput.of("stray"));
+
+        ExecutionState state = protocol.recover("wf-1");
+
+        assertThat(state.nextSuperStep()).isEqualTo(1);
+        // 🔑 P0 ADV-2 修复：FAILED 状态下忽略 stray COMPLETED，崩溃层整体重跑
+        assertThat(state.completedNodeIds()).isEmpty();
+        assertThat(state.replayOutputs()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("P0 ADV-2: 工作流状态=RUNNING（正常崩溃非 abort）→ 崩溃层 COMPLETED 合法，跳过+重放")
+    void runningWorkflowTreatsCompletedAsLegitimate() {
+        cm.saveBarrier("wf-1", 0, new WorkflowContext(Map.of("a", 1)));
+        // 正常崩溃（进程挂了，未 abort 标记），状态仍 RUNNING
+        cm.updateStatus("wf-1", WorkflowStatus.RUNNING);
+        cm.saveNodeOutput("wf-1", 1, "nodeX", AgentOutput.of("x"));
+
+        ExecutionState state = protocol.recover("wf-1");
+
+        // 非 FAILED → 崩溃层 COMPLETED 是合法的崩溃前完成结果，跳过 + 重放
+        assertThat(state.completedNodeIds()).containsExactly("nodeX");
+        assertThat(state.replayOutputs()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("P0 ADV-2: 无工作流状态记录（NoopCheckPointManager 或未 initWorkflow）→ 不阻断，正常恢复")
+    void noStatusRecordDoesNotBlockRecovery() {
+        cm.saveBarrier("wf-1", 0, new WorkflowContext(Map.of("a", 1)));
+        // 未调 initWorkflow / updateStatus → findStatus 返回 empty
+        cm.saveNodeOutput("wf-1", 1, "nodeX", AgentOutput.of("x"));
+
+        ExecutionState state = protocol.recover("wf-1");
+
+        // 无状态记录视为非 abort，崩溃层 COMPLETED 合法
+        assertThat(state.completedNodeIds()).containsExactly("nodeX");
+        assertThat(state.replayOutputs()).hasSize(1);
+    }
+
     @Test
     @DisplayName("崩溃层无任何 COMPLETED 节点 → 全部重执行")
     void noCompletedNodesInCrashLayer() {

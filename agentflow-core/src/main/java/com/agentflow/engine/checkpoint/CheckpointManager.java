@@ -79,4 +79,15 @@ public interface CheckpointManager {
 
     /** 更新工作流执行状态。 */
     void updateStatus(String workflowId, WorkflowStatus status);
+
+    /**
+     * 查找工作流当前执行状态（U5 P0 修复新增）。
+     *
+     * <p>Recovery 据此鉴别 timeout abort 后的 stray COMPLETED 记录：若工作流已被引擎标记为
+     * FAILED（abort 路径显式调用 {@link #updateStatus}），Recovery 忽略崩溃层的 stray COMPLETED
+     * 节点，让该层整体重跑，避免读到未经 barrier 合并的孤立 channel 输出。
+     *
+     * @return 工作流状态，若不存在则返回 {@code Optional.empty()}
+     */
+    Optional<WorkflowStatus> findStatus(String workflowId);
 }

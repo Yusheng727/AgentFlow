@@ -58,7 +58,11 @@ CREATE TABLE workflow_checkpoints (
     workflow_id     TEXT        NOT NULL,
     super_step      INT         NOT NULL,
     channel_values  JSONB       NOT NULL,
-    completed_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+    completed_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    -- 幂等保证：同一 workflow + super_step 只能有一条 barrier 记录
+    -- （saveBarrier 重放/重试时 ON CONFLICT DO NOTHING，防重复行让 findLatestBarrier 返回陈旧快照）
+    CONSTRAINT uq_workflow_checkpoint UNIQUE (workflow_id, super_step)
 );
 
 COMMENT ON TABLE workflow_checkpoints IS 'Barrier 级 checkpoint：super-step 完成后 channel 快照（仅成功 super-step 写入）';

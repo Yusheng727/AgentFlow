@@ -123,6 +123,7 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                     INSERT INTO workflow_checkpoints
                         (workflow_id, super_step, channel_values)
                     VALUES (?, ?, ?::jsonb)
+                    ON CONFLICT (workflow_id, super_step) DO NOTHING
                     """,
                     workflowId, superStep, jsonChannels);
         } finally {
@@ -205,6 +206,17 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                 WHERE id = ?
                 """,
                 status.name(), workflowId);
+    }
+
+    @Override
+    public Optional<WorkflowStatus> findStatus(String workflowId) {
+        List<WorkflowStatus> results = jdbc.query(
+                """
+                SELECT status FROM workflow_executions WHERE id = ?
+                """,
+                (rs, rowNum) -> WorkflowStatus.valueOf(rs.getString("status")),
+                workflowId);
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.getFirst());
     }
 
     // ──────────────────────── 辅助方法 ────────────────────────

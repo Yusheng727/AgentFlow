@@ -507,5 +507,10 @@ class BspEngineTest {
         public void updateStatus(String workflowId, com.agentflow.engine.checkpoint.WorkflowStatus status) {
             // noop
         }
+
+        @Override
+        public java.util.Optional<com.agentflow.engine.checkpoint.WorkflowStatus> findStatus(String workflowId) {
+            return java.util.Optional.empty();
+        }
     }
 }

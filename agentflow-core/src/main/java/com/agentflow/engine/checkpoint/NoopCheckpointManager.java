@@ -45,4 +45,9 @@ public final class NoopCheckpointManager implements CheckpointManager {
     public void updateStatus(String workflowId, WorkflowStatus status) {
         // noop
     }
+
+    @Override
+    public Optional<WorkflowStatus> findStatus(String workflowId) {
+        return Optional.empty();
+    }
 }
