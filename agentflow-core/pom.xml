@@ -28,6 +28,13 @@
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
+        <!-- JSR-310 时间类型（Instant/LocalDateTime 等）序列化支持：
+             BarrierCheckpoint/NodeOutputStore 含 Instant completedAt 字段，
+             PostgresCheckpointManager.defaultJsonMapper 注册 JavaTimeModule 依赖此包 -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.datatype</groupId>
+            <artifactId>jackson-datatype-jsr310</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-jdbc</artifactId>

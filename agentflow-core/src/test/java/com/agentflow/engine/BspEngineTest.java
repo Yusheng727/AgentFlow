@@ -486,5 +486,26 @@ class BspEngineTest {
         public void saveBarrier(String workflowId, int superStep, WorkflowContext context) {
             barriers.add(superStep);
         }
+
+        // U5 接口扩展的查询/生命周期方法——本 mock 仅关注写入侧，其余返回空。
+        @Override
+        public java.util.Optional<com.agentflow.engine.checkpoint.BarrierCheckpoint> findLatestBarrier(String workflowId) {
+            return java.util.Optional.empty();
+        }
+
+        @Override
+        public java.util.List<com.agentflow.engine.checkpoint.NodeOutputStore> findCompletedNodes(String workflowId, int superStep) {
+            return java.util.List.of();
+        }
+
+        @Override
+        public void initWorkflow(String workflowId, String workflowName, String version) {
+            // noop
+        }
+
+        @Override
+        public void updateStatus(String workflowId, com.agentflow.engine.checkpoint.WorkflowStatus status) {
+            // noop
+        }
     }
 }

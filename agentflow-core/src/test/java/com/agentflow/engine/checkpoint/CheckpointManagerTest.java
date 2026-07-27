@@ -208,7 +208,9 @@ class CheckpointManagerTest {
                     .output().channelWrites().get("metrics");
 
             assertThat(metrics).containsEntry("p95", 1.5);
-            assertThat(metrics).containsEntry("count", 100);
+            // 造数据用 100L（Long）；InMemoryCheckpointManager 不做 JSON 序列化，存取后类型不变，
+            // 故断言须用 100L 匹配（Long.equals(Integer) 恒为 false）。
+            assertThat(metrics).containsEntry("count", 100L);
             assertThat(metrics).containsEntry("ratio", 0.75);
         }
     }
