@@ -28,7 +28,7 @@ class RetryPolicyTest {
 
     private static AgentInput input(String nodeId) {
         return new AgentInput(nodeId, "a", null, new com.agentflow.engine.WorkflowContext(),
-                java.util.Map.of(), java.util.List.of(), java.util.Map.of());
+                java.util.Map.of(), java.util.List.of(), java.util.Map.of(), null);
     }
 
     /** 造一个在前 failTimes 次抛 throwable、之后返 success 的 agent。 */

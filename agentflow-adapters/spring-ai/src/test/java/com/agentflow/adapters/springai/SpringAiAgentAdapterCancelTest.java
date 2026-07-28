@@ -59,7 +59,7 @@ class SpringAiAgentAdapterCancelTest {
 
     private static AgentInput input(String nodeId) {
         return new AgentInput(nodeId, "test-agent", "hi", new WorkflowContext(),
-                Map.of(), List.of(), Map.of());
+                Map.of(), List.of(), Map.of(), null);
     }
 
     private static SpringAiAgentAdapter adapter(ChatModel model) {

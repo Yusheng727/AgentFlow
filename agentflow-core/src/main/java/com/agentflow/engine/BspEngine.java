@@ -304,7 +304,7 @@ public final class BspEngine {
         for (String id : step.nodeIds()) {
             NodeDefinition node = dag.node(id);
             AgentInput input = new AgentInput(id, node.agent(), node.promptTemplate(), snapshot, inputs,
-                    node.tools(), node.outputSchema());
+                    node.tools(), node.outputSchema(), node.mockResponse());
             // 并行执行 + 节点级 checkpoint（完成当下即持久化，R3）
             futures.add(CompletableFuture.supplyAsync(() -> {
                 try {

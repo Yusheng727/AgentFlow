@@ -155,3 +155,63 @@
 - 顺带删掉 dead code `skipCompleted` 方法 + 未用的 `Set` import。
 
 **Result**: 测试通过。**教训**：「跳过」要在执行前，不是执行后过滤——后者只能改结果不能阻止副作用（LLM 调用、计数器、IO 都已发生）。
+
+---
+
+## U9 — Mock LLM 模式
+
+### Bug-8: `AgentInput` 加 `mockResponse` 字段破坏所有调用方（接口扩展）
+
+**Situation**: `MockAgentFunction` 需要读到 YAML 节点的 `mock_response`，但 `AgentFunction.execute(AgentInput)` 只收 AgentInput，而 AgentInput 当时没有 mockResponse 字段。`NodeDefinition`（U1 已预留 `mockResponse`）的数据透传不到 agent。
+**Task**: 让 mock 响应能从 YAML 流到 MockAgentFunction。
+**Action**:
+- 设计决策：给 `AgentInput` 加第 8 个字段 `mockResponse`（透传自 `NodeDefinition.mockResponse`，同 U3 加 tools/outputSchema 的模式）。
+- 这是 **record 字段扩展**，binary-incompatible——所有 `new AgentInput(...)` 调用点都要补参数。
+- 影响面：`BspEngine`（生产）+ 5 个测试文件（SpringAiAgentAdapterTest 5 处、CancelTest、RetryPolicyTest、MockAgentFunctionTest）。逐一补 `, null`（非 mock 模式传 null）。
+- `AgentInput.of(...)` 5 参工厂保留兼容（内部传 null）。
+
+**Result**: 编译通过，verify 绿。**教训**：record 加字段是破坏性变更，要全局 grep 所有构造点。U3 加 tools/outputSchema 时就该预见还会有 mockResponse——透传字段的设计模式一旦确立，新字段按同模式加。
+
+---
+
+### Bug-9: `Matcher.appendReplacement` 把 `${nonexistent}` 当 group 引用
+
+**Situation**: MockAgentFunction 占位符替换，未找到的占位符要原样保留。
+**Task**: 让 `${nonexistent}` 调试时可见。
+**Action**:
+- 第一版：`m.appendReplacement(out, value != null ? quoteReplacement(...) : m.group())`——未找到时传 `m.group()`（即 `${nonexistent}`）。
+- 测试失败：`IllegalArgumentException: No group with name {nonexistent}`。
+- 根因：`appendReplacement` 把替换串里的 `$` 当 group 引用，`${nonexistent}` 的 `$` 触发解析 `{nonexistent}` 当 named group。
+- 修复：未找到时也用 `Matcher.quoteReplacement(m.group())` 转义 `$` 和 `\`，再 appendReplacement。
+
+**Result**: 测试通过。**教训**：`Matcher.appendReplacement` 的替换串里 `$`/`\` 是元字符，任何字面量拼接都要 `quoteReplacement`——包括「原样保留」的场景。
+
+---
+
+### Bug-10: `resolvePath` 末尾点 `${data.}` 解析成 data 通道（ce-code-review 发现）
+
+**Situation**: code-review max-effort 审查发现的低置信度但真实的不一致行为。
+**Task**: 让畸形路径统一保留占位符。
+**Action**:
+- 根因：`path.split("\\.")` 按 Java 语义丢弃末尾空段——`${data.}` 的 group(1)=`data.`，split 成 `["data"]`（末尾空丢弃），于是当成 `${data}` 解析。若 data 持有 Map，输出 `Map.toString()`（`{riskScore=HIGH}`）而非保留占位符。
+- 对比：其他畸形路径（`${a..b}`、前导点 `${.a}`）都正确保留（split 后某段为空 → `map.get("")` → null → 保留）。只有末尾点产生错误值。
+- 修复：`resolvePath` 开头加 `if (path.endsWith(".")) return null;`——末尾点直接返回 null 保留占位符。
+- 加测试 `trailingDotPlaceholderPreserved` 覆盖。
+
+**Result**: 测试通过。**面试讲法**：「code review 用 max-effort 多 angle 审查，一个 finder 逐行扫出 `String.split` 丢弃末尾空段导致畸形占位符解析不一致——这种边界 case 单测很难想到，靠 review 的 recall 模式捕获。」
+
+---
+
+### 设计决策：跳过 MockAdvisor（避免过度设计）
+
+plan U9 列了 `MockAdvisor` 文件，但实现时判断 v1 非必要——mock 模式不走 ChatClient/advisor 链，MockAgentFunction 直接返回 AgentOutput，advisor 无参与点。强行加 MockAdvisor 是无消费者的过度抽象（maintainability 反模式）。记此决策在 CLAUDE.md + handoff，U13 若需要 trace 记录再补。
+
+**面试讲法**：「plan 里列了 MockAdvisor，我实现时判断它是过度设计——mock 模式根本不走 advisor 链，加一个空 advisor 是无消费者的抽象。我跳过它并在文档记决策。工程深度不是照单全收 plan，是判断哪些是必要复杂度。」
+
+---
+
+### 设计决策：U9 AutoConfiguration 只注册 mockAgentResolver，不注册 BspEngine
+
+ce-code-review cross-file finder 指出：原实现注册了 `mockBspEngine` Bean，但 BspEngine 无参构造不持有 resolver（resolver 按 `execute()` 调用传入），孤立注册的 Bean 无人 wire，会误导调用方「Bean 存在即可用」。修复：删 `mockBspEngine` Bean，只保留 `mockAgentResolver`（有效可注入）。完整 Bean 装配（BspEngine + Parser + Registry + Controller）留给 U13 Starter 封装。CLAUDE.md 已记此范围限制。
+
+**面试讲法**：「review 发现我注册了一个孤立的 BspEngine Bean——它无参构造、不持有 resolver、没人 wire，是无效注册。我删掉它，避免误导调用方。这体现 review 的价值：不光找 bug，也找『有 Bean 但不能用』的设计误导。」

@@ -39,14 +39,25 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 > **U3 详细接手清单**：[`docs/handoff/u3-spring-ai-adapter.md`](docs/handoff/u3-spring-ai-adapter.md) — 已完成，留作 U3 实现决策的历史记录。
 
 **后续顺序**（按 `05-implementation-units.md` 的 Unit Priority 矩阵 P0 先行）：
-U3（Agent 适配器）✅ → U4（容错）✅ → U5（Checkpoint+Recovery）🔄 → U14（API 鉴权）🔄 → U10（主 Demo）→ U13（Starter）。P1/P2（U6/U7/U8/U9/U11/U12）跟进。
+U3（Agent 适配器）✅ → U4（容错）✅ → U5（Checkpoint+Recovery）✅ → U14（API 鉴权）✅ → **U9（Mock LLM）✅ 实现完成，待 review+commit** → U10（主 Demo）→ U13（Starter）。P1/P2（U6/U7/U8/U11/U12）跟进。
 
-> **当前状态**：
-> - `feat/u5-checkpoint`：代码完成，12 文件 + 20 tests，待验证合并
-> - `feat/u14-api-security`：代码完成，16 文件 + 30 tests，待验证
-> - U5 和 U14 的 CheckpointManager 接口有冲突（U14 改了方法签名），合并时需手动 resolve
+> **当前状态（2026-07-28）**：
+> - U5 + U14 已合 main（fast-forward）；U9 在 `feat/u9-mock-llm` 分支，实现+测试完成，`mvn verify` 5 模块全绿（150 tests pass，JaCoCo 80% 达标），待 ce-code-review + commit
+> - main 本地领先 origin 4 commit（U5×3 + U14×1），**待 push**（外向操作需用户确认；远程旧 feat/u5、feat/u14 分支 rebase 重写了历史，push 后需 force-push 或删旧远程分支）
+> - 工具链：Maven 3.9.16 已装 `C:\Users\YushengWang\apache-maven-3.9.16`，已加进 User PATH（新终端有 mvn）
+>
+> **U9 落地情况**：
+> - `MockAgentFunction`（agentflow-adapters/spring-ai/mock）：从 `AgentInput.mockResponse()` 读预设响应，支持 `${channel}` 占位符替换（含嵌套点路径 `${a.b}`），缺失抛 `MissingMockResponseException`（Fatal）。无状态单例，任意 agent name 复用
+> - `MissingMockResponseException`（core/agent）：FatalException 子类
+> - `AgentInput` 加 `mockResponse` 字段（透传自 NodeDefinition.mockResponse，U1 已预留）——**接口扩展**，所有构造点已同步改（BspEngine + adapter/api 测试）
+> - `AgentFlowAutoConfiguration` + `AgentFlowProperties` + `EnableAgentFlow`（agentflow-starter）：`agentflow.mock.enabled=true` 时注册 `mockAgentResolver` Bean（任意 name → MockAgentFunction 单例）+ `mockBspEngine`。AutoConfiguration.imports 已注册
+> - **跳过 MockAdvisor**（plan 提及但 v1 非必要）：mock 模式不走 ChatClient/advisor 链，MockAgentFunction 直接返回。记为设计决策（避免过度设计）
+> - **完整 BSP 端到端跑通**（parser+registry+engine 全套）留给 U13 Starter 完整封装；U9 MockModeTest 聚焦 AutoConfiguration Bean 切换契约（3 tests）
+> - 测试：MockAgentFunctionTest 8 个（含占位符边界）+ MockModeTest 3 个
+> - 缺 `mock_response` → 抛 `MissingMockResponseException`
+> - 验收：本地跑通，不发任何 LLM API 调用
 
-> **当前状态**：U5 代码已完成（`feat/u5-checkpoint` 分支），12 文件 + 20 tests，待有 Maven 环境跑 `mvn verify` 验证后合并 main。
+> **历史状态（U5/U14 合并前，留档备查）**：U5 和 U14 的 CheckpointManager 接口曾有不兼容设计冲突（U14 弱类型 `Optional<?>` vs U5 强类型），已通过对齐修复——以 U5 强类型为基底融入 U14 的 createdBy/findCreatedBy。详见 `docs/developer-notes/02-bugs-and-fixes.md` Bug-6。
 
 **U2 留给后续单元的 seam（实现时已决策，非 plan 偏离，记此备查）**：
 - `AgentFunction`/`AgentInput`/`AgentOutput`/异常类型由 U2 引入最小合约 → U3 已落地。
