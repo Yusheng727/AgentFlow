@@ -34,15 +34,16 @@ class DiagnosisServiceTest {
     @Test
     @DisplayName("识别 Token 异常消耗：某节点 token > 均值 ×3")
     void detectsTokenAnomaly() {
-        NodeTrace normal1 = buildNode("A", "a", NodeTrace.Status.SUCCESS, "ok", 50, 50);
-        NodeTrace normal2 = buildNode("B", "b", NodeTrace.Status.SUCCESS, "ok", 60, 40);
-        NodeTrace abnormal = buildNode("C", "c", NodeTrace.Status.SUCCESS, "ok", 500, 500);
-        ExecutionTrace.Snapshot trace = snapshot(List.of(normal1, normal2, abnormal));
+        NodeTrace normal1 = buildNode("A", "a", NodeTrace.Status.SUCCESS, "ok", 10, 10);
+        NodeTrace normal2 = buildNode("B", "b", NodeTrace.Status.SUCCESS, "ok", 10, 10);
+        NodeTrace normal3 = buildNode("C", "c", NodeTrace.Status.SUCCESS, "ok", 10, 10);
+        NodeTrace abnormal = buildNode("D", "d", NodeTrace.Status.SUCCESS, "ok", 500, 500);
+        ExecutionTrace.Snapshot trace = snapshot(List.of(normal1, normal2, normal3, abnormal));
 
         var report = service.diagnose(trace);
 
         assertThat(report.findings()).anyMatch(f ->
-                f.problemType().equals("Token 异常消耗") && f.nodeId().equals("C"));
+                f.problemType().equals("Token 异常消耗") && f.nodeId().equals("D"));
     }
 
     @Test
