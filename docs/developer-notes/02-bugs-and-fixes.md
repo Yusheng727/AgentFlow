@@ -258,3 +258,19 @@ U10 的 4 个 Agent 类在 mock 模式下不被调用（MockAgentFunction 接管
 U10 的 demo 用代码直接 `new WorkflowDSLParser()` + `new BspEngine()` + `new InMemoryCheckpointManager()` 跑通工作流，不依赖 U13 的 `@EnableAgentFlow` 一键启动。v4.3 解耦约定：U13 做 Starter 封装，U10 证明引擎能独立跑通的「原子性」——引擎核心 + mock 模式 + YAML 定义即可运行。U13 再做 Starter 封装和 REST 端点整合。
 
 **面试讲法**：「我让 demo 自包含——不依赖任何还没做的自动配置。你只需要一个 BspEngine、一个 YAML 解析器、一份 mock 数据，就能看到 3 并行专家分析到汇总评级的完整链路。这体现了引擎的『原子可用』——核心概念自洽，封装是锦上添花。」
+
+---
+
+## U6 — 调试体验
+
+### 设计决策：DryRunMockAgentFunction 放 core，不引用 U9 MockAgentFunction
+
+U9 的 `MockAgentFunction` 在 `agentflow-adapters/spring-ai` 模块，而 DryRunEngine 在 `agentflow-core` 模块——如果 core 引用 adapter，会产生反向依赖。修复：core 内置一个更轻量的 `DryRunMockAgentFunction`（package-private）：有 `mock_response` 用预设、无 `mock_response` 自动生成 schema 描述。消除 core→adapter 依赖，保持模块依赖方向单向。
+
+**面试讲法**：「dry-run 引擎在核心模块，不能依赖适配器模块的 MockAgentFunction——那会造成反向依赖。我写了一个更轻量的内置版：有 mock 数据用 mock，没 mock 数据自动生成 input/output schema 描述。这样 dry-run 不需要任何外部依赖就能跑通。」
+
+### 设计决策：DiagnosisService 分析 ExecutionTrace.Snapshot，5 类问题
+
+U3 的 `ExecutionTrace` 记录了每个节点的 token/耗时/status/error，但只有数据没有分析。U6 的 `DiagnosisService` 读 `Snapshot`（不可变快照）做模式识别：连续超时（FAILED + error 含 timeout）、Token 异常消耗（> 均值 ×3 + >100 token 阈值）、SpEL 解析失败（error 含 SpelEvaluation）、Channel 缺失（error 含 channel/null）、节点重复执行（同一 nodeId SUCCESS > 1 次）。每种问题输出 description + suggestion（修复方向）。
+
+**面试讲法**：「执行轨迹只是数据，诊断服务做的是模式识别——比如某个节点的 token 消耗是其他节点的 3 倍以上，它会告诉你'这个 Agent 的 prompt 可能太长或模型参数需要调'。它不是替代人工排查，而是把常见问题自动分类、给排查方向。」

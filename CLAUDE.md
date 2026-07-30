@@ -39,7 +39,7 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 > **U3 详细接手清单**：[`docs/handoff/u3-spring-ai-adapter.md`](docs/handoff/u3-spring-ai-adapter.md) — 已完成，留作 U3 实现决策的历史记录。
 
 **后续顺序**（按 `05-implementation-units.md` 的 Unit Priority 矩阵 P0 先行）：
-U3 ✅ → U4 ✅ → U5 ✅ → U14 ✅ → U9 ✅ → U10 ✅ → **U13 ✅（P0 全部交付）**。P1/P2（U6/U7/U8/U11/U12）跟进。
+U3 ✅ → U4 ✅ → U5 ✅ → U14 ✅ → U9 ✅ → U10 ✅ → U13 ✅（P0 全部交付）。P1/P2：**U6（调试体验）✅ 实现完成** → U7 → U8 → U11 → U12。
 
 > **当前状态（2026-07-30）**：
 > - **P0 全部交付**：U1-U5 + U14 + U9 + U10 + U13 已合 main

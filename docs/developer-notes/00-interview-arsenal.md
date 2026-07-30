@@ -155,6 +155,22 @@
 
 ---
 
+## U6 — 调试体验（Dry-run + Diagnosis）
+
+**可讲故事**：
+- `DryRunEngine` 复用 BSP 拓扑，内置 `DryRunMockAgentFunction`（core 本地，不依赖 adapter），不发 LLM → 返回每步预期 input/output schema
+- `DiagnosisService` 分析 ExecutionTrace 识别 5 类问题：（连续超时/Token 异常消耗/SpEL 解析失败/Channel 缺失/节点重复执行）+ 每类输出修复建议
+- `StructuredLogger` JSON 格式日志（workflowId/nodeId/durationMs/token/status）
+- 设计权衡：DryRunMockAgentFunction 放 core 而非复用 U9 MockAgentFunction——消除 core→adapter 反向依赖
+
+**深挖点**：
+- Dry-run 和 mock 模式区别？（Dry-run 不要求 mock_response，无则自动生成 schema；mock 需配 mock_response，返回具体内容。都不调 LLM）
+- Token 异常怎么识别？（遍历 SUCCESS 节点，标记 token > 均值 ×3 且 > 100 阈值——避免低 token 节点因均值低被误报）
+
+**反问准备**：暂无。
+
+---
+
 ## 跨单元：工程化能力（★面试加分项★）
 
 **可讲故事**：
