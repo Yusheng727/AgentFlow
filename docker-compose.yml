@@ -1,0 +1,77 @@
+# AgentFlow Docker Compose（统一入口，U13）
+#
+# Mock 模式：零基础设施，一键启动 → 跑通 Demo
+#   docker compose --profile mock up
+#
+# 生产模式：PG + Redis + API 端点
+#   docker compose --profile production up
+
+services:
+
+  # ── Mock 模式：Demo 应用 + 零外部依赖 ──
+  agentflow-mock:
+    build:
+      context: .
+      dockerfile: demo-supplier-risk/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=mock
+      - agentflow.mock.enabled=true
+    profiles:
+      - mock
+
+  # ── 生产模式：PG + Redis ──
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: agentflow
+      POSTGRES_USER: agentflow
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agentflow}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentflow"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    profiles:
+      - production
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    profiles:
+      - production
+
+  agentflow-api:
+    build:
+      context: .
+      dockerfile: demo-supplier-risk/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/agentflow
+      - SPRING_DATASOURCE_USERNAME=agentflow
+      - SPRING_DATASOURCE_PASSWORD=${POSTGRES_PASSWORD:-agentflow}
+      - SPRING_REDIS_HOST=redis
+      - SPRING_AI_OPENAI_API_KEY=${OPENAI_API_KEY}
+      - agentflow.mock.enabled=false
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - production
+
+volumes:
+  pg-data:
