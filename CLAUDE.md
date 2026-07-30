@@ -39,7 +39,18 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 > **U3 详细接手清单**：[`docs/handoff/u3-spring-ai-adapter.md`](docs/handoff/u3-spring-ai-adapter.md) — 已完成，留作 U3 实现决策的历史记录。
 
 **后续顺序**（按 `05-implementation-units.md` 的 Unit Priority 矩阵 P0 先行）：
-U3（Agent 适配器）✅ → U4（容错）✅ → U5（Checkpoint+Recovery）✅ → U14（API 鉴权）✅ → **U9（Mock LLM）✅ 实现完成，待 review+commit** → U10（主 Demo）→ U13（Starter）。P1/P2（U6/U7/U8/U11/U12）跟进。
+U3（Agent 适配器）✅ → U4（容错）✅ → U5（Checkpoint+Recovery）✅ → U14（API 鉴权）✅ → U9（Mock LLM）✅ → **U10（主 Demo）✅** → U13（Starter）← 进行中。P1/P2（U6/U7/U8/U11/U12）跟进。
+
+> **当前状态（2026-07-29）**：
+> - U5 + U14 + U9 + **U10** 已合 main；`mvn verify` 6 模块全绿（154 tests pass，JaCoCo 80% 达标）
+> - U10 落地情况：`demo-supplier-risk` 模块，supplier-risk.yml（3 并行→1 汇总，mock 模式零 LLM），4 Agent + Application + 测试 4 验收场景，docker-compose + Dockerfile
+> - main 本地领先 origin 6 commit（U5×3 + U14 + U9 + U10），**待 push**
+> - **下一步：U13 Starter 封装 + Docker 交付 + README 文档**（plan 05 U13 章节，P0）
+>   - 完善 `AgentFlowAutoConfiguration`（注册 BspEngine/WorkflowDSLParser/NodeRegistry/PostgresCheckpointManager 等核心 Bean——U9 只做了 mock 切换）
+>   - 根目录 `docker-compose.yml`（mock/production profiles）
+>   - `README.md`（架构图 + Quick Start + Tutorial + Production Guide + FAQ）
+>   - `docs/TROUBLESHOOTING.md`（Top10 FAQ）
+>   - `StarterIntegrationTest`（@EnableAgentFlow 自动注入 + mock profile 跑通 U10 Demo）
 
 > **当前状态（2026-07-28）**：
 > - U5 + U14 已合 main（fast-forward）；U9 在 `feat/u9-mock-llm` 分支，实现+测试完成，`mvn verify` 5 模块全绿（150 tests pass，JaCoCo 80% 达标），待 ce-code-review + commit
