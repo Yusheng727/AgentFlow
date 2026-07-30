@@ -124,3 +124,33 @@
 - **不要接口，直接 new PostgresCheckpointManager**：测试要 mock 时无法替换。
 
 **为什么不选**：SPI seam 是教科书级解耦，且 plan 明确 U2 seam → U5 实现的交付节奏。代价是接口要稳定（U5 扩展了 4 个方法 + U14 又改了签名，导致合并冲突——见 [CLAUDE.md 当前状态](../../CLAUDE.md)），但接口演进的可控性 > 一次性绑死。
+
+---
+
+## 为什么主 Demo 选 3 并行 → 1 汇总拓扑（供应商风险评估）？
+
+**决策**：U10 供应商风险评估用「3 专家 Agent 并行分析（财务/合规/声誉）→ Supervisor 汇总评级」的 fork-join 拓扑。
+
+**为什么**：
+- **覆盖引擎核心能力**：并行节点互不可见（BSP 只读快照）、barrier 同步（等最慢专家）、channel 合并（三路输出写入独立 channel，汇总 SpEL 引用）、Reducer 确定性合并。单拓扑跑通即验证 BSP 全链路。
+- **差异化的 Demo 场景**：供应商风险评估是经典的多视角决策——财务/合规/声誉三个维度天然并行、互相独立，汇总节点综合三路做评级。场景自洽，不需要编造用例。
+- **mock 数据真实感**：财务（资产负债率 35%）、合规（1 次环保违规）、声誉（5 年合作），数据有区分度，汇总能产出有意义的 LOW risk → 可留观建议。
+
+**替代方案**：
+- **链式串行**（U11）：4 步串行依赖链，适合展示上下文传递，但不验证并行能力。
+- **双层 fork-join**（U12）：更复杂拓扑（6 节点 4 super-step），能展示多层并行，但 Demo 调试成本高。
+
+**为什么不选**：fork-join 是最典型的并行场景——3 个专家同时看一个问题然后汇总，这个模式理解成本最低。串行和双层 fork-join 留给辅助 Demo（U11/U12），主 Demo 先验证核心并行能力。
+
+---
+
+## 为什么 Demo 编程式组装引擎，不依赖 @EnableAgentFlow？
+
+**决策**：U10 Demo 用 `new WorkflowDSLParser()` + `new BspEngine()` + `new InMemoryCheckpointManager()` 手动组装，不依赖 U13 的 `@EnableAgentFlow` 一键启动。
+
+**为什么**：
+- **证明引擎的「原子可用」**：不需要任何 Starter 封装，只需要 BspEngine + Parser + MockAgentFunction + YAML 即可跑通完整工作流。引擎核心自洽，Starter 是锦上添花。
+- **v4.3 解耦约定**：plan 明确「Demo 不阻塞 Starter 交付」——Starter/Docker/docs 对引擎核心交付，Demo 是验证不是构建依赖。U10 自包含、U13 封装的分离策略让两者可独立 verify。
+- **U13 尚未完成**：U10 在 U13 前做，没有 @EnableAgentFlow 可用。如果硬等 U13，U10 的验收场景（mock 跑通 <30s）无法验证。
+
+**为什么不选**：等 U13 再跑 Demo 会推迟引擎验证——U10 的 Recovery 测试、并行验证、channel 传递验证都是引擎核心能力的回归点，越早跑越早发现 bug。

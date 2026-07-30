@@ -121,6 +121,40 @@
 
 ---
 
+## U9 — Mock LLM 模式
+
+**可讲故事**：
+- `MockAgentFunction` 从 YAML `mock_response` 读预设响应，支持 `${channel}` 占位符替换，零 LLM 成本
+- ce-code-review 发现 `appendReplacement` 把 `${nonexistent}` 当 group 引用 → `quoteReplacement` 修复
+- 跳过 MockAdvisor（plan 列的，但 mock 不走 advisor 链，判断为过度设计）
+
+**深挖点**：
+- record 加字段是 binary-incompatible 的，怎么保证不漏改调用方？（全局 grep 构造点，编译期 enforce）
+- `${channel}` 占位符怎么验证上下文传递？（MockAgentFunction 读 Input.context()，正则替换 → 与 SpEL 语义等价）
+
+**反问准备**：暂无。
+
+---
+
+## U10 — 主 Demo：供应商风险评估（★面试重点★）
+
+**可讲故事**：
+- 3 专家 Agent 并行（财务+合规+声誉）→ Supervisor 汇总，BSP fork-join 拓扑
+- mock 模式零 LLM：mock_response 预设数据 + 占位符替换 → 汇总产出 JSON riskLevel
+- 编程式组装引擎：`new BspEngine()` + `new Parser()` → 证明引擎「原子可用」
+- Channel 名 = nodeId 便捷约定：MockAgentFunction.of(content) 无 channelWrites，引擎写 channel=nodeId
+- 端到端测试 4 验收场景（完整流程 + channel 传递 + DAG 分层 + Recovery）
+
+**深挖点**：
+- 3 并行 Agent 怎么保证互不可见？（BSP 只读快照，同层节点各自 buffer，barrier 后 Reducer 合并）
+- 汇总怎么读三路输出？（三路写独立 channel，汇总 mock_response 的 `${channel}` 从 context 读值替换）
+- 为什么编程组装不用 @EnableAgentFlow？（v4.3 解耦：引擎原子可用，Starter 是封装）
+
+**反问准备**：
+- 面试官问「这个 Demo 和真实 AI Agent 区别」——答：Demo 验证引擎调度能力（并行/barrier/Reducer/Recovery），Agent 智能力由 LLM 提供，AgentFlow 负责调度——「引擎」和「Agent」的分工。
+
+---
+
 ## 跨单元：工程化能力（★面试加分项★）
 
 **可讲故事**：
