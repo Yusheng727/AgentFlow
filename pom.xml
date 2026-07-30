@@ -29,6 +29,7 @@
         <module>agentflow-adapters/spring-ai</module>
         <module>agentflow-api</module>
         <module>agentflow-starter</module>
+        <module>demo-supplier-risk</module>
     </modules>
 
     <dependencyManagement>
@@ -54,6 +55,11 @@
             <dependency>
                 <groupId>com.agentflow</groupId>
                 <artifactId>agentflow-adapters-spring-ai</artifactId>
+                <version>${agentflow.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.agentflow</groupId>
+                <artifactId>agentflow-starter</artifactId>
                 <version>${agentflow.version}</version>
             </dependency>
         </dependencies>

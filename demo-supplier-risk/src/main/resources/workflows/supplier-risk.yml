@@ -1,0 +1,64 @@
+# 供应商风险评估工作流（U10 主 Demo，R15）
+#
+# 拓扑：3 专家 Agent 并行分析（super-step 0）→ Supervisor 汇总评级（super-step 1）
+# BSP 分层：3 并行节点入度为 0 → super-step 0；汇总节点依赖三路 → super-step 1
+# MockAgentFunction 返回 AgentOutput.of(content)（无 channelWrites），引擎便捷约定
+# 按 channel=nodeId 写入 content，故 channel 名与 node id 保持一致。
+
+agentflow:
+  version: "1.0"
+
+channels:
+  financial-analysis:
+    reducer: overwrite
+  compliance-check:
+    reducer: overwrite
+  reputation:
+    reducer: overwrite
+  aggregate-rating:
+    reducer: overwrite
+
+nodes:
+  # ─── super-step 0：3 专家并行分析 ───
+  - id: financial-analysis
+    agent: finance-agent
+    prompt_template: "分析供应商 ${supplier} 的财务风险：资产负债率、现金流、盈利能力"
+    mock_response: |
+      财务风险：低
+      资产负债率：35%（健康）
+      现金流：稳定，连续 3 年为正
+      净利润率：12%
+
+  - id: compliance-check
+    agent: compliance-agent
+    prompt_template: "检查供应商 ${supplier} 的合规记录：资质、违规、认证"
+    mock_response: |
+      合规风险：中
+      营业执照：有效
+      行业资质：齐全
+      近 2 年有 1 次环保违规记录
+
+  - id: reputation
+    agent: reputation-agent
+    prompt_template: "评估供应商 ${supplier} 的行业声誉：口碑、合作历史、舆情"
+    mock_response: |
+      声誉风险：低
+      行业口碑：良好
+      合作历史：5 年稳定合作
+      近 1 年无重大负面舆情
+
+  # ─── super-step 1：Supervisor 汇总评级 ───
+  - id: aggregate-rating
+    agent: aggregate-agent
+    prompt_template: |
+      汇总三路评估，输出风险评级 JSON：
+      财务：${financial-analysis}
+      合规：${compliance-check}
+      声誉：${reputation}
+    mock_response: |
+      {"riskLevel":"LOW","confidence":0.85,"evidence":["财务健康","合规1次违规","声誉良好"],"recommendation":"可合作，建议持续监控环保合规"}
+
+edges:
+  - { from: financial-analysis, to: aggregate-rating }
+  - { from: compliance-check, to: aggregate-rating }
+  - { from: reputation, to: aggregate-rating }

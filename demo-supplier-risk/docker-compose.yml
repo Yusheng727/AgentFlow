@@ -1,0 +1,15 @@
+# 供应商风险评估 Demo Docker Compose（U10）
+# 启动命令：docker compose --profile mock -p supplier-risk up
+# mock 模式：零 LLM 成本，验证引擎拓扑 + SpEL 引用 + BSP 并行
+
+services:
+  demo:
+    build:
+      context: ..
+      dockerfile: demo-supplier-risk/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=mock
+    profiles:
+      - mock
