@@ -1,45 +1,46 @@
 /** @type {import('tailwindcss').Config} */
+// 色板对齐 prototype-final.html（A 风格：深色侧边栏 + 浅色内容区）
 export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
       colors: {
-        space: {
-          950: '#0A0F1E',
-          900: '#141B2E',
-          800: '#1E2A45',
-          700: '#2A3554',
-          600: '#3A4870',
-          500: '#5560A0',
+        page: '#F8FAFC',
+        surface: '#FFFFFF',
+        hover: '#F1F5F9',
+        line: '#E2E8F0',
+        accent: { DEFAULT: '#3B82F6', dim: '#2563EB', light: '#EFF6FF' },
+        success: { DEFAULT: '#16A34A', light: '#DCFCE7' },
+        warning: '#D97706',
+        danger: { DEFAULT: '#DC2626', light: '#FEE2E2' },
+        ink: '#0F172A',
+        muted: '#64748B',
+        dim: '#94A3B8',
+        sidebar: {
+          DEFAULT: '#0F172A',
+          hover: '#1E293B',
+          active: 'rgba(59,130,246,0.15)',
+          'active-border': 'rgba(59,130,246,0.3)',
         },
-        cyan: {
-          DEFAULT: '#00E5CC',
-          dim: '#00C4B0',
-        },
-        text: {
-          bright: '#F0F4F8',
-          muted: '#8892B0',
-          dim: '#5A6B8C',
-        },
-        success: '#22C55E',
-        warning: '#FFB224',
-        danger: '#EF4444',
       },
       fontFamily: {
-        display: ['"Space Grotesk"', 'sans-serif'],
-        body: ['"Inter"', 'sans-serif'],
+        sans: ['Inter', 'sans-serif'],
         mono: ['"JetBrains Mono"', 'monospace'],
       },
+      boxShadow: {
+        card: '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
+        'card-lg': '0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04)',
+      },
       animation: {
-        'pulse-slow': 'pulse 3s ease-in-out infinite',
-        'fade-in': 'fadeIn 0.3s ease-out',
-        'slide-up': 'slideUp 0.4s ease-out',
+        'fade-in': 'fadeIn 0.25s ease-out',
       },
       keyframes: {
-        fadeIn: { from: { opacity: '0' }, to: { opacity: '1' } },
-        slideUp: { from: { opacity: '0', transform: 'translateY(12px)' }, to: { opacity: '1', transform: 'translateY(0)' } },
-      }
-    }
+        fadeIn: {
+          from: { opacity: '0', transform: 'translateY(6px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+    },
   },
-  plugins: []
+  plugins: [],
 }

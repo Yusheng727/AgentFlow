@@ -4,10 +4,17 @@
 
 @layer base {
   body {
-    @apply bg-space-950 text-text-bright font-body antialiased;
+    @apply bg-page text-ink font-sans antialiased;
   }
-  ::-webkit-scrollbar { width: 6px; height: 6px; }
-  ::-webkit-scrollbar-track { background: transparent; }
-  ::-webkit-scrollbar-thumb { background: theme('colors.space.600'); border-radius: 3px; }
-  ::selection { background: theme('colors.cyan.DEFAULT / 20%'); }
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+  }
 }

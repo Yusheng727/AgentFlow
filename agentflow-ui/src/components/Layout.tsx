@@ -1,52 +1,85 @@
-import React from 'react';
-import { Play, GitBranch, Activity } from 'lucide-react';
+import type { ReactNode } from 'react'
+import {
+  AlertCircle,
+  FileText,
+  GitBranch,
+  LayoutDashboard,
+  Play,
+  type LucideIcon,
+} from 'lucide-react'
 
-interface LayoutProps {
-  children: React.ReactNode;
-  activeTab: string;
-  onTabChange: (tab: 'submit' | 'monitor' | 'diagnosis') => void;
+export type TabId = 'dashboard' | 'submit' | 'definitions' | 'trace' | 'diagnosis'
+
+interface NavItem {
+  id: TabId
+  label: string
+  icon: LucideIcon
 }
 
-const tabs = [
-  { id: 'submit' as const, label: '提交工作流', icon: Play },
-  { id: 'monitor' as const, label: '执行轨迹', icon: GitBranch },
-  { id: 'diagnosis' as const, label: '诊断报告', icon: Activity },
-];
+const navSections: { title: string; items: NavItem[] }[] = [
+  {
+    title: '操作',
+    items: [
+      { id: 'dashboard', label: '看板', icon: LayoutDashboard },
+      { id: 'submit', label: '提交工作流', icon: Play },
+      { id: 'definitions', label: '工作流定义', icon: FileText },
+    ],
+  },
+  {
+    title: '分析',
+    items: [
+      { id: 'trace', label: '执行轨迹', icon: GitBranch },
+      { id: 'diagnosis', label: '诊断报告', icon: AlertCircle },
+    ],
+  },
+]
 
-export function Layout({ children, activeTab, onTabChange }: LayoutProps) {
+interface LayoutProps {
+  activeTab: TabId
+  onTabChange: (tab: TabId) => void
+  children: ReactNode
+}
+
+/** A 风格布局：深色侧边栏（5 菜单）+ 浅色主内容区，仿 prototype-final.html。 */
+export function Layout({ activeTab, onTabChange, children }: LayoutProps) {
   return (
-    <div className="flex h-screen bg-space-950 overflow-hidden">
-      {/* 左侧导航 */}
-      <aside className="w-56 border-r border-space-800 flex flex-col flex-shrink-0">
-        <div className="px-6 py-5 border-b border-space-800">
-          <h1 className="font-display text-xl font-bold text-cyan tracking-tight">AgentFlow</h1>
-          <p className="text-xs text-text-muted mt-0.5">Multi-Agent 编排引擎</p>
+    <div className="flex h-screen overflow-hidden">
+      <aside className="flex w-[232px] flex-shrink-0 flex-col bg-sidebar">
+        <div className="border-b border-white/10 px-6 py-5">
+          <h1 className="text-lg font-bold tracking-tight text-accent">AgentFlow</h1>
+          <p className="mt-0.5 text-[11px] text-white/40">Multi-Agent 编排引擎</p>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-1">
-          {tabs.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => onTabChange(id)}
-              className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-                activeTab === id
-                  ? 'bg-cyan/10 text-cyan border border-cyan/20'
-                  : 'text-text-muted hover:text-text-bright hover:bg-space-800 border border-transparent'
-              }`}
-            >
-              <Icon size={16} strokeWidth={activeTab === id ? 2.5 : 2} />
-              {label}
-            </button>
+        <nav className="flex-1 p-3">
+          {navSections.map((section) => (
+            <div key={section.title}>
+              <div className="px-3 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-white/30">
+                {section.title}
+              </div>
+              {section.items.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  onClick={() => onTabChange(id)}
+                  className={`mb-0.5 flex w-full items-center gap-2.5 rounded-md border px-3 py-2 text-[13px] font-medium transition-all duration-150 ${
+                    activeTab === id
+                      ? 'border-sidebar-active-border bg-sidebar-active text-accent'
+                      : 'border-transparent text-white/60 hover:bg-sidebar-hover hover:text-white'
+                  }`}
+                >
+                  <Icon size={15} strokeWidth={2} />
+                  {label}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
-        <div className="px-6 py-4 border-t border-space-800 text-xs text-text-muted">
+        <div className="border-t border-white/10 px-5 py-4 text-[11px] leading-relaxed text-white/30">
           BSP 引擎 · Java 21 VT · PG Checkpoint
         </div>
       </aside>
 
-      {/* 主内容 */}
-      <main className="flex-1 overflow-y-auto">
-        <div className="max-w-6xl mx-auto px-8 py-8">{children}</div>
+      <main className="flex-1 overflow-y-auto bg-page">
+        <div className="mx-auto max-w-[1280px] px-8 py-7">{children}</div>
       </main>
     </div>
-  );
+  )
 }
