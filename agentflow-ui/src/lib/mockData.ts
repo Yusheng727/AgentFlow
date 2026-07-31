@@ -1,4 +1,10 @@
-import type { PipelineNode, WorkflowDefinitionInfo, WorkflowSummary } from '../types'
+import type {
+  DiagnosisReport,
+  ExecutionTraceSnapshot,
+  PipelineNode,
+  WorkflowDefinitionInfo,
+  WorkflowSummary,
+} from '../types'
 
 // ──────────────────────────── mock fallback 数据（KTD-1）────────────────────────────
 // 移植自 prototype-final.html 的演示 state：后端不可达时 UI 降级渲染这些数据，保证不白屏。
@@ -76,6 +82,59 @@ export const mockKpi = {
   avgDurationTrend: '↓ 15% vs 上周',
   tokenTotal: '0',
   tokenHint: 'mock 模式',
+}
+
+/**
+ * mock 执行轨迹（ExecutionTrace.Snapshot 形态）：由 mockPipelineNodes 推导。
+ * 节点顺序即展示顺序——末位 aggregate-rating 为汇总节点（PipelineView 分组约定）。
+ */
+export const mockTrace: ExecutionTraceSnapshot = {
+  workflowId: 'demo-supplier-risk-1',
+  startTime: '2026-07-31T10:00:00Z',
+  endTime: '2026-07-31T10:00:00.041Z',
+  status: 'COMPLETED',
+  totalTokens: 0,
+  nodes: mockPipelineNodes.map((n) => ({
+    nodeId: n.id,
+    agentName: n.agent,
+    status: n.status === 'success' ? ('SUCCESS' as const) : n.status === 'failed' ? ('FAILED' as const) : ('RUNNING' as const),
+    durationMs: n.time,
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+    outputSummary: n.output,
+    error: null,
+  })),
+}
+
+/**
+ * mock 诊断报告：对齐后端 DiagnosisService 的 5 类问题（连续超时 / Token 异常消耗 /
+ * SpEL 解析失败 / Channel 缺失 / 节点重复执行），取 3 类演示卡片渲染。
+ */
+export const mockDiagnosisReport: DiagnosisReport = {
+  workflowId: 'wf-5',
+  totalNodes: 6,
+  failedNodes: 1,
+  findings: [
+    {
+      problemType: '连续超时',
+      nodeId: 'risk-assessment',
+      description: '节点连续 3 次重试均超时（阈值 120s），super-step 2 被阻塞',
+      suggestion: '检查 Prompt 复杂度或调大 timeout 配置；确认 LLM 网络链路稳定',
+    },
+    {
+      problemType: 'Token 异常消耗',
+      nodeId: 'profit-forecast',
+      description: '单节点 Token 消耗 12,400，超过同层均值 3 倍',
+      suggestion: '精简 prompt_template，或对超长上下文做截断/摘要',
+    },
+    {
+      problemType: '节点重复执行',
+      nodeId: 'company-finance',
+      description: '同一节点在 super-step 0 被执行 2 次，存在重复计费风险',
+      suggestion: '检查 DAG 定义中是否有重复节点 id，或 Recovery 重放逻辑是否误判',
+    },
+  ],
 }
 
 /** 执行趋势（7 天）柱状图：高度百分比。 */

@@ -6,7 +6,7 @@ import type {
   SubmitResponse,
   WorkflowSummary,
 } from '../types'
-import { mockWorkflows } from './mockData'
+import { mockTrace, mockWorkflows } from './mockData'
 
 /**
  * fetch 封装（KTD-1：真实 API 优先 + mock fallback）。
@@ -97,6 +97,24 @@ export function getWorkflowStatus(workflowId: string): Promise<StatusResponse> {
 /** POST /api/workflows/{id}/retry — 重试 FAILED 工作流。 */
 export function retryWorkflow(workflowId: string): Promise<SubmitResponse> {
   return request<SubmitResponse>(`/workflows/${workflowId}/retry`, { method: 'POST' })
+}
+
+export interface WorkflowTraceResult {
+  trace: ExecutionTraceSnapshot
+  /** 数据来源：api=TraceController（U3 端点），mock=降级数据。 */
+  source: 'api' | 'mock'
+}
+
+/**
+ * GET /api/workflows/{id}/trace — 执行轨迹（U3 TraceController）。
+ * 端点未上线或后端不可达时自动降级 mockTrace，轨迹页不白屏。
+ */
+export async function getWorkflowTrace(workflowId: string): Promise<WorkflowTraceResult> {
+  const { data, source } = await withMockFallback(
+    () => request<ExecutionTraceSnapshot>(`/workflows/${workflowId}/trace`),
+    () => ({ ...mockTrace, workflowId }),
+  )
+  return { trace: data, source }
 }
 
 /** POST /api/diagnosis — 对 ExecutionTrace.Snapshot 做 5 类问题诊断。 */

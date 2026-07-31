@@ -18,3 +18,19 @@
     border-radius: 3px;
   }
 }
+
+/* YamlEditor 手写高亮（对齐 prototype-final.html 的 editor-content 着色） */
+@layer components {
+  .yh-comment {
+    @apply text-dim;
+  }
+  .yh-key {
+    @apply text-accent font-medium;
+  }
+  .yh-string {
+    @apply text-warning;
+  }
+  .yh-placeholder {
+    @apply text-success;
+  }
+}

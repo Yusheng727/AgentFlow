@@ -10,6 +10,8 @@ export default function App() {
   const [tab, setTab] = useState<TabId>('dashboard')
   // 全局选中的工作流：看板卡片「查看轨迹 / 诊断」跳入对应 Tab 时带入
   const [workflowId, setWorkflowId] = useState<string | null>(null)
+  // 定义 Tab 选中后跳转提交页时预填的名称（SubmitForm 挂载时消费并清空）
+  const [prefillName, setPrefillName] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const toastTimer = useRef<number | undefined>(undefined)
 
@@ -24,12 +26,26 @@ export default function App() {
     setTab(next)
   }
 
+  const useDefinition = (name: string) => {
+    setPrefillName(name)
+    setTab('submit')
+  }
+
   return (
     <>
       <Layout activeTab={tab} onTabChange={setTab}>
         {tab === 'dashboard' && <Dashboard onNavigate={navigate} showToast={showToast} />}
-        {tab === 'submit' && <SubmitForm />}
-        {tab === 'definitions' && <WorkflowDefinitions />}
+        {tab === 'submit' && (
+          <SubmitForm
+            navigate={navigate}
+            showToast={showToast}
+            prefillName={prefillName}
+            onPrefillConsumed={() => setPrefillName(null)}
+          />
+        )}
+        {tab === 'definitions' && (
+          <WorkflowDefinitions navigate={navigate} showToast={showToast} onUseDefinition={useDefinition} />
+        )}
         {tab === 'trace' && <PipelineView workflowId={workflowId} />}
         {tab === 'diagnosis' && <DiagnosisPanel workflowId={workflowId} />}
       </Layout>
