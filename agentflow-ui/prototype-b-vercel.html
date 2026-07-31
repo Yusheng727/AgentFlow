@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentFlow — 版本 B：Vercel 极简风</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#FFF;--surface:#FAFAFA;--border:#EAEAEA;--accent:#000;--accent-hover:#333;--success:#0070F3;--warning:#F5A623;--danger:#EE0000;--text:#000;--text-muted:#666;--text-dim:#999;--radius:6px;--shadow:0 1px 2px rgba(0,0,0,0.05)}
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{background:var(--bg);color:var(--text);font-family:'Inter',sans-serif;-webkit-font-smoothing:antialiased}
+    .mono{font-family:'JetBrains Mono',monospace}
+    .topbar{display:flex;align-items:center;justify-content:space-between;padding:16px 32px;border-bottom:1px solid var(--border)}
+    .topbar-logo{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
+    .topbar-logo svg{color:var(--accent)}
+    .topbar-nav{display:flex;gap:4px}
+    .topbar-nav button{padding:6px 16px;border-radius:var(--radius);font-size:13px;font-weight:500;color:var(--text-muted);background:transparent;border:none;cursor:pointer;transition:all 0.15s}
+    .topbar-nav button.active{background:var(--text);color:#fff}
+    .topbar-nav button:hover:not(.active){color:var(--text);background:var(--surface)}
+    .container{max-width:960px;margin:0 auto;padding:32px}
+    .page-title{font-size:24px;font-weight:700;letter-spacing:-0.02em;margin-bottom:4px}
+    .page-sub{font-size:14px;color:var(--text-muted);margin-bottom:32px}
+    .tabs{display:none}
+    .tabs.active{display:block;animation:fadeIn 0.2s ease-out}
+    @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+    .btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border-radius:var(--radius);font-size:13px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--surface);color:var(--text);transition:all 0.15s}
+    .btn:hover{border-color:var(--text)}
+    .btn-primary{background:var(--text);color:#fff;border-color:var(--text)}
+    .btn-primary:hover{background:var(--accent-hover)}
+    .btn-sm{padding:4px 10px;font-size:12px}
+    .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow)}
+    .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:32px}
+    .kpi-item{text-align:center;padding:16px}
+    .kpi-num{font-size:32px;font-weight:700;letter-spacing:-0.02em}
+    .kpi-label{font-size:12px;color:var(--text-muted);margin-top:4px}
+    .kpi-delta{font-size:11px;margin-top:2px}
+    .kpi-delta.up{color:var(--success)}
+    .wf-list{display:flex;flex-direction:column;gap:8px}
+    .wf-item{display:flex;align-items:center;justify-content:space-between;padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);cursor:pointer;transition:all 0.15s}
+    .wf-item:hover{border-color:var(--text)}
+    .wf-item.expanded{border-color:var(--text);background:#fff}
+    .wf-left{display:flex;align-items:center;gap:12px}
+    .wf-status{width:8px;height:8px;border-radius:50%}
+    .wf-status.success{background:var(--success)}
+    .wf-status.running{background:var(--warning)}
+    .wf-status.failed{background:var(--danger)}
+    .wf-name{font-weight:600;font-size:14px}
+    .wf-meta{font-size:12px;color:var(--text-muted);font-family:'JetBrains Mono',monospace}
+    .wf-detail{margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:13px;color:var(--text-muted);line-height:1.6;display:none}
+    .wf-item.expanded .wf-detail{display:block}
+    .wf-actions{display:flex;gap:8px;margin-top:10px}
+    .pipeline{display:flex;align-items:center;gap:0;overflow-x:auto;padding:24px 0}
+    .p-node{flex-shrink:0;text-align:center;padding:16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);min-width:180px;transition:all 0.2s;cursor:pointer}
+    .p-node:hover{border-color:var(--text)}
+    .p-node.success{border-top:2px solid var(--success)}
+    .p-node-name{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:600;margin-bottom:4px}
+    .p-node-agent{font-size:11px;color:var(--text-muted)}
+    .p-node-time{font-size:11px;color:var(--text-dim);margin-top:4px}
+    .p-node-output{margin-top:8px;padding:6px;background:#fff;border-radius:4px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .p-arrow{flex-shrink:0;padding:0 8px;color:var(--text-dim);font-size:18px}
+    .p-barrier{flex-shrink:0;display:flex;flex-direction:column;align-items:center;gap:2px;padding:0 4px;font-size:9px;color:var(--text-dim);text-transform:uppercase;letter-spacing:0.1em}
+    .p-barrier-line{width:1px;height:30px;background:var(--border)}
+    .editor{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+    .editor-header{display:flex;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border);font-size:12px;color:var(--text-muted);background:var(--surface)}
+    .editor-body{position:relative;background:#fff}
+    .editor-lines{position:absolute;left:0;top:0;bottom:0;width:36px;background:var(--surface);border-right:1px solid var(--border);padding:10px 6px;text-align:right}
+    .editor-lines span{display:block;font-size:11px;color:var(--text-dim);line-height:20px;font-family:'JetBrains Mono',monospace}
+    .editor-content{padding:10px 14px 10px 48px;font-family:'JetBrains Mono',monospace;font-size:13px;line-height:20px;min-height:350px;white-space:pre-wrap;outline:none}
+    .editor-content .comment{color:var(--text-dim)}
+    .editor-content .key{color:var(--success);font-weight:500}
+    .editor-content .string{color:var(--warning)}
+    .editor-content .placeholder{color:var(--accent)}
+    .form-row{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+    .form-group label{display:block;font-size:12px;font-weight:500;color:var(--text-muted);margin-bottom:6px}
+    .form-group input,.form-group textarea{width:100%;background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:8px 12px;font-size:13px;font-family:'JetBrains Mono',monospace;outline:none;transition:border-color 0.15s}
+    .form-group input:focus,.form-group textarea:focus{border-color:var(--text)}
+    .form-group textarea{resize:vertical;min-height:80px}
+    .diag-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
+    .diag-item{text-align:center;padding:16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius)}
+    .diag-num{font-size:24px;font-weight:700}
+    .diag-num.ok{color:var(--success)}
+    .diag-num.warn{color:var(--warning)}
+    .diag-label{font-size:12px;color:var(--text-muted);margin-top:4px}
+    .finding{padding:14px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;border-left:3px solid var(--warning)}
+    .finding-type{font-size:13px;font-weight:600;color:var(--warning);margin-bottom:4px}
+    .finding-desc{font-size:13px;color:var(--text);line-height:1.5}
+    .finding-fix{font-size:12px;color:var(--text-muted);margin-top:4px;font-style:italic}
+    .toast{position:fixed;bottom:20px;right:20px;background:var(--text);color:#fff;padding:10px 16px;border-radius:var(--radius);font-size:13px;font-weight:500;opacity:0;transform:translateY(8px);transition:all 0.25s;z-index:100}
+    .toast.show{opacity:1;transform:translateY(0)}
+    .spinner{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,0.3);border-top-color:#fff;border-radius:50%;animation:spin 0.6s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="topbar-logo">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+      AgentFlow
+    </div>
+    <div class="topbar-nav">
+      <button class="active" onclick="switchTab(this,'dashboard')">看板</button>
+      <button onclick="switchTab(this,'submit')">提交</button>
+      <button onclick="switchTab(this,'pipeline')">轨迹</button>
+      <button onclick="switchTab(this,'diagnosis')">诊断</button>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- 看板 -->
+    <div class="tabs active" id="tab-dashboard">
+      <h2 class="page-title">工作流看板</h2>
+      <p class="page-sub">BSP 引擎执行概览</p>
+      <div class="kpi-grid">
+        <div class="kpi-item"><div class="kpi-num" id="kpi-total">12</div><div class="kpi-label">今日执行</div><div class="kpi-delta up">↑ 3</div></div>
+        <div class="kpi-item"><div class="kpi-num" id="kpi-rate">91.7%</div><div class="kpi-label">成功率</div><div class="kpi-delta">11/12</div></div>
+        <div class="kpi-item"><div class="kpi-num">42ms</div><div class="kpi-label">平均耗时</div><div class="kpi-delta up">↓ 15%</div></div>
+        <div class="kpi-item"><div class="kpi-num">0</div><div class="kpi-label">Token</div><div class="kpi-delta">mock</div></div>
+      </div>
+      <div class="wf-list" id="wf-list"></div>
+    </div>
+
+    <!-- 提交 -->
+    <div class="tabs" id="tab-submit">
+      <h2 class="page-title">提交工作流</h2>
+      <p class="page-sub">YAML DSL 声明 Multi-Agent 工作流</p>
+      <div class="editor">
+        <div class="editor-header"><span>supplier-risk.yml</span><span id="yaml-status" style="color:var(--success);font-size:11px;">✓ 校验通过</span></div>
+        <div class="editor-body">
+          <div class="editor-lines" id="editor-lines"></div>
+          <div class="editor-content" id="yaml-editor" contenteditable="true" spellcheck="false"></div>
+        </div>
+      </div>
+      <div style="margin-top:16px;">
+        <div class="form-row">
+          <div class="form-group"><label>工作流名称</label><input type="text" id="wf-name" value="supplier-risk"></div>
+          <div class="form-group"><label>启动入参（JSON）</label><input type="text" id="wf-inputs" value='{"supplier":"Acme Corp"}'></div>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn btn-primary" onclick="submitWorkflow()"><span id="submit-btn-text">提交工作流</span></button>
+          <button class="btn" onclick="dryRun()">Dry-run 预览</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 轨迹 -->
+    <div class="tabs" id="tab-pipeline">
+      <h2 class="page-title">执行轨迹</h2>
+      <p class="page-sub mono" id="pipeline-wf-id">demo-supplier-risk-1</p>
+      <div class="pipeline" id="pipeline-flow"></div>
+    </div>
+
+    <!-- 诊断 -->
+    <div class="tabs" id="tab-diagnosis">
+      <h2 class="page-title">诊断报告</h2>
+      <p class="page-sub mono" id="diag-wf-id">demo-supplier-risk-1</p>
+      <div class="diag-summary">
+        <div class="diag-item"><div class="diag-num" id="diag-total">4</div><div class="diag-label">总节点</div></div>
+        <div class="diag-item"><div class="diag-num ok" id="diag-failed">0</div><div class="diag-label">失败节点</div></div>
+        <div class="diag-item"><div class="diag-num ok" id="diag-findings">0</div><div class="diag-label">发现问题</div></div>
+      </div>
+      <div id="diag-results"></div>
+      <div style="margin-top:16px;"><button class="btn btn-primary" onclick="runDiagnosis()"><span id="diag-btn-text">运行诊断</span></button></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+<script>
+const state = {
+  workflows: [
+    { id: 'wf-1', name: 'supplier-risk-v2', status: 'running', nodes: 4, time: '1.2s', desc: '正在执行 super-step 0：3 个专家 Agent 并行分析中。' },
+    { id: 'wf-2', name: 'supplier-risk-v1', status: 'success', nodes: 4, time: '41ms', desc: '3 专家并行分析完成 → Supervisor 汇总评级 LOW。' },
+    { id: 'wf-3', name: 'greeting-test', status: 'success', nodes: 1, time: '3ms', desc: '单节点问候工作流。' },
+    { id: 'wf-4', name: 'contract-review', status: 'success', nodes: 4, time: '28ms', desc: '4 步串行合同审核流水线。' },
+    { id: 'wf-5', name: 'investment-analysis', status: 'failed', nodes: 6, time: '超时 120s', desc: 'super-step 2 风险评估节点超时。LLM 连接异常。' },
+  ],
+  pipelineNodes: [
+    { id: 'financial-analysis', agent: 'finance-agent', status: 'success', time: 12, output: '财务风险：低 | 资产负债率：35%' },
+    { id: 'compliance-check', agent: 'compliance-agent', status: 'success', time: 10, output: '合规风险：中 | 营业执照：有效' },
+    { id: 'reputation', agent: 'reputation-agent', status: 'success', time: 11, output: '声誉风险：低 | 行业口碑：良好' },
+    { id: 'aggregate-rating', agent: 'aggregate-agent', status: 'success', time: 8, output: '{"riskLevel":"LOW",...}' },
+  ],
+};
+
+function init() { renderWfList(); renderEditor(); renderPipeline(); updateKpi(); }
+
+function renderWfList() {
+  const list = document.getElementById('wf-list');
+  list.innerHTML = state.workflows.map(wf => `
+    <div class="wf-item" onclick="this.classList.toggle('expanded')">
+      <div class="wf-left">
+        <div class="wf-status ${wf.status}"></div>
+        <div>
+          <div class="wf-name">${wf.name}</div>
+          <div class="wf-meta">${wf.nodes} 节点 · ${wf.time}</div>
+        </div>
+      </div>
+      <div class="wf-actions">
+        <button class="btn btn-sm" onclick="event.stopPropagation();viewPipeline('${wf.id}')">轨迹</button>
+        <button class="btn btn-sm" onclick="event.stopPropagation();viewDiagnosis('${wf.id}')">诊断</button>
+      </div>
+      <div class="wf-detail" style="width:100%;margin-top:8px;">
+        <p>${wf.desc}</p>
+      </div>
+    </div>
+  `).join('');
+}
+
+const DEFAULT_YAML = `# 供应商风险评估工作流
+agentflow:
+  version: "1.0"
+
+nodes:
+  - id: financial-analysis
+    agent: finance-agent
+    prompt_template: "分析供应商 \${supplier} 的财务风险"
+    mock_response: |
+      财务风险：低
+      资产负债率：35%
+
+  - id: compliance-check
+    agent: compliance-agent
+    prompt_template: "检查供应商 \${supplier} 的合规记录"
+    mock_response: |
+      合规风险：中
+      营业执照：有效
+
+  - id: reputation
+    agent: reputation-agent
+    prompt_template: "评估供应商 \${supplier} 的行业声誉"
+    mock_response: |
+      声誉风险：低
+      行业口碑：良好
+
+  - id: aggregate-rating
+    agent: aggregate-agent
+    prompt_template: |
+      汇总三路评估，输出风险评级 JSON：
+      财务：\${financial-analysis}
+      合规：\${compliance-check}
+      声誉：\${reputation}
+    mock_response: |
+      {"riskLevel":"LOW","confidence":0.85,...}
+
+edges:
+  - { from: financial-analysis, to: aggregate-rating }
+  - { from: compliance-check, to: aggregate-rating }
+  - { from: reputation, to: aggregate-rating }`;
+
+function renderEditor() {
+  const editor = document.getElementById('yaml-editor');
+  editor.innerHTML = highlightYaml(DEFAULT_YAML);
+  updateLineNumbers();
+  editor.addEventListener('input', () => { updateLineNumbers(); validateYaml(); });
+}
+
+function highlightYaml(text) {
+  return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/^(#.*)$/gm,'<span class="comment">$1</span>')
+    .replace(/^(\s*)([a-zA-Z_-]+):/gm,'$1<span class="key">$2</span>:')
+    .replace(/"([^"]*)"/g,'<span class="string">"$1"</span>')
+    .replace(/\$\{([^}]+)\}/g,'<span class="placeholder">\${$1}</span>');
+}
+
+function updateLineNumbers() {
+  const editor = document.getElementById('yaml-editor');
+  const lines = document.getElementById('editor-lines');
+  const count = editor.innerText.split('\n').length;
+  lines.innerHTML = Array.from({length: Math.max(count, 10)}, (_, i) => `<span>${i+1}</span>`).join('');
+}
+
+function validateYaml() {
+  const editor = document.getElementById('yaml-editor');
+  const status = document.getElementById('yaml-status');
+  const text = editor.innerText;
+  if (!text.includes('nodes:')) { status.textContent = '⚠ 缺少 nodes 段'; status.style.color = 'var(--warning)'; }
+  else if (!text.includes('agentflow:')) { status.textContent = '⚠ 缺少 agentflow 声明'; status.style.color = 'var(--warning)'; }
+  else { status.textContent = '✓ 校验通过'; status.style.color = 'var(--success)'; }
+}
+
+function submitWorkflow() {
+  const btn = document.getElementById('submit-btn-text');
+  btn.innerHTML = '<span class="spinner"></span> 执行中...';
+  setTimeout(() => {
+    const name = document.getElementById('wf-name').value || 'unnamed';
+    state.workflows.unshift({ id: 'wf-' + Date.now(), name, status: 'success', nodes: 4, time: '38ms', desc: '刚提交的工作流执行完成。' });
+    renderWfList(); updateKpi();
+    btn.textContent = '提交工作流';
+    showToast('工作流提交成功：' + name);
+    setTimeout(() => { document.querySelectorAll('.topbar-nav button')[2].click(); }, 800);
+  }, 1500);
+}
+
+function dryRun() { showToast('Dry-run 完成：拓扑验证通过，4 节点 2 super-step'); }
+
+function renderPipeline() {
+  const container = document.getElementById('pipeline-flow');
+  const nodes = state.pipelineNodes;
+  const step0 = nodes.filter(n => n.id !== 'aggregate-rating');
+  const step1 = nodes.filter(n => n.id === 'aggregate-rating');
+  container.innerHTML = step0.map((n, i) => `
+    ${i > 0 ? '<div class="p-arrow">→</div>' : ''}
+    <div class="p-node ${n.status}">
+      <div class="p-node-name">${n.id}</div>
+      <div class="p-node-agent">${n.agent}</div>
+      <div class="p-node-time">${n.time}ms</div>
+      <div class="p-node-output">${n.output}</div>
+    </div>
+  `).join('') + `
+    <div class="p-barrier"><div class="p-barrier-line"></div><span>barrier</span><div class="p-barrier-line"></div></div>
+    ${step1.map(n => `
+      <div class="p-node ${n.status}">
+        <div class="p-node-name">${n.id}</div>
+        <div class="p-node-agent">${n.agent}</div>
+        <div class="p-node-time">${n.time}ms</div>
+        <div class="p-node-output">${n.output}</div>
+      </div>
+    `).join('')}
+  `;
+}
+
+function runDiagnosis() {
+  const btn = document.getElementById('diag-btn-text');
+  btn.innerHTML = '<span class="spinner"></span> 分析中...';
+  setTimeout(() => {
+    document.getElementById('diag-results').innerHTML = `
+      <div style="background:#F0F9FF;border:1px solid var(--success);border-radius:var(--radius);padding:24px;text-align:center;">
+        <div style="color:var(--success);font-size:18px;font-weight:700;">✓ 无异常发现</div>
+        <p style="color:var(--text-muted);font-size:13px;margin-top:4px;">工作流执行正常</p>
+      </div>`;
+    btn.textContent = '运行诊断';
+    showToast('诊断完成：无异常发现');
+  }, 1200);
+}
+
+function switchTab(el, id) {
+  document.querySelectorAll('.topbar-nav button').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.tabs').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-' + id).classList.add('active');
+}
+function viewPipeline(id) { document.querySelectorAll('.topbar-nav button')[2].click(); }
+function viewDiagnosis(id) { document.querySelectorAll('.topbar-nav button')[3].click(); }
+function updateKpi() {
+  const total = state.workflows.length;
+  const success = state.workflows.filter(w => w.status === 'success').length;
+  document.getElementById('kpi-total').textContent = total;
+  document.getElementById('kpi-rate').textContent = total > 0 ? ((success/total)*100).toFixed(1) + '%' : '0%';
+}
+function showToast(msg) {
+  const toast = document.getElementById('toast');
+  toast.textContent = msg; toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 3000);
+}
+
+init();
+</script>
+</body>
+</html>

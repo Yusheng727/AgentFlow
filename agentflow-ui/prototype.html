@@ -1,0 +1,515 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AgentFlow — Multi-Agent 编排引擎</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #F8FAFC;
+      --surface: #FFFFFF;
+      --surface-hover: #F1F5F9;
+      --border: #E2E8F0;
+      --accent: #3B82F6;
+      --accent-dim: #2563EB;
+      --accent-light: #EFF6FF;
+      --success: #16A34A;
+      --warning: #D97706;
+      --danger: #DC2626;
+      --text: #0F172A;
+      --text-muted: #64748B;
+      --text-dim: #94A3B8;
+      --sidebar-bg: #0F172A;
+      --sidebar-hover: #1E293B;
+      --sidebar-active: rgba(59,130,246,0.15);
+      --sidebar-active-border: rgba(59,130,246,0.3);
+      --shadow: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-lg: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+    .layout { display: flex; height: 100vh; overflow: hidden; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+
+    /* ── 侧边栏 ── */
+    .sidebar {
+      width: 232px; background: var(--sidebar-bg);
+      display: flex; flex-direction: column; flex-shrink: 0;
+    }
+    .logo { padding: 20px 24px; border-bottom: 1px solid rgba(255,255,255,0.08); }
+    .logo h1 { font-size: 18px; font-weight: 700; color: var(--accent); letter-spacing: -0.02em; }
+    .logo p { font-size: 11px; color: rgba(255,255,255,0.4); margin-top: 2px; }
+    .nav { flex: 1; padding: 12px; }
+    .nav-section { font-size: 10px; font-weight: 600; color: rgba(255,255,255,0.3); text-transform: uppercase; letter-spacing: 0.08em; padding: 8px 12px 4px; }
+    .nav-item {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 12px; margin-bottom: 2px; border-radius: 6px;
+      font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.6);
+      cursor: pointer; border: 1px solid transparent; transition: all 0.15s;
+    }
+    .nav-item.active { background: var(--sidebar-active); color: var(--accent); border-color: var(--sidebar-active-border); }
+    .nav-item:hover:not(.active) { color: #fff; background: var(--sidebar-hover); }
+    .nav-item svg { opacity: 0.7; }
+    .sidebar-footer { padding: 16px 20px; border-top: 1px solid rgba(255,255,255,0.08); font-size: 11px; color: rgba(255,255,255,0.3); line-height: 1.5; }
+
+    /* ── 主内容 ── */
+    .main { flex: 1; overflow-y: auto; }
+    .container { max-width: 1200px; margin: 0 auto; padding: 28px 32px; }
+    .page-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
+    .page-title { font-size: 22px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); }
+    .page-sub { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
+
+    /* ── KPI 看板 ── */
+    .kpi-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 24px; }
+    .kpi-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px; box-shadow: var(--shadow);
+      transition: all 0.2s;
+    }
+    .kpi-card:hover { box-shadow: var(--shadow-lg); border-color: var(--accent); }
+    .kpi-label { font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+    .kpi-label svg { opacity: 0.6; }
+    .kpi-value { font-size: 28px; font-weight: 700; color: var(--text); margin-top: 6px; letter-spacing: -0.02em; }
+    .kpi-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+    .kpi-sub.up { color: var(--success); }
+    .kpi-sub.down { color: var(--danger); }
+
+    /* ── 工作流看板 ── */
+    .board { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    .board-col { display: flex; flex-direction: column; gap: 10px; }
+    .col-header {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 13px; font-weight: 600; color: var(--text-muted);
+      padding: 4px 0 8px; border-bottom: 1px solid var(--border); margin-bottom: 8px;
+    }
+    .col-count { background: var(--surface-hover); border-radius: 999px; padding: 1px 8px; font-size: 11px; font-weight: 600; color: var(--text); }
+    .wf-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 10px; padding: 14px; cursor: pointer;
+      box-shadow: var(--shadow); transition: all 0.2s;
+    }
+    .wf-card:hover { box-shadow: var(--shadow-lg); border-color: var(--accent); transform: translateY(-1px); }
+    .wf-card.expanded { border-color: var(--accent); }
+    .wf-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+    .wf-name { font-weight: 600; font-size: 14px; color: var(--text); }
+    .wf-badge { padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+    .wf-badge.running { background: var(--accent-light); color: var(--accent); }
+    .wf-badge.success { background: #DCFCE7; color: var(--success); }
+    .wf-badge.failed { background: #FEE2E2; color: var(--danger); }
+    .wf-meta { display: flex; gap: 16px; font-size: 12px; color: var(--text-muted); }
+    .wf-meta span { font-family: 'JetBrains Mono', monospace; }
+    .wf-detail {
+      margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border);
+      font-size: 12px; color: var(--text-muted); line-height: 1.6; display: none;
+    }
+    .wf-card.expanded .wf-detail { display: block; }
+    .wf-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .btn-sm {
+      padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 500;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text-muted);
+      cursor: pointer; transition: all 0.15s;
+    }
+    .btn-sm:hover { border-color: var(--accent); color: var(--accent); }
+    .btn-sm.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .btn-sm.primary:hover { background: var(--accent-dim); }
+
+    /* ── Pipeline 可视化 ── */
+    .pipeline-section { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin-top: 24px; box-shadow: var(--shadow); }
+    .pipeline-title { font-size: 14px; font-weight: 600; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; color: var(--text); }
+    .pipeline-flow { display: flex; align-items: flex-start; gap: 12px; overflow-x: auto; padding-bottom: 12px; }
+    .step-col { flex-shrink: 0; }
+    .step-badge { display: inline-block; padding: 3px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; color: var(--text-muted); background: var(--surface-hover); margin-bottom: 10px; }
+    .node-card {
+      width: 240px; border-radius: 8px; padding: 12px;
+      border: 1px solid var(--border); background: var(--surface);
+      transition: all 0.2s; cursor: pointer;
+    }
+    .node-card:hover { border-color: var(--accent); box-shadow: var(--shadow-lg); }
+    .node-card.success { border-left: 3px solid var(--success); }
+    .node-card.running { border-left: 3px solid var(--accent); }
+    .node-card.failed { border-left: 3px solid var(--danger); }
+    .node-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+    .node-id { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; color: var(--text); }
+    .node-status { font-size: 10px; font-weight: 700; text-transform: uppercase; }
+    .node-status.success { color: var(--success); }
+    .node-status.running { color: var(--accent); }
+    .node-meta { font-size: 11px; color: var(--text-dim); display: flex; justify-content: space-between; margin-top: 4px; }
+    .node-output {
+      margin-top: 8px; padding: 8px; background: var(--surface-hover); border-radius: 4px;
+      font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text-muted);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .pipeline-arrow { flex-shrink: 0; display: flex; align-items: center; padding-top: 36px; color: var(--text-dim); }
+    .barrier-marker { flex-shrink: 0; display: flex; flex-direction: column; align-items: center; gap: 4px; padding-top: 24px; font-size: 10px; color: var(--text-dim); }
+    .barrier-line { width: 1px; height: 40px; background: var(--border); }
+    .barrier-label { writing-mode: vertical-rl; font-size: 10px; letter-spacing: 0.1em; }
+
+    /* ── YAML 编辑器 ── */
+    .editor-wrap { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); }
+    .editor-header { display: flex; justify-content: space-between; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--text-muted); }
+    .editor-body { position: relative; }
+    .editor-lines {
+      position: absolute; left: 0; top: 0; bottom: 0; width: 40px;
+      background: var(--surface-hover); border-right: 1px solid var(--border);
+      padding: 12px 8px; text-align: right;
+    }
+    .editor-lines span { display: block; font-size: 11px; color: var(--text-dim); line-height: 22px; font-family: 'JetBrains Mono', monospace; }
+    .editor-content { padding: 12px 16px 12px 52px; font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 22px; color: var(--text); min-height: 400px; white-space: pre-wrap; }
+    .editor-content .comment { color: var(--text-dim); }
+    .editor-content .key { color: var(--accent); font-weight: 500; }
+    .editor-content .string { color: var(--warning); }
+    .editor-content .placeholder { color: var(--success); }
+
+    /* ── 诊断卡片 ── */
+    .diag-findings { display: flex; flex-direction: column; gap: 12px; }
+    .finding-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px; border-left: 3px solid var(--warning); box-shadow: var(--shadow); transition: all 0.2s; }
+    .finding-card:hover { border-color: var(--warning); }
+    .finding-header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    .finding-icon { font-size: 18px; }
+    .finding-type { font-size: 14px; font-weight: 600; color: var(--warning); }
+    .finding-node { font-size: 11px; color: var(--text-dim); background: var(--surface-hover); padding: 2px 8px; border-radius: 4px; font-family: 'JetBrains Mono', monospace; }
+    .finding-desc { font-size: 13px; color: var(--text); line-height: 1.5; }
+    .finding-suggestion { font-size: 12px; color: var(--text-muted); margin-top: 6px; font-style: italic; }
+
+    /* ── 通用按钮 ── */
+    .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; }
+    .btn-primary { background: var(--accent); color: #fff; box-shadow: var(--shadow); }
+    .btn-primary:hover { background: var(--accent-dim); }
+    .btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Tab 切换 ── */
+    .tabs { display: none; }
+    .tabs.active { display: block; animation: fadeIn 0.25s ease-out; }
+    @keyframes fadeIn { from{opacity:0;transform:translateY(6px)} to{opacity:1;transform:translateY(0)} }
+    @media (max-width: 960px) { .kpi-row { grid-template-columns: repeat(2, 1fr); } .board { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <!-- 侧边栏 -->
+  <aside class="sidebar">
+    <div class="logo">
+      <h1>AgentFlow</h1>
+      <p>Multi-Agent 编排引擎</p>
+    </div>
+    <nav class="nav">
+      <div class="nav-section">操作</div>
+      <div class="nav-item active" onclick="switchTab(this,'dashboard')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        看板
+      </div>
+      <div class="nav-item" onclick="switchTab(this,'submit')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5,3 19,12 5,21"/></svg>
+        提交工作流
+      </div>
+      <div class="nav-section">分析</div>
+      <div class="nav-item" onclick="switchTab(this,'pipeline')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 9v12"/></svg>
+        执行轨迹
+      </div>
+      <div class="nav-item" onclick="switchTab(this,'diagnosis')">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        诊断报告
+      </div>
+    </nav>
+    <div class="sidebar-footer">BSP 引擎 · Java 21 Virtual Threads · PostgreSQL Checkpoint</div>
+  </aside>
+
+  <!-- 主内容 -->
+  <main class="main">
+    <div class="container">
+
+      <!-- Tab 1: 看板 -->
+      <div class="tabs active" id="tab-dashboard">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">工作流看板</h2>
+            <p class="page-sub">BSP 引擎执行概览与状态监控</p>
+          </div>
+          <button class="btn btn-primary" onclick="document.querySelectorAll('.nav-item')[1].click()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            提交新工作流
+          </button>
+        </div>
+
+        <div class="kpi-row">
+          <div class="kpi-card">
+            <div class="kpi-label"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5,3 19,12 5,21"/></svg>今日执行</div>
+            <div class="kpi-value">12</div>
+            <div class="kpi-sub up">↑ 3 vs 昨日</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>成功率</div>
+            <div class="kpi-value">91.7%</div>
+            <div class="kpi-sub">11/12 成功</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>平均耗时</div>
+            <div class="kpi-value">42ms</div>
+            <div class="kpi-sub down">↓ 15% vs 上周</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/></svg>Token 消耗</div>
+            <div class="kpi-value">0</div>
+            <div class="kpi-sub">mock 模式</div>
+          </div>
+        </div>
+
+        <div class="board">
+          <div class="board-col">
+            <div class="col-header">
+              <span style="color:var(--accent)">●</span> 进行中
+              <span class="col-count">1</span>
+            </div>
+            <div class="wf-card" onclick="toggleCard(this)">
+              <div class="wf-header">
+                <span class="wf-name">supplier-risk-v2</span>
+                <span class="wf-badge running">RUNNING</span>
+              </div>
+              <div class="wf-meta"><span>4 节点</span><span>2 super-step</span><span>1.2s 已运行</span></div>
+              <div class="wf-detail">
+                <p>正在执行 super-step 0：3 个专家 Agent 并行分析中。compliance-check 已完成，其余 2 个仍在执行。</p>
+                <div class="wf-actions"><button class="btn-sm">查看轨迹</button><button class="btn-sm primary">诊断</button></div>
+              </div>
+            </div>
+          </div>
+          <div class="board-col">
+            <div class="col-header">
+              <span style="color:var(--success)">●</span> 已完成
+              <span class="col-count">8</span>
+            </div>
+            <div class="wf-card" onclick="toggleCard(this)">
+              <div class="wf-header">
+                <span class="wf-name">supplier-risk-v1</span>
+                <span class="wf-badge success">SUCCESS</span>
+              </div>
+              <div class="wf-meta"><span>4 节点</span><span>41ms</span><span>LOW</span></div>
+              <div class="wf-detail">
+                <p>3 专家并行分析完成 → Supervisor 汇总评级 LOW。mock 模式零 LLM 成本。</p>
+                <div class="wf-actions"><button class="btn-sm">查看轨迹</button><button class="btn-sm primary">诊断</button><button class="btn-sm">重试</button></div>
+              </div>
+            </div>
+            <div class="wf-card" onclick="toggleCard(this)">
+              <div class="wf-header">
+                <span class="wf-name">greeting-test</span>
+                <span class="wf-badge success">SUCCESS</span>
+              </div>
+              <div class="wf-meta"><span>1 节点</span><span>3ms</span><span>12ms 前</span></div>
+            </div>
+            <div class="wf-card" onclick="toggleCard(this)">
+              <div class="wf-header">
+                <span class="wf-name">contract-review</span>
+                <span class="wf-badge success">SUCCESS</span>
+              </div>
+              <div class="wf-meta"><span>4 节点串行</span><span>28ms</span><span>1h 前</span></div>
+            </div>
+          </div>
+          <div class="board-col">
+            <div class="col-header">
+              <span style="color:var(--danger)">●</span> 失败
+              <span class="col-count">3</span>
+            </div>
+            <div class="wf-card" onclick="toggleCard(this)">
+              <div class="wf-header">
+                <span class="wf-name">investment-analysis</span>
+                <span class="wf-badge failed">FAILED</span>
+              </div>
+              <div class="wf-meta"><span>6 节点</span><span>超时 120s</span><span>30m 前</span></div>
+              <div class="wf-detail">
+                <p>super-step 2 风险评估节点超时。LLM 连接异常，需检查网络或调整 TimeoutPolicy。</p>
+                <div class="wf-actions"><button class="btn-sm">查看轨迹</button><button class="btn-sm primary">诊断</button><button class="btn-sm">重试</button></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: 提交工作流 -->
+      <div class="tabs" id="tab-submit">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">提交工作流</h2>
+            <p class="page-sub">用 YAML DSL 声明 Multi-Agent 工作流，BSP 引擎自动分层执行</p>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 320px;gap:24px;">
+          <div>
+            <div class="editor-wrap">
+              <div class="editor-header">
+                <span>supplier-risk.yml</span>
+                <span style="color:var(--success);font-size:11px;font-weight:500;">✓ 校验通过</span>
+              </div>
+              <div class="editor-body">
+                <div class="editor-lines">
+                  <span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span><span>16</span><span>17</span><span>18</span><span>19</span><span>20</span><span>21</span><span>22</span><span>23</span><span>24</span><span>25</span><span>26</span><span>27</span><span>28</span><span>29</span><span>30</span><span>31</span><span>32</span>
+                </div>
+                <div class="editor-content"><span class="comment"># 供应商风险评估工作流</span>
+<span class="key">agentflow</span>:
+  <span class="key">version</span>: <span class="string">"1.0"</span>
+
+<span class="key">nodes</span>:
+  - <span class="key">id</span>: financial-analysis
+    <span class="key">agent</span>: finance-agent
+    <span class="key">prompt_template</span>: <span class="string">"分析供应商 ${supplier} 的财务风险"</span>
+    <span class="key">mock_response</span>: |
+      财务风险：低
+      资产负债率：35%
+      现金流：稳定
+
+  - <span class="key">id</span>: compliance-check
+    <span class="key">agent</span>: compliance-agent
+    <span class="key">prompt_template</span>: <span class="string">"检查供应商 ${supplier} 的合规记录"</span>
+    <span class="key">mock_response</span>: |
+      合规风险：中
+      营业执照：有效
+      近 2 年有 1 次环保违规
+
+  - <span class="key">id</span>: reputation
+    <span class="key">agent</span>: reputation-agent
+    <span class="key">prompt_template</span>: <span class="string">"评估供应商 ${supplier} 的行业声誉"</span>
+    <span class="key">mock_response</span>: |
+      声誉风险：低
+      行业口碑：良好
+      合作历史：5 年
+
+  - <span class="key">id</span>: aggregate-rating
+    <span class="key">agent</span>: aggregate-agent
+    <span class="key">prompt_template</span>: |
+      汇总三路评估，输出风险评级 JSON：
+      财务：<span class="placeholder">${financial-analysis}</span>
+      合规：<span class="placeholder">${compliance-check}</span>
+      声誉：<span class="placeholder">${reputation}</span>
+    <span class="key">mock_response</span>: |
+      {"riskLevel":"LOW","confidence":0.85,...}
+
+<span class="key">edges</span>:
+  - { <span class="key">from</span>: financial-analysis, <span class="key">to</span>: aggregate-rating }
+  - { <span class="key">from</span>: compliance-check, <span class="key">to</span>: aggregate-rating }
+  - { <span class="key">from</span>: reputation, <span class="key">to</span>: aggregate-rating }</div>
+              </div>
+            </div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:20px;">
+            <div>
+              <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">工作流名称</label>
+              <input type="text" value="supplier-risk" style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);font-size:13px;font-family:'JetBrains Mono',monospace;outline:none;">
+            </div>
+            <div>
+              <label style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em;display:block;margin-bottom:6px;">启动入参（JSON）</label>
+              <textarea style="width:100%;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 14px;color:var(--text);font-size:13px;font-family:'JetBrains Mono',monospace;outline:none;min-height:100px;resize:vertical;">{"supplier": "Acme Corp"}</textarea>
+            </div>
+            <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:12px;color:var(--text-muted);line-height:1.6;box-shadow:var(--shadow);">
+              <strong style="color:var(--text);display:block;margin-bottom:4px;">BSP 分层执行</strong>
+              3 个专家 Agent 并行分析 → Supervisor 汇总评级<br>
+              YAML 4 节点 → 2 super-step，mock 模式零 LLM 成本
+            </div>
+            <button class="btn btn-primary" style="width:100%;justify-content:center;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5,3 19,12 5,21"/></svg>
+              提交工作流
+            </button>
+            <button class="btn btn-secondary" style="width:100%;justify-content:center;">
+              Dry-run 预览（不调 LLM）
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 3: 执行轨迹 -->
+      <div class="tabs" id="tab-pipeline">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">执行轨迹</h2>
+            <p class="page-sub mono">demo-supplier-risk-1</p>
+          </div>
+          <span class="wf-badge success" style="font-size:13px;padding:6px 16px;">✓ SUCCESS</span>
+        </div>
+
+        <div class="pipeline-section">
+          <div class="pipeline-title">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 9v12"/></svg>
+            BSP Pipeline（2 super-step）
+          </div>
+          <div class="pipeline-flow">
+            <div class="step-col">
+              <div class="step-badge">Step 0 · 并行 3 节点</div>
+              <div style="display:flex;flex-direction:column;gap:10px;">
+                <div class="node-card success">
+                  <div class="node-header"><span class="node-id">financial-analysis</span><span class="node-status success">✓</span></div>
+                  <div class="node-meta"><span>Agent</span><span>finance-agent</span></div>
+                  <div class="node-meta"><span>耗时</span><span>12ms</span></div>
+                  <div class="node-output">财务风险：低 | 资产负债率：35% | 现金流：稳定</div>
+                </div>
+                <div class="node-card success">
+                  <div class="node-header"><span class="node-id">compliance-check</span><span class="node-status success">✓</span></div>
+                  <div class="node-meta"><span>Agent</span><span>compliance-agent</span></div>
+                  <div class="node-meta"><span>耗时</span><span>10ms</span></div>
+                  <div class="node-output">合规风险：中 | 营业执照：有效 | 1 次环保违规</div>
+                </div>
+                <div class="node-card success">
+                  <div class="node-header"><span class="node-id">reputation</span><span class="node-status success">✓</span></div>
+                  <div class="node-meta"><span>Agent</span><span>reputation-agent</span></div>
+                  <div class="node-meta"><span>耗时</span><span>11ms</span></div>
+                  <div class="node-output">声誉风险：低 | 行业口碑：良好 | 5 年合作</div>
+                </div>
+              </div>
+            </div>
+            <div class="barrier-marker">
+              <div class="barrier-line"></div>
+              <div class="barrier-label">barrier</div>
+              <div class="barrier-line"></div>
+            </div>
+            <div class="step-col">
+              <div class="step-badge">Step 1 · 汇总</div>
+              <div class="node-card success">
+                <div class="node-header"><span class="node-id">aggregate-rating</span><span class="node-status success">✓</span></div>
+                <div class="node-meta"><span>Agent</span><span>aggregate-agent</span></div>
+                <div class="node-meta"><span>耗时</span><span>8ms</span></div>
+                <div class="node-output">{"riskLevel":"LOW","confidence":0.85,"evidence":[...]}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 4: 诊断报告 -->
+      <div class="tabs" id="tab-diagnosis">
+        <div class="page-header">
+          <div>
+            <h2 class="page-title">诊断报告</h2>
+            <p class="page-sub mono">demo-supplier-risk-1</p>
+          </div>
+          <button class="btn btn-primary">运行诊断</button>
+        </div>
+
+        <div class="kpi-row" style="margin-bottom:20px;">
+          <div class="kpi-card"><div class="kpi-label">总节点</div><div class="kpi-value">4</div></div>
+          <div class="kpi-card"><div class="kpi-label">失败节点</div><div class="kpi-value" style="color:var(--success)">0</div></div>
+          <div class="kpi-card"><div class="kpi-label">发现问题</div><div class="kpi-value" style="color:var(--success)">0</div></div>
+          <div class="kpi-card"><div class="kpi-label">诊断耗时</div><div class="kpi-value">3ms</div></div>
+        </div>
+
+        <div style="background:#DCFCE7;border:1px solid rgba(22,163,74,0.3);border-radius:10px;padding:32px;text-align:center;box-shadow:var(--shadow);">
+          <div style="color:var(--success);font-size:20px;font-weight:700;">✓ 无异常发现</div>
+          <p style="color:var(--text-muted);font-size:13px;margin-top:6px;">工作流执行正常：无超时、无异常 token 消耗、无解析错误</p>
+        </div>
+      </div>
+
+    </div>
+  </main>
+</div>
+
+<script>
+  function switchTab(el, id) {
+    document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+    el.classList.add('active');
+    document.querySelectorAll('.tabs').forEach(t => t.classList.remove('active'));
+    document.getElementById('tab-' + id).classList.add('active');
+  }
+  function toggleCard(card) { card.classList.toggle('expanded'); }
+</script>
+</body>
+</html>
