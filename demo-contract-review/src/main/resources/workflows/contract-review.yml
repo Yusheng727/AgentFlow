@@ -1,0 +1,78 @@
+# 合同审核串行流水线工作流（U11 对比 Demo，R15）
+#
+# 拓扑：4 步串行依赖链（合同解析 → 法律风险 → 合规建议 → 最终报告）
+# BSP 分层：每步依赖前一步 → 4 个 super-step，每个 super-step 恰 1 个节点（与 U10 并行拓扑对比）
+# MockAgentFunction 返回 AgentOutput.of(content)（无 channelWrites），引擎便捷约定
+# 按 channel=nodeId 写入 content，故 channel 名与 node id 保持一致。
+# 每步 mock_response 用 ${previousStep} 占位符引用上一步输出，验证 BSP 上下文传递。
+
+agentflow:
+  version: "1.0"
+
+channels:
+  contract-parse:
+    reducer: overwrite
+  legal-risk:
+    reducer: overwrite
+  compliance-advice:
+    reducer: overwrite
+  final-report:
+    reducer: overwrite
+
+nodes:
+  # ─── super-step 0：合同解析 ───
+  - id: contract-parse
+    agent: contract-agent
+    prompt_template: "解析合同 ${contractTitle} 的关键条款：标的、金额、付款、违约、争议解决"
+    mock_response: |
+      合同解析：
+      标的：SaaS 服务订阅（Pro 版）
+      金额：年费 120 万元
+      付款：预付 50%，验收后付尾款 50%
+      违约金：逾期付款按日 0.5‰ 计
+      争议解决：提交北京仲裁委员会
+
+  # ─── super-step 1：法律风险（引用 ${contract-parse}） ───
+  - id: legal-risk
+    agent: legal-agent
+    prompt_template: |
+      基于合同解析结果分析法律风险：
+      ${contract-parse}
+    mock_response: |
+      法律风险分析：
+      [输入合同解析] ${contract-parse}
+      风险点：违约金偏高（日 0.5‰ ≈ 年 18%），超出司法保护上限风险
+      风险点：仲裁条款有效，但管辖地偏对方
+      建议：争取违约金上限封顶，或约定我方所在地法院
+
+  # ─── super-step 2：合规建议（引用 ${legal-risk}） ───
+  - id: compliance-advice
+    agent: compliance-agent
+    prompt_template: |
+      基于法律风险给合规建议：
+      ${legal-risk}
+    mock_response: |
+      合规建议：
+      [输入法律风险] ${legal-risk}
+      合规要求：付款条款符合公司资金管理办法，预付比例需财务审批
+      合规要求：仲裁条款需法务备案，违约金条款需报董事会
+      处置：要求对方下调违约金至日 0.3‰，否则触发合规红线中止流程
+
+  # ─── super-step 3：最终报告（引用 ${compliance-advice}） ───
+  - id: final-report
+    agent: report-agent
+    prompt_template: |
+      汇总合规建议输出最终审核报告：
+      ${compliance-advice}
+    mock_response: |
+      合同审核最终报告：
+      [输入合规建议] ${compliance-advice}
+      审核结论：条件通过
+      关键修改：违约金下调至日 0.3‰、付款预付比例需财务审批
+      风险等级：中（可缓释）
+      下一步：法务跟进修改条款，财务审批预付比例
+
+edges:
+  - { from: contract-parse, to: legal-risk }
+  - { from: legal-risk, to: compliance-advice }
+  - { from: compliance-advice, to: final-report }

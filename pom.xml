@@ -30,6 +30,7 @@
         <module>agentflow-api</module>
         <module>agentflow-starter</module>
         <module>demo-supplier-risk</module>
+        <module>demo-contract-review</module>
     </modules>
 
     <dependencyManagement>

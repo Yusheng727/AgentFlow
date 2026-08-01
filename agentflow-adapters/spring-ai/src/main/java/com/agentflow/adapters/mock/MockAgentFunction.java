@@ -30,8 +30,12 @@ import java.util.regex.Pattern;
  */
 public final class MockAgentFunction implements AgentFunction {
 
-    /** 匹配 ${channel.name} 占位符（支持嵌套点路径，如 ${finance.riskScore}）。 */
-    private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{([a-zA-Z_][\\w.]*)}");
+    /**
+     * 匹配 ${channel.name} 占位符（支持嵌套点路径，如 ${finance.riskScore}）。
+     * channel 名允许连字符（如 ${contract-parse}、${financial-analysis}，与 nodeId 命名一致），
+     * 故字符类含 {@code -}；点路径分隔符 {@code .} 仍用于下钻 Map。
+     */
+    private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{([a-zA-Z_][\\w.-]*)}");
 
     @Override
     public AgentOutput execute(AgentInput input) throws AgentExecutionException {

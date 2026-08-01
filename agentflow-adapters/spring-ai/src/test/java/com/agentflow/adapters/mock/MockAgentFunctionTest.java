@@ -84,6 +84,15 @@ class MockAgentFunctionTest {
         assertThat(out.content()).isEqualTo("${x}");
     }
 
+    @Test
+    @DisplayName("mock 模式：连字符 channel 名 ${contract-parse} 正确解析（与 nodeId 命名一致）")
+    void hyphenatedChannelResolves() throws com.agentflow.agent.AgentExecutionException {
+        WorkflowContext ctx = new WorkflowContext(Map.of("contract-parse", "标的=SaaS"));
+        AgentInput input = inputWithMock("H", "上游=${contract-parse}", ctx);
+        AgentOutput out = agent.execute(input);
+        assertThat(out.content()).isEqualTo("上游=标的=SaaS");
+    }
+
     // ─────────────────── 场景 2：mock_response 缺失 ───────────────────
 
     @Test
