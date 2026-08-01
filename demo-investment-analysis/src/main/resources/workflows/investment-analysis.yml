@@ -1,0 +1,116 @@
+# 投资分析决策工作流（U12 辅 Demo 2，R17）
+#
+# 拓扑：双层 fork-join 混合（6 节点 4 super-step）
+#   super-step 0：company_finance + market_data（2 并行，入度 0）
+#   super-step 1：feasibility_analysis（1 串行，依赖 step 0 两路）
+#   super-step 2：risk_assessment + return_forecast（2 并行，依赖 step 1）
+#   super-step 3：investment_decision（1 汇总，依赖 step 2 两路 + 引用前 3 层全部输出）
+#
+# 验证 BSP 最长路径分层（DAGLayerer.computeSuperSteps）对复杂混合拓扑的泛用性。
+# MockAgentFunction 返回 AgentOutput.of(content)，引擎按 channel=nodeId 写入；
+# 下游 mock_response 用 ${channel} 占位符引用上游输出，验证上下文跨 super-step 传递。
+#
+# 命名约定：node id / channel 用下划线（非连字符）——MockAgentFunction 的占位符正则
+# [a-zA-Z_][\w.]* 不支持连字符，下划线可被 ${...} 正确解析替换。
+
+agentflow:
+  version: "1.0"
+
+channels:
+  company_finance:
+    reducer: overwrite
+  market_data:
+    reducer: overwrite
+  feasibility_analysis:
+    reducer: overwrite
+  risk_assessment:
+    reducer: overwrite
+  return_forecast:
+    reducer: overwrite
+  investment_decision:
+    reducer: overwrite
+
+nodes:
+  # ─── super-step 0：基础信息并行采集（2 节点） ───
+  - id: company_finance
+    agent: finance-agent
+    prompt_template: "采集标的 ${target} 的公司财报：营收、利润、现金流"
+    mock_response: |
+      公司财报：
+      营收：120 亿（同比 +18%）
+      净利润：22 亿（同比 +25%）
+      经营现金流：28 亿（连续 3 年为正）
+      资产负债率：38%（健康）
+
+  - id: market_data
+    agent: market-agent
+    prompt_template: "采集标的 ${target} 的市场数据：行业景气、估值、情绪"
+    mock_response: |
+      市场数据：
+      行业景气度：高（政策利好）
+      PE：22 倍（低于行业中位 28 倍）
+      近 30 日北向资金：净流入 8.5 亿
+      舆论情绪：偏多
+
+  # ─── super-step 1：可行性分析（串行，依赖 step 0 两路） ───
+  - id: feasibility_analysis
+    agent: feasibility-agent
+    prompt_template: |
+      综合财报与市场数据，输出可行性结论：
+      财报：${company_finance}
+      市场：${market_data}
+    mock_response: |
+      可行性分析：
+      基本面：优秀（营收/利润双增，现金流稳健）
+      估值：偏低（PE 22 < 中位 28，安全边际充足）
+      结论：具备投资可行性，建议进入风险评估与收益预测环节
+      引用上游财报：${company_finance}
+      引用上游市场：${market_data}
+
+  # ─── super-step 2：风险评估 + 收益预测（2 并行，依赖 step 1） ───
+  - id: risk_assessment
+    agent: risk-agent
+    prompt_template: |
+      基于可行性结论做风险评估：
+      可行性：${feasibility_analysis}
+    mock_response: |
+      风险评估：
+      市场风险：中（行业景气高但情绪波动）
+      财务风险：低（资产负债率 38% 健康）
+      流动性风险：低
+      综合风险等级：MEDIUM
+      引用可行性：${feasibility_analysis}
+
+  - id: return_forecast
+    agent: return-agent
+    prompt_template: |
+      基于可行性结论做收益预测：
+      可行性：${feasibility_analysis}
+    mock_response: |
+      收益预测：
+      12 个月目标价涨幅：+22%
+      年化预期收益率：18%
+      上行概率：65%
+      下行保护（估值底）：-8%
+      引用可行性：${feasibility_analysis}
+
+  # ─── super-step 3：投资裁决（汇总，依赖 step 2 两路 + 引用前 3 层全部输出） ───
+  - id: investment_decision
+    agent: decision-agent
+    prompt_template: |
+      汇总前 3 层全部输出，输出投资裁决 JSON：
+      财报：${company_finance}
+      市场：${market_data}
+      可行性：${feasibility_analysis}
+      风险：${risk_assessment}
+      收益：${return_forecast}
+    mock_response: |
+      {"riskLevel":"MEDIUM","confidence":0.82,"evidence":["汇总前3层全部输出"],"recommendation":"建议买入，仓位 60%，止损位 -8%","upstream":{"finance":"${company_finance}","market":"${market_data}","feasibility":"${feasibility_analysis}","risk":"${risk_assessment}","return":"${return_forecast}"}}
+
+edges:
+  - { from: company_finance, to: feasibility_analysis }
+  - { from: market_data, to: feasibility_analysis }
+  - { from: feasibility_analysis, to: risk_assessment }
+  - { from: feasibility_analysis, to: return_forecast }
+  - { from: risk_assessment, to: investment_decision }
+  - { from: return_forecast, to: investment_decision }

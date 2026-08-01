@@ -31,6 +31,7 @@
         <module>agentflow-starter</module>
         <module>demo-supplier-risk</module>
         <module>demo-contract-review</module>
+        <module>demo-investment-analysis</module>
     </modules>
 
     <dependencyManagement>

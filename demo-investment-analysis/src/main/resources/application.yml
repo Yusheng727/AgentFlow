@@ -1,0 +1,15 @@
+server:
+  port: 8081
+
+# Mock LLM 模式（零成本本地调试，不发 LLM 请求）
+agentflow:
+  mock:
+    enabled: true
+
+spring:
+  application:
+    name: demo-investment-analysis
+  # 真实模式需配 OpenAI key（从环境变量读，禁止入 yml——R22）
+  # ai:
+  #   openai:
+  #     api-key: ${SPRING_AI_OPENAI_API_KEY}

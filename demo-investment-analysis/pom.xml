@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.agentflow</groupId>
+        <artifactId>agentflow-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>demo-investment-analysis</artifactId>
+    <name>AgentFlow Demo :: 投资分析</name>
+    <description>辅 Demo 2：双层 fork-join 混合拓扑（2 并行 → 1 串行 → 2 并行 → 1 汇总），验证引擎复杂拓扑分层（R17）。</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.agentflow</groupId>
+            <artifactId>agentflow-starter</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.agentflow</groupId>
+            <artifactId>agentflow-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-model-openai</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <properties>
+        <!-- 跳过 JaCoCo 门禁：demo 模块是验证场景，核心引擎覆盖率由 core/adapters/api/starter 保证 -->
+        <jacoco.skip>true</jacoco.skip>
+    </properties>
+</project>
