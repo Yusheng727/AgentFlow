@@ -63,7 +63,7 @@ class SpringAiAgentAdapterTest {
                                    Map<String, Object> inputs) {
         WorkflowContext ctx = new WorkflowContext(channels);
         return new AgentInput(nodeId, "test-agent", template, ctx.readOnlySnapshot(),
-                inputs, List.of(), Map.of(), null);
+                inputs, List.of(), Map.of(), null, null);
     }
 
     /**
@@ -309,7 +309,7 @@ class SpringAiAgentAdapterTest {
                 "enum", List.of("LOW", "MEDIUM", "HIGH"))));
         schema.put("required", List.of("riskLevel"));
         AgentInput in = new AgentInput("L", "test-agent", "分析风险", new WorkflowContext(),
-                Map.of(), List.of(), schema, null);
+                Map.of(), List.of(), schema, null, null);
         SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
                 client(model), passThroughAdvisors(), List.of(), null, Function.identity(),
                 new OutputSchemaValidator());
@@ -336,7 +336,7 @@ class SpringAiAgentAdapterTest {
                 "enum", List.of("LOW", "MEDIUM", "HIGH"))));
         schema.put("required", List.of("riskLevel"));
         AgentInput in = new AgentInput("M", "test-agent", "分析风险", new WorkflowContext(),
-                Map.of(), List.of(), schema, null);
+                Map.of(), List.of(), schema, null, null);
         SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
                 client(model), passThroughAdvisors(), List.of(), null, Function.identity(),
                 new OutputSchemaValidator());
@@ -356,7 +356,7 @@ class SpringAiAgentAdapterTest {
         schema.put("type", "object");
         schema.put("required", List.of("riskLevel"));
         AgentInput in = new AgentInput("N", "test-agent", "分析风险", new WorkflowContext(),
-                Map.of(), List.of(), schema, null);
+                Map.of(), List.of(), schema, null, null);
         SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
                 client(model), passThroughAdvisors(), List.of(), null, Function.identity(),
                 new OutputSchemaValidator());
@@ -375,7 +375,7 @@ class SpringAiAgentAdapterTest {
         schema.put("type", "object");
         schema.put("required", List.of("riskLevel"));
         AgentInput in = new AgentInput("O", "test-agent", "分析风险", new WorkflowContext(),
-                Map.of(), List.of(), schema, null);
+                Map.of(), List.of(), schema, null, null);
         ExecutionTrace trace = new ExecutionTrace("wf-exhaust");
         SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
                 client(model), passThroughAdvisors(), List.of(), trace, Function.identity(),

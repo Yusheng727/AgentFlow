@@ -17,6 +17,8 @@ import com.agentflow.engine.checkpoint.WorkflowStatus;
 import com.agentflow.engine.fault.ErrorHandler;
 import com.agentflow.engine.fault.RetryPolicy;
 import com.agentflow.engine.fault.TimeoutPolicy;
+import com.agentflow.observability.ExecutionTrace;
+import com.agentflow.observability.ExecutionTraceRegistry;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,6 +68,9 @@ public final class BspEngine {
     private final ErrorHandler errorHandler;
     /** U4 超时策略：可空（null = 无工作流总超时）。 */
     private final TimeoutPolicy timeoutPolicy;
+    /** U7 可观测性：trace 注册表。可空（null = 不注册 trace，mock 模式下 TraceController 返回空树）。
+     *  非空时 execute() 开头为每个 workflowId 创建 ExecutionTrace 并通过 AgentInput.trace() 透传给 AgentFunction。 */
+    private final ExecutionTraceRegistry traceRegistry;
 
     public BspEngine() {
         this(new DAGLayerer());
@@ -81,10 +86,21 @@ public final class BspEngine {
      */
     public BspEngine(DAGLayerer layerer, RetryPolicy retryPolicy,
                      ErrorHandler errorHandler, TimeoutPolicy timeoutPolicy) {
+        this(layerer, retryPolicy, errorHandler, timeoutPolicy, null);
+    }
+
+    /**
+     * U7 可观测性入口：在 U4 容错基础上注入 {@link ExecutionTraceRegistry}。
+     * traceRegistry 为 null 表示不注册 trace（与 U2-U6 行为一致，向后兼容）。
+     */
+    public BspEngine(DAGLayerer layerer, RetryPolicy retryPolicy,
+                     ErrorHandler errorHandler, TimeoutPolicy timeoutPolicy,
+                     ExecutionTraceRegistry traceRegistry) {
         this.layerer = Objects.requireNonNull(layerer, "layerer");
         this.retryPolicy = retryPolicy;
         this.errorHandler = errorHandler;
         this.timeoutPolicy = timeoutPolicy;
+        this.traceRegistry = traceRegistry;
     }
 
     /** 便捷入口（Map 形式）：无 checkpoint、无自定义 reducer（开发/测试）。 */
@@ -157,6 +173,9 @@ public final class BspEngine {
         Map<String, Object> effInputs = inputs == null ? Map.of() : inputs;
         WorkflowContext context = new WorkflowContext(effInputs);
 
+        // U7：为本次执行注册 trace（traceRegistry 为 null 或 workflowId 为空时 trace=null，不影响执行）
+        ExecutionTrace trace = traceRegistry == null ? null : traceRegistry.register(workflowId);
+
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         NodeExecutor nodeExecutor = new NodeExecutor(agentResolver, executor);
         Instant workflowStart = Instant.now();
@@ -169,11 +188,17 @@ public final class BspEngine {
                 }
                 WorkflowContext snapshot = context.readOnlySnapshot();
                 List<NodeResult> results = runSuperStep(step, dag, snapshot, nodeExecutor, cp, workflowId,
-                        executor, effInputs, workflowStart);
+                        executor, effInputs, workflowStart, trace);
                 applyBarrier(step, results, context, dag, def, reducer, cp, workflowId);
+            }
+            if (trace != null) {
+                trace.markCompleted(ExecutionTrace.Status.COMPLETED);
             }
             return context;
         } catch (WorkflowExecutionException we) {
+            if (trace != null) {
+                trace.markCompleted(ExecutionTrace.Status.FAILED);
+            }
             // U5 P0 修复（ADV-2）：abort 前显式标记 FAILED——RecoveryProtocol 据此鉴别崩溃层可能含
             // timeout 后在飞 VT 写出的 stray COMPLETED 记录，整体重跑该层，避免读到未经 barrier
             // 合并的孤立 channel 输出。best-effort：状态写入失败不掩盖原始 abort 异常。
@@ -264,7 +289,7 @@ public final class BspEngine {
                                 .toList())
                         : step;
                 List<NodeResult> results = runSuperStep(stepToRun, dag, snapshot, nodeExecutor, cp, workflowId,
-                        executor, Map.of(), workflowStart);
+                        executor, Map.of(), workflowStart, null);
                 applyBarrier(step, results, context, dag, def, reducer, cp, workflowId);
             }
             cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
@@ -299,12 +324,12 @@ public final class BspEngine {
     private List<NodeResult> runSuperStep(SuperStep step, DAGraph dag, WorkflowContext snapshot,
                                           NodeExecutor nodeExecutor, CheckpointManager cp, String workflowId,
                                           ExecutorService executor, Map<String, Object> inputs,
-                                          Instant workflowStart) {
+                                          Instant workflowStart, ExecutionTrace trace) {
         List<CompletableFuture<NodeResult>> futures = new ArrayList<>(step.nodeIds().size());
         for (String id : step.nodeIds()) {
             NodeDefinition node = dag.node(id);
             AgentInput input = new AgentInput(id, node.agent(), node.promptTemplate(), snapshot, inputs,
-                    node.tools(), node.outputSchema(), node.mockResponse());
+                    node.tools(), node.outputSchema(), node.mockResponse(), trace);
             // 并行执行 + 节点级 checkpoint（完成当下即持久化，R3）
             futures.add(CompletableFuture.supplyAsync(() -> {
                 try {

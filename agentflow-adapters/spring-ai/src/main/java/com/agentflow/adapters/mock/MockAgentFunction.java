@@ -6,6 +6,8 @@ import com.agentflow.agent.AgentInput;
 import com.agentflow.agent.AgentOutput;
 import com.agentflow.agent.MissingMockResponseException;
 import com.agentflow.engine.WorkflowContext;
+import com.agentflow.observability.ExecutionTrace;
+import com.agentflow.observability.NodeTrace;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -39,13 +41,46 @@ public final class MockAgentFunction implements AgentFunction {
 
     @Override
     public AgentOutput execute(AgentInput input) throws AgentExecutionException {
-        String mock = input.mockResponse();
-        if (mock == null || mock.isBlank()) {
-            throw new MissingMockResponseException(input.nodeId());
+        // U7 KTD-2：mock 模式补齐 trace——若 AgentInput 携带 ExecutionTrace（BspEngine 通过
+        // ExecutionTraceRegistry 注入），构造 NodeTrace 并 addNode，succeed 时记 mock token=0。
+        // 不携带（input.trace()==null）时 no-op，保持 mock 单元测试原行为不变。
+        ExecutionTrace trace = input.trace();
+        NodeTrace nodeTrace = trace != null ? new NodeTrace(input.nodeId(), input.agentName()) : null;
+        if (nodeTrace != null) {
+            trace.addNode(nodeTrace);
         }
-        // 占位符替换：从 context 只读快照读 channel 值
-        String resolved = resolvePlaceholders(mock, input.context());
-        return AgentOutput.of(resolved);
+        try {
+            String mock = input.mockResponse();
+            if (mock == null || mock.isBlank()) {
+                throw new MissingMockResponseException(input.nodeId());
+            }
+            // 占位符替换：从 context 只读快照读 channel 值
+            String resolved = resolvePlaceholders(mock, input.context());
+            AgentOutput output = AgentOutput.of(resolved);
+            if (nodeTrace != null) {
+                // mock 模式 token=0（不发 LLM）；outputSummary 截断防止巨型 mock 内容撑爆 trace
+                nodeTrace.succeed(truncate(resolved), 0L, 0L);
+            }
+            return output;
+        } catch (AgentExecutionException ae) {
+            if (nodeTrace != null) {
+                nodeTrace.fail(ae.getMessage());
+            }
+            throw ae;
+        } catch (RuntimeException re) {
+            if (nodeTrace != null) {
+                nodeTrace.fail(re.getMessage());
+            }
+            throw re;
+        }
+    }
+
+    /** 截断 outputSummary 到 200 字符，避免 mock 巨型响应撑爆 trace snapshot。 */
+    private static String truncate(String s) {
+        if (s == null) {
+            return null;
+        }
+        return s.length() <= 200 ? s : s.substring(0, 200) + "...";
     }
 
     /**

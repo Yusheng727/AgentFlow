@@ -99,9 +99,12 @@ public class SpringAiAgentAdapter implements AgentFunction {
 
     @Override
     public AgentOutput execute(AgentInput input) throws AgentExecutionException {
+        // U7：trace 来源优先级——构造器注入的 trace（适配器级，OQ-3 决议）> input.trace()（workflow 级，KTD-2）。
+        // 两者皆空（无 registry 且未注入）时不写 trace，保持原始行为。
+        ExecutionTrace effectiveTrace = this.trace != null ? this.trace : input.trace();
         NodeTrace nodeTrace = new NodeTrace(input.nodeId(), input.agentName());
-        if (trace != null) {
-            trace.addNode(nodeTrace);
+        if (effectiveTrace != null) {
+            effectiveTrace.addNode(nodeTrace);
         }
 
         // 1. SpEL 解析 prompt 模板

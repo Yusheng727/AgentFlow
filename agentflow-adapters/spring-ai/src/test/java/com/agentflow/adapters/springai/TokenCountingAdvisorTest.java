@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.within;
 
 class TokenCountingAdvisorTest {
 
@@ -111,5 +112,40 @@ class TokenCountingAdvisorTest {
         double count = registry.counter(TokenCountingAdvisor.COUNTER_NAME,
                 "agent", "unknown", "model", "m").count();
         assertThat(count).isEqualTo(2.0);
+    }
+
+    // ──────────────────────────── U7 KTD-3 成本核算委托 ────────────────────────────
+
+    @Test
+    @DisplayName("U7：注入 AgentFlowMetrics → after 同时记 token + cost（KTD-3 单一真相源）")
+    void recordsCostViaMetricsDelegate() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        com.agentflow.observability.AgentFlowMetrics metrics =
+                new com.agentflow.observability.AgentFlowMetrics(registry);
+        TokenCountingAdvisor advisor = new TokenCountingAdvisor(registry, "a", metrics);
+
+        advisor.after(responseWith(1_000_000, 1_000_000, "gpt-4o"), null);
+
+        // token Counter 记一次（advisor 直写）
+        assertThat(registry.counter(TokenCountingAdvisor.COUNTER_NAME,
+                "agent", "a", "model", "gpt-4o").count()).isEqualTo(2_000_000.0);
+        // cost Counter 记一次（delegate recordCost）= gpt-4o 1M+1M = $12.50
+        assertThat(registry.counter("agentflow.workflow.cost.estimated",
+                "model", "gpt-4o").count()).isCloseTo(12.50, within(1e-9));
+    }
+
+    @Test
+    @DisplayName("U7：metricsDelegate 为 null（旧构造器）→ 仅记 token，不记 cost（向后兼容 U3 行为）")
+    void nullMetricsDelegateBackwardCompat() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        TokenCountingAdvisor advisor = new TokenCountingAdvisor(registry, "a");  // 2-arg 旧构造器
+
+        advisor.after(responseWith(100, 100, "gpt-4o"), null);
+
+        assertThat(registry.counter(TokenCountingAdvisor.COUNTER_NAME,
+                "agent", "a", "model", "gpt-4o").count()).isEqualTo(200.0);
+        // cost Counter 不应被记
+        assertThat(registry.find("agentflow.workflow.cost.estimated")
+                .counter()).isNull();
     }
 }

@@ -1,5 +1,7 @@
 package com.agentflow.adapters.springai;
 
+import com.agentflow.observability.AgentFlowMetrics;
+
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 
@@ -28,14 +30,30 @@ public class TokenCountingAdvisor implements BaseAdvisor {
 
     private final MeterRegistry meterRegistry;
     private final String agentName;
+    /** U7 KTD-3：可选 AgentFlowMetrics 委托——非空时 after() 记 token 后调 recordCost 算成本。
+     *  为空时仅记 token Counter（U3 行为，向后兼容）。 */
+    private final AgentFlowMetrics metricsDelegate;
 
     /**
      * @param meterRegistry Micrometer registry（可空——空时 after 仍跑但不记指标，便于无 actuator 环境跑测试）
      * @param agentName     agent 名（作为 tag；可空）
      */
     public TokenCountingAdvisor(MeterRegistry meterRegistry, String agentName) {
+        this(meterRegistry, agentName, null);
+    }
+
+    /**
+     * U7 KTD-3：扩展构造器，注入 AgentFlowMetrics 做成本核算。
+     * metricsDelegate 为 null 时退化为 U3 行为（仅记 token）。
+     *
+     * @param meterRegistry  Micrometer registry
+     * @param agentName      agent 名
+     * @param metricsDelegate 可空 AgentFlowMetrics（非空时 after 调 recordCost）
+     */
+    public TokenCountingAdvisor(MeterRegistry meterRegistry, String agentName, AgentFlowMetrics metricsDelegate) {
         this.meterRegistry = meterRegistry;
         this.agentName = agentName;
+        this.metricsDelegate = metricsDelegate;
     }
 
     @Override
@@ -67,6 +85,11 @@ public class TokenCountingAdvisor implements BaseAdvisor {
         String modelTag = (model == null || model.isBlank()) ? "unknown" : model;
         Tags tags = Tags.of("agent", agentTag).and("model", modelTag);
         meterRegistry.counter(COUNTER_NAME, tags).increment(tokens.total());
+        // U7 KTD-3：成本核算委托给 AgentFlowMetrics（单一真相源）。
+        // 用 recordCost 而非 recordTokens——本方法已直记 token Counter，避免双计。
+        if (metricsDelegate != null) {
+            metricsDelegate.recordCost(modelTag, tokens.promptTokens(), tokens.completionTokens());
+        }
         return response;
     }
 }

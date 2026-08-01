@@ -25,7 +25,7 @@ class MockAgentFunctionTest {
     private final MockAgentFunction agent = new MockAgentFunction();
 
     private static AgentInput inputWithMock(String nodeId, String mockResponse, WorkflowContext ctx) {
-        return new AgentInput(nodeId, "mock-agent", null, ctx, Map.of(), List.of(), Map.of(), mockResponse);
+        return new AgentInput(nodeId, "mock-agent", null, ctx, Map.of(), List.of(), Map.of(), mockResponse, null);
     }
 
     // ─────────────────── 场景 1：mock_response 返回 + 占位符替换 ───────────────────
@@ -79,7 +79,7 @@ class MockAgentFunctionTest {
     @Test
     @DisplayName("mock 模式：context 为 null 时占位符原样保留（防御）")
     void nullContextLeavesPlaceholders() throws com.agentflow.agent.AgentExecutionException {
-        AgentInput input = new AgentInput("E", "mock-agent", null, null, Map.of(), List.of(), Map.of(), "${x}");
+        AgentInput input = new AgentInput("E", "mock-agent", null, null, Map.of(), List.of(), Map.of(), "${x}", null);
         AgentOutput out = agent.execute(input);
         assertThat(out.content()).isEqualTo("${x}");
     }
@@ -123,5 +123,72 @@ class MockAgentFunctionTest {
         AgentOutput out2 = agent.execute(inputWithMock("nodeB", "B=${x}", ctx));
         assertThat(out1.content()).isEqualTo("A=1");
         assertThat(out2.content()).isEqualTo("B=1");
+    }
+
+    // ─────────────────── 场景 4：U7 trace 写入（KTD-2 mock 模式补齐） ───────────────────
+
+    @Test
+    @DisplayName("U7：AgentInput 携带 ExecutionTrace → MockAgentFunction 写 NodeTrace.succeed（token=0）")
+    void writesNodeTraceWhenTracePresent() throws com.agentflow.agent.AgentExecutionException {
+        com.agentflow.observability.ExecutionTrace trace = new com.agentflow.observability.ExecutionTrace("wf-u7");
+        WorkflowContext ctx = new WorkflowContext();
+        // 构造带 trace 的 AgentInput（模拟 BspEngine 注入）
+        AgentInput input = new AgentInput("N", "mock-agent", null, ctx, Map.of(),
+                List.of(), Map.of(), "mock-output", trace);
+
+        AgentOutput out = agent.execute(input);
+
+        assertThat(out.content()).isEqualTo("mock-output");
+        assertThat(trace.nodes()).hasSize(1);
+        com.agentflow.observability.NodeTrace n = trace.nodes().get(0);
+        assertThat(n.nodeId()).isEqualTo("N");
+        assertThat(n.agentName()).isEqualTo("mock-agent");
+        assertThat(n.status()).isEqualTo(com.agentflow.observability.NodeTrace.Status.SUCCESS);
+        assertThat(n.promptTokens()).isZero();
+        assertThat(n.completionTokens()).isZero();
+        assertThat(n.totalTokens()).isZero();
+        assertThat(n.outputSummary()).isEqualTo("mock-output");
+    }
+
+    @Test
+    @DisplayName("U7：AgentInput 不携带 trace → MockAgentFunction 不写 trace（向后兼容，无 NPE）")
+    void noTraceNoOp() throws com.agentflow.agent.AgentExecutionException {
+        // inputWithMock 构造的 AgentInput.trace() == null
+        AgentInput input = inputWithMock("X", "x", new WorkflowContext());
+        AgentOutput out = agent.execute(input);
+        assertThat(out.content()).isEqualTo("x");
+        // 不抛即通过（无 trace 不写）
+    }
+
+    @Test
+    @DisplayName("U7：mock_response 缺失 + 携带 trace → MissingMockResponseException + NodeTrace.fail")
+    void missingMockWithTraceFailsNode() {
+        com.agentflow.observability.ExecutionTrace trace = new com.agentflow.observability.ExecutionTrace("wf-fail");
+        AgentInput input = new AgentInput("F", "mock-agent", null, new WorkflowContext(), Map.of(),
+                List.of(), Map.of(), null, trace);
+
+        assertThatThrownBy(() -> agent.execute(input))
+                .isInstanceOf(MissingMockResponseException.class);
+
+        com.agentflow.observability.NodeTrace n = trace.nodes().get(0);
+        assertThat(n.status()).isEqualTo(com.agentflow.observability.NodeTrace.Status.FAILED);
+        assertThat(n.error()).contains("F");
+    }
+
+    @Test
+    @DisplayName("U7：mock 巨型响应 → outputSummary 截断到 200 字符（防撑爆 trace snapshot）")
+    void longMockOutputTruncated() throws com.agentflow.agent.AgentExecutionException {
+        com.agentflow.observability.ExecutionTrace trace = new com.agentflow.observability.ExecutionTrace("wf-long");
+        String huge = "x".repeat(500);
+        AgentInput input = new AgentInput("L", "mock-agent", null, new WorkflowContext(), Map.of(),
+                List.of(), Map.of(), huge, trace);
+
+        agent.execute(input);
+
+        String summary = trace.nodes().get(0).outputSummary();
+        assertThat(summary).hasSizeLessThanOrEqualTo(203);  // 200 + "..."
+        assertThat(summary).endsWith("...");
+        // 原始 content 不截断
+        // （AgentOutput.content() 保留原值，仅 trace summary 截断——此处不直接断言，因 input mock 已是 huge）
     }
 }

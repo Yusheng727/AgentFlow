@@ -64,7 +64,7 @@ public final class DryRunEngine {
                 try {
                     expectedOutput = agent.execute(
                             new AgentInput(nodeId, node.agent(), node.promptTemplate(), null,
-                                    inputs, node.tools(), node.outputSchema(), node.mockResponse()))
+                                    inputs, node.tools(), node.outputSchema(), node.mockResponse(), null))
                             .content();
                 } catch (com.agentflow.agent.AgentExecutionException e) {
                     expectedOutput = "<error: " + e.getMessage() + ">";

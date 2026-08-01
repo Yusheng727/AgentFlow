@@ -1,0 +1,8 @@
+{
+  "_comment": "AgentFlow LLM 成本单价表（U7 KTD-3）。USD per 1M tokens。启动期由 CostCalculator.loadFromClasspath 加载，覆盖内置默认表。模型单价变化频繁，更新此文件即可，无需改码。",
+  "gpt-4o": { "input_per_million": 2.50, "output_per_million": 10.00 },
+  "gpt-4o-mini": { "input_per_million": 0.15, "output_per_million": 0.60 },
+  "gpt-4-turbo": { "input_per_million": 10.00, "output_per_million": 30.00 },
+  "gpt-3.5-turbo": { "input_per_million": 0.50, "output_per_million": 1.50 },
+  "claude-3-5-sonnet": { "input_per_million": 3.00, "output_per_million": 15.00 }
+}
