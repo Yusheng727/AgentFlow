@@ -1,6 +1,6 @@
 # AgentFlow — 接手指南（给 Claude Code）
 
-> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-07-27（U5 已合 main + U14 接口对齐 rebase 完成，均 mvn verify 绿）。
+> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-02（U6/U7/U11/U12 落地于 `feat/u7-observability` 分支，8 模块 305 tests 绿，待 ce-code-review + 合 main）。
 
 ## 这是什么项目
 
@@ -26,6 +26,10 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 | U4 | 容错机制：`com.agentflow.engine.fault`（ErrorClassifier/RetryPolicy/TimeoutPolicy/ErrorHandler，全 record）。三层链路 Timeout→ErrorClassifier→Retry（指数退避 1s→2s→4s，max 3，仅 transient）→ErrorHandler（abort 前 context 补偿）。BspEngine 新构造注入 RetryPolicy/ErrorHandler/TimeoutPolicy；runSuperStep 用 retryPolicy 包 NodeExecutor + allOf.get(remaining) 工作流总超时；applyBarrier 抛前调 ErrorHandler。失败传播：节点耗尽/fatal → 工作流 FAILED abort。retry 预算组合式（3 attempt × 内含 schema-retry ≤2 = 9 上限）。adapter.mapException 委托 ErrorClassifier（单一真相源）。经 ce-code-review + 1 correctness（backoffFor 小数倍率截断）+ 4 cleanup 修复 | 136 tests pass（97 core + 39 adapter），JaCoCo 80% 达标，`mvn verify` 5 模块 SUCCESS |
 | U5 | 两级 Checkpoint 持久化 + Recovery：`com.agentflow.engine.checkpoint` 包。CheckpointManager 接口扩展（U2 seam 落地：查询方法 + 工作流生命周期 + U14 加 findCreatedBy 所有权查询）+ `InMemoryCheckpointManager`（ConcurrentHashMap，开发测试）+ `PostgresCheckpointManager`（JdbcTemplate + Flyway 迁移 + Semaphore(20) 限流 + ON CONFLICT 幂等 upsert）+ `RecoveryProtocol`（崩溃恢复，off-by-one 修复：查 nextSuperStep）+ `BspEngine.recoverAndExecute`（U5 P0 修复新增：replayOutputs 重放崩溃层输出 + stray COMPLETED 防护）。数据 record：NodeOutputStore / BarrierCheckpoint / ExecutionState + NodeStatus / WorkflowStatus 枚举。DB 迁移 V1__checkpoint_schema.sql（3 表 + 2 索引 + barrier UNIQUE 约束）。经 ce-code-review 10 reviewer + 2 个 P0 修复（ADV-1 崩溃层 channel 丢失 / ADV-2 stray 防护未实现，4 reviewer 独立确认） | 131 core tests pass，JaCoCo 80% 达标，`mvn verify` 5 模块 SUCCESS，已合 main |
 | U14 | API 鉴权 + 凭证管理：`ApiKeyAuthFilter`（OncePerRequestFilter，SHA-256 hash）+ `WorkflowOwnershipChecker`（防 IDOR）+ `CallerToolAllowlist`（per-caller tool 授权）+ `CredentialManager`（LLM 凭证从 env 读取，禁止 yml 硬编码）+ `PromptRedactionFilter`（正则脱敏 API Key/手机号/身份证）+ `WorkflowController`（POST /api/workflows → 202 异步执行 + GET status + POST retry）+ DB migration V2（workflow_executions.created_by）。接口对齐：U14 弱类型 Optional<?> 改 U5 强类型 + WorkflowStatus 枚举 + initWorkflow 4 参(createdBy) + findCreatedBy | api 测试 8 个（含补的 WorkflowControllerTest）+ core 22，JaCoCo 80% 达标，`mvn verify` 5 模块 SUCCESS，`feat/u14-api-security` 分支（已 rebase 到含 U5 的 main） |
+| U6 | 调试体验：`DryRunEngine`（不调 LLM 的干跑，验证拓扑/SpEL/channel）+ `DiagnosisService`（分析 5 类异常：超时/成本/token 异常/失败层/孤儿节点）+ `StructuredLogger`（结构化执行日志）。经 ce-code-review 修复（token 异常测试数据：3 正常节点 + 1 极端离群点过 3x 阈值） | core 测试，JaCoCo 80% 达标，已合 main |
+| U7 | 可观测性：`AgentFlowMetrics`（5 Micrometer 指标：workflow.executed / node.duration / tokens.consumed / workflow.cost.estimated / workflow.cost.budget_exceeded）+ `CostCalculator`（token×模型单价表，单价表放 `agentflow-cost-pricings.json` 配置文件启动期加载，R4 规避）+ `ExecutionTraceRegistry`（workflowId→trace 集中存放，ConcurrentHashMap）+ `TraceController`（GET /api/workflows/{id}/trace 返回 ExecutionTrace.Snapshot）。**Trace 穿线**（KTD-2 难题 R1）：BspEngine 5-arg 构造器注入 registry → execute() 注册 trace → AgentInput 第 9 字段穿线 → MockAgentFunction/SpringAiAgentAdapter 从 AgentInput.trace() 取 trace 写 NodeTrace（mock 模式补齐，OQ-3 决议扩展）→ TraceController 从 registry 取 snapshot。traceRegistry=null 整条链路 no-op，旧构造器保留向后兼容。TokenCountingAdvisor 新增 3-arg 构造器委托 AgentFlowMetrics 记成本（2-arg 旧构造器保留） | 299→305 tests，JaCoCo 80% 达标，`mvn verify` 8 模块 SUCCESS，`feat/u7-observability` 分支（含 U11/U12） |
+| U11 | 合同审核串行 Demo（对比 U10 并行拓扑）：新 `demo-contract-review` 模块，4 节点串行链（合同解析→法律风险→合规建议→最终报告），每步 mock_response 用 `${previousStep}` 占位符引用上一步输出，验证 BSP 串行依赖链 + 上下文逐级传递。4 super-step 各 1 节点。**附带修复**：MockAgentFunction PLACEHOLDER 正则 `[\\w.]` → `[\\w.-]` 支持连字符 channel 名（`${contract-parse}` 之前不解析，channel=nodeId 用连字符是项目约定），加 `hyphenatedChannelResolves` 测试锁定 | 5 tests，`mvn verify` SUCCESS |
+| U12 | 投资分析双层 fork-join Demo：新 `demo-investment-analysis` 模块，6 节点 4 super-step 双层 fork-join（step0 公司财报+市场数据并行 → step1 可行性分析串行 → step2 风险评估+收益预测并行 → step3 投资裁决汇总），验证 BSP 最长路径分层泛用性 + channel 隔离。用 `DAGLayerer.computeSuperSteps` 断言 4 层分层。node id 用下划线（`company_finance`）避开连字符占位符问题（U11 已修连字符正则，但 U12 保持自包含） | 6 tests，`mvn verify` SUCCESS |
 
 **OQ-2 决议**：plan 当初猜 Spring AI 2.0 要 Boot 3.5——实际不够。3.5 仍带 Jackson 2.19，而 Spring AI 2.0.0 的 @Tool schema 路径用 Jackson 3（`tools.jackson.core`，需 `JsonSerializeAs`）。**正确版本是 Spring Boot 4.1.0 GA**（自带 Jackson 3.1.4 + Spring Framework 7）。U3 起全仓升 Boot 4.1。
 
@@ -39,7 +43,14 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 > **U3 详细接手清单**：[`docs/handoff/u3-spring-ai-adapter.md`](docs/handoff/u3-spring-ai-adapter.md) — 已完成，留作 U3 实现决策的历史记录。
 
 **后续顺序**（按 `05-implementation-units.md` 的 Unit Priority 矩阵 P0 先行）：
-U3 ✅ → U4 ✅ → U5 ✅ → U14 ✅ → U9 ✅ → U10 ✅ → U13 ✅（P0 全部交付）。P1/P2：**U6（调试体验）✅ 实现完成** → U7 → U8 → U11 → U12。
+U3 ✅ → U4 ✅ → U5 ✅ → U14 ✅ → U9 ✅ → U10 ✅ → U13 ✅（P0 全部交付）。P1/P2：U6 ✅ → U7 ✅ → U11 ✅ → U12 ✅ → **U8（版本管理）→ UI（React 5 Tab）→ Grafana Dashboard**。详见 `docs/plans/2026-07-31-001-feat-ui-observability-aux-demos-plan.md`。
+
+> **当前状态（2026-08-02）**：
+> - P0 全交付 + U6/U7/U11/U12 落地，`mvn verify` **8 模块全绿（305 tests pass）**，JaCoCo 80% 达标
+> - 三个并行单元在 `feat/u7-observability` 分支：U7（`c888473`，可观测性）+ U11（`e869444`，合同审核串行 Demo）+ U12（`1b72166`，投资分析 fork-join Demo）
+> - **未 push、未合 main**（待 ce-code-review + 用户确认外向操作）
+> - 下一批：UI（React 5 Tab，串行先行）+ Grafana Dashboard JSON + U8 版本管理
+> - 历史：U5+U14+U9+U10+U13 已合 main；U6 已合 main。main 本地领先 origin 多个 commit，待 push
 
 > **当前状态（2026-07-30）**：
 > - **P0 全部交付**：U1-U5 + U14 + U9 + U10 + U13 已合 main
