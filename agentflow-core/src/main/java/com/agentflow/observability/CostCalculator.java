@@ -61,12 +61,6 @@ public final class CostCalculator {
         this.pricings = new java.util.concurrent.ConcurrentHashMap<>(defaultPricings());
     }
 
-    /** 从 classpath JSON 加载单价表覆盖默认表。JSON 格式见 {@link #loadFromClasspath}。 */
-    public CostCalculator(String classpathResource) {
-        this();
-        loadFromClasspath(classpathResource);
-    }
-
     /**
      * 从 classpath 加载 JSON 单价表覆盖默认表。JSON 结构：
      * <pre>{@code
@@ -75,7 +69,9 @@ public final class CostCalculator {
      *   "claude-sonnet-4": { "input_per_million": 3.00, "output_per_million": 15.00 }
      * }
      * }</pre>
-     * 文件不存在时 warn 并保留默认表（启动不失败）。
+     * 文件不存在时 warn 并保留默认表（启动不失败）。畸形 JSON（非数字单价、缺字段）
+     * 逐条跳过并 warn，整体沿用默认表——不抛 ClassCastException 阻断启动
+     *（reliability REL-3 + adversarial + security SEC-R3 三方确认）。
      *
      * @return this（链式）
      */
@@ -98,7 +94,10 @@ public final class CostCalculator {
                 Map<String, Object> vm = (Map<String, Object>) vals;
                 Object inVal = vm.get("input_per_million");
                 Object outVal = vm.get("output_per_million");
-                if (inVal == null || outVal == null) {
+                // 畸形条目（缺字段或非数字类型如 String/Array）跳过而非抛 ClassCastException
+                if (!(inVal instanceof Number) || !(outVal instanceof Number)) {
+                    log.warn("成本单价表 {} 条目 {} 非数字单价（input={}, output={}），跳过",
+                            classpathResource, model, inVal, outVal);
                     return;
                 }
                 double input = ((Number) inVal).doubleValue();

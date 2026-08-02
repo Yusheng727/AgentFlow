@@ -209,6 +209,12 @@ public final class BspEngine {
             }
             throw we;
         } finally {
+            // U7 兜底：catch(WorkflowExecutionException) 不覆盖 reducer.merge/applyOutput 抛的其他
+            // RuntimeException（如 CUSTOM reducer 异常），trace 会永留 RUNNING 误导诊断。finally 里
+            // 若 trace 仍 RUNNING 则标 FAILED（correctness #1，2 票确认）。best-effort，不掩盖原异常。
+            if (trace != null && trace.status() == ExecutionTrace.Status.RUNNING) {
+                trace.markCompleted(ExecutionTrace.Status.FAILED);
+            }
             executor.shutdownNow();
         }
     }
@@ -246,6 +252,10 @@ public final class BspEngine {
         Objects.requireNonNull(agentResolver, "agentResolver");
         Objects.requireNonNull(reducer, "reducer");
         Objects.requireNonNull(workflowId, "workflowId");
+
+        // U7：恢复路径同样注册 trace（与 execute() 对齐），否则 TraceController 查恢复续跑的工作流
+        // 会返回旧 FAILED trace 或空，与 checkpoint 的 SUCCESS 状态分裂（adversarial/correctness/reliability/agent-native 4 票确认）。
+        ExecutionTrace trace = traceRegistry == null ? null : traceRegistry.register(workflowId);
 
         ExecutionState state = recovery.recover(workflowId);
         log.info("recoverAndExecute wf={}: nextSuperStep={}, 跳过节点={}, 重放输出={}",
@@ -289,12 +299,18 @@ public final class BspEngine {
                                 .toList())
                         : step;
                 List<NodeResult> results = runSuperStep(stepToRun, dag, snapshot, nodeExecutor, cp, workflowId,
-                        executor, Map.of(), workflowStart, null);
+                        executor, Map.of(), workflowStart, trace);
                 applyBarrier(step, results, context, dag, def, reducer, cp, workflowId);
             }
             cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
+            if (trace != null) {
+                trace.markCompleted(ExecutionTrace.Status.COMPLETED);
+            }
             return context;
         } catch (WorkflowExecutionException we) {
+            if (trace != null) {
+                trace.markCompleted(ExecutionTrace.Status.FAILED);
+            }
             try {
                 cp.updateStatus(workflowId, WorkflowStatus.FAILED);
             } catch (RuntimeException se) {

@@ -55,3 +55,6 @@ application-local.yml
 
 # Project-local Maven settings (mirror override, user-specific)
 settings.xml
+
+# ce-code-review 临时产物
+.review_tmp/

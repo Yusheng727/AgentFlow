@@ -1,14 +1,18 @@
 package com.agentflow.api;
 
+import com.agentflow.api.security.WorkflowOwnershipChecker;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.ExecutionTraceRegistry;
 
+import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Objects;
 
 /**
  * Trace REST Controller（U7，R8）。
@@ -25,8 +29,10 @@ import org.springframework.web.bind.annotation.RestController;
  * （mock 模式）与 {@code SpringAiAgentAdapter}（真实模式），两者都写 {@link com.agentflow.observability.NodeTrace}。
  * 故本端点在 mock 模式下也返回完整轨迹树，不返回空树。
  *
- * <p>鉴权：v1 不加所有权校验（trace 查询只读，且 registry 是进程内 transient；U14 鉴权在 WorkflowController 已覆盖，
- * TraceController 由 Starter 的 security filter 链统一保护）。生产环境应补 ownership check，留 v1.1。
+ * <h3>鉴权（防 IDOR，对齐 U14 R21）</h3>
+ * <p>注入 {@link WorkflowOwnershipChecker}，getTrace 开头取 callerId 调 {@code requireOwnership}：
+ * 非创建者 → 403，与 {@link WorkflowController#getStatus} / {@code retry} 同一防线。
+ * workflowId 不存在（未注册 trace）→ 404 + 空 body。
  *
  * <p>未注册的 workflowId 返回 404 + 空 body（不返回 200 空对象，避免误判）。
  */
@@ -35,19 +41,29 @@ import org.springframework.web.bind.annotation.RestController;
 public class TraceController {
 
     private final ExecutionTraceRegistry traceRegistry;
+    private final WorkflowOwnershipChecker ownershipChecker;
 
-    public TraceController(ExecutionTraceRegistry traceRegistry) {
+    public TraceController(ExecutionTraceRegistry traceRegistry,
+                           WorkflowOwnershipChecker ownershipChecker) {
         this.traceRegistry = traceRegistry;
+        this.ownershipChecker = Objects.requireNonNull(ownershipChecker, "ownershipChecker");
     }
 
     /**
      * 查工作流执行轨迹。
      *
      * @param workflowId 工作流执行 id
-     * @return 200 + {@link ExecutionTrace.Snapshot}；未注册返回 404
+     * @return 200 + {@link ExecutionTrace.Snapshot}；非创建者 403；未注册 404
      */
     @GetMapping("/{workflowId}/trace")
-    public ResponseEntity<ExecutionTrace.Snapshot> getTrace(@PathVariable String workflowId) {
+    public ResponseEntity<ExecutionTrace.Snapshot> getTrace(@PathVariable String workflowId,
+                                                             HttpServletRequest httpRequest) {
+        String callerId = WorkflowOwnershipChecker.callerIdFrom(httpRequest);
+        try {
+            ownershipChecker.requireOwnership(workflowId, callerId);
+        } catch (WorkflowOwnershipChecker.OwnershipException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
         ExecutionTrace.Snapshot snapshot = traceRegistry == null ? null : traceRegistry.snapshot(workflowId);
         if (snapshot == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();

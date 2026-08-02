@@ -71,17 +71,17 @@ class InvestmentAnalysisDemoTest {
 
         // 0-based：step 0 = 2 并行采集，step 1 = 1 可行性，step 2 = 2 并行评估，step 3 = 1 裁决
         assertThat(steps.get(0))
-                .containsExactlyInAnyOrder("company_finance", "market_data");
-        assertThat(steps.get(1)).containsExactly("feasibility_analysis");
+                .containsExactlyInAnyOrder("company-finance", "market-data");
+        assertThat(steps.get(1)).containsExactly("feasibility-analysis");
         assertThat(steps.get(2))
-                .containsExactlyInAnyOrder("risk_assessment", "return_forecast");
-        assertThat(steps.get(3)).containsExactly("investment_decision");
+                .containsExactlyInAnyOrder("risk-assessment", "return-forecast");
+        assertThat(steps.get(3)).containsExactly("investment-decision");
     }
 
     // ─────────────────── 场景 2：上层并行 → 下层串行 占位符传递 ───────────────────
 
     @Test
-    @DisplayName("step0 并行输出正确传递到 step1 串行（${company_finance}/${market_data} 占位符替换验证）")
+    @DisplayName("step0 并行输出正确传递到 step1 串行（${company-finance}/${market-data} 占位符替换验证）")
     void parallelOutputsPropagateToSerialStep() throws Exception {
         WorkflowDefinition def = loadWorkflow();
         MockAgentFunction mock = new MockAgentFunction();
@@ -92,25 +92,25 @@ class InvestmentAnalysisDemoTest {
                 new InMemoryCheckpointManager(), new ChannelReducer(), "test-2");
 
         // step0 两路 channel 各自落库（channel = nodeId 便捷约定）
-        assertThat(result.getValue("company_finance"))
+        assertThat(result.getValue("company-finance"))
                 .asString().contains("营收：120 亿");
-        assertThat(result.getValue("market_data"))
+        assertThat(result.getValue("market-data"))
                 .asString().contains("PE：22 倍");
 
-        // step1 feasibility_analysis 的 mock_response 含占位符 ${company_finance}/${market_data}，
+        // step1 feasibility-analysis 的 mock_response 含占位符 ${company-finance}/${market-data}，
         // 被替换为上游真实输出 → 证明 step0 并行结果已传到 step1 串行节点
-        String feasibility = (String) result.getValue("feasibility_analysis");
-        assertThat(feasibility).contains("营收：120 亿")   // 来自 company_finance
-                .contains("PE：22 倍");                    // 来自 market_data
+        String feasibility = (String) result.getValue("feasibility-analysis");
+        assertThat(feasibility).contains("营收：120 亿")   // 来自 company-finance
+                .contains("PE：22 倍");                    // 来自 market-data
         // 占位符未被原样保留（替换确实发生）
-        assertThat(feasibility).doesNotContain("${company_finance}")
-                .doesNotContain("${market_data}");
+        assertThat(feasibility).doesNotContain("${company-finance}")
+                .doesNotContain("${market-data}");
     }
 
     // ─────────────────── 场景 3：最终汇总引用前 3 层全部输出 ───────────────────
 
     @Test
-    @DisplayName("investment_decision 汇总引用前 3 层全部输出（5 个 ${...} 占位符全部替换）")
+    @DisplayName("investment-decision 汇总引用前 3 层全部输出（5 个 ${...} 占位符全部替换）")
     void finalDecisionAggregatesAllUpstreamLayers() throws Exception {
         WorkflowDefinition def = loadWorkflow();
         MockAgentFunction mock = new MockAgentFunction();
@@ -120,7 +120,7 @@ class InvestmentAnalysisDemoTest {
                 def, agents, Map.of("target", "Acme Tech"),
                 new InMemoryCheckpointManager(), new ChannelReducer(), "test-3");
 
-        String decision = (String) result.getValue("investment_decision");
+        String decision = (String) result.getValue("investment-decision");
 
         // 验收：输出 JSON 含 riskLevel / confidence / evidence / recommendation
         assertThat(decision).contains("\"riskLevel\"")
@@ -130,22 +130,22 @@ class InvestmentAnalysisDemoTest {
                 .contains("\"recommendation\"");
 
         // 汇总节点 mock_response 的 upstream 段含 5 个占位符，全部应被前 3 层输出替换
-        // step0：company_finance / market_data
+        // step0：company-finance / market-data
         assertThat(decision).contains("营收：120 亿")
                 .contains("PE：22 倍");
-        // step1：feasibility_analysis
+        // step1：feasibility-analysis
         assertThat(decision).contains("基本面：优秀")
                 .contains("安全边际充足");
-        // step2：risk_assessment / return_forecast
+        // step2：risk-assessment / return-forecast
         assertThat(decision).contains("综合风险等级：MEDIUM")
                 .contains("年化预期收益率：18%");
 
         // 无残留占位符 → 前 3 层全部输出确实传到汇总节点
-        assertThat(decision).doesNotContain("${company_finance}")
-                .doesNotContain("${market_data}")
-                .doesNotContain("${feasibility_analysis}")
-                .doesNotContain("${risk_assessment}")
-                .doesNotContain("${return_forecast}");
+        assertThat(decision).doesNotContain("${company-finance}")
+                .doesNotContain("${market-data}")
+                .doesNotContain("${feasibility-analysis}")
+                .doesNotContain("${risk-assessment}")
+                .doesNotContain("${return-forecast}");
     }
 
     // ─────────────────── 场景 4：ExecutionTrace 展示完整 4 层结构 ───────────────────
@@ -177,8 +177,8 @@ class InvestmentAnalysisDemoTest {
         assertThat(snapshot.status()).isEqualTo(ExecutionTrace.Status.COMPLETED);
         assertThat(snapshot.nodes()).map(NodeTrace::nodeId)
                 .containsExactlyInAnyOrder(
-                        "company_finance", "market_data", "feasibility_analysis",
-                        "risk_assessment", "return_forecast", "investment_decision");
+                        "company-finance", "market-data", "feasibility-analysis",
+                        "risk-assessment", "return-forecast", "investment-decision");
         // 每个节点 trace 状态成功
         assertThat(snapshot.nodes()).allSatisfy(nt ->
                 assertThat(nt.status()).isEqualTo(NodeTrace.Status.SUCCESS));
@@ -198,22 +198,22 @@ class InvestmentAnalysisDemoTest {
                 new InMemoryCheckpointManager(), new ChannelReducer(), "test-5");
 
         // BSP 语义：同 super-step 节点读只读快照互不可见，barrier 后按 Reducer 合并。
-        // company_finance / market_data 各写独立 channel（channel=nodeId），不串：
-        Object finance = result.getValue("company_finance");
-        Object market = result.getValue("market_data");
+        // company-finance / market-data 各写独立 channel（channel=nodeId），不串：
+        Object finance = result.getValue("company-finance");
+        Object market = result.getValue("market-data");
 
         assertThat(finance).isInstanceOf(String.class);
         assertThat(market).isInstanceOf(String.class);
-        // company_finance channel 只含财报内容，不含市场数据
+        // company-finance channel 只含财报内容，不含市场数据
         assertThat((String) finance).contains("营收：120 亿")
                 .doesNotContain("PE：22 倍");
-        // market_data channel 只含市场数据，不含财报内容
+        // market-data channel 只含市场数据，不含财报内容
         assertThat((String) market).contains("PE：22 倍")
                 .doesNotContain("营收：120 亿");
 
-        // step2 两并行同理：risk_assessment / return_forecast channel 互不污染
-        String risk = (String) result.getValue("risk_assessment");
-        String ret = (String) result.getValue("return_forecast");
+        // step2 两并行同理：risk-assessment / return-forecast channel 互不污染
+        String risk = (String) result.getValue("risk-assessment");
+        String ret = (String) result.getValue("return-forecast");
         assertThat(risk).contains("综合风险等级：MEDIUM")
                 .doesNotContain("年化预期收益率");
         assertThat(ret).contains("年化预期收益率：18%")
@@ -236,7 +236,7 @@ class InvestmentAnalysisDemoTest {
         long elapsed = System.currentTimeMillis() - start;
 
         assertThat(elapsed).isLessThan(40_000L);
-        assertThat(result.getValue("investment_decision")).isNotNull();
+        assertThat(result.getValue("investment-decision")).isNotNull();
     }
 
     // ─────────────────── 辅助 ───────────────────
@@ -253,12 +253,12 @@ class InvestmentAnalysisDemoTest {
 
     private static String agentNameFor(String nodeId) {
         return switch (nodeId) {
-            case "company_finance" -> "finance-agent";
-            case "market_data" -> "market-agent";
-            case "feasibility_analysis" -> "feasibility-agent";
-            case "risk_assessment" -> "risk-agent";
-            case "return_forecast" -> "return-agent";
-            case "investment_decision" -> "decision-agent";
+            case "company-finance" -> "finance-agent";
+            case "market-data" -> "market-agent";
+            case "feasibility-analysis" -> "feasibility-agent";
+            case "risk-assessment" -> "risk-agent";
+            case "return-forecast" -> "return-agent";
+            case "investment-decision" -> "decision-agent";
             default -> "unknown-agent";
         };
     }

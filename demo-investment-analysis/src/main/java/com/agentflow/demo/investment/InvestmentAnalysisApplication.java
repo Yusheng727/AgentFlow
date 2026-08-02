@@ -22,10 +22,10 @@ import java.util.Map;
  *
  * <p>双层 fork-join 混合拓扑（6 节点 4 super-step）：
  * <ul>
- *   <li>super-step 0：company_finance + market_data（2 并行采集）</li>
- *   <li>super-step 1：feasibility_analysis（1 串行，依赖 step 0 两路）</li>
- *   <li>super-step 2：risk_assessment + return_forecast（2 并行，依赖 step 1）</li>
- *   <li>super-step 3：investment_decision（1 汇总，引用前 3 层全部输出）</li>
+ *   <li>super-step 0：company-finance + market-data（2 并行采集）</li>
+ *   <li>super-step 1：feasibility-analysis（1 串行，依赖 step 0 两路）</li>
+ *   <li>super-step 2：risk-assessment + return-forecast（2 并行，依赖 step 1）</li>
+ *   <li>super-step 3：investment-decision（1 汇总，引用前 3 层全部输出）</li>
  * </ul>
  * 验证 {@link com.agentflow.dsl.DAGLayerer#computeSuperSteps} 最长路径分层对复杂混合拓扑的泛用性，
  * 以及 BSP super-step 间上下文传递（下游 mock_response 的 ${channel} 占位符替换验证上游输出可达）。
@@ -67,8 +67,8 @@ public class InvestmentAnalysisApplication {
                     def, agents, Map.of("target", "Acme Tech"),
                     new InMemoryCheckpointManager(), new ChannelReducer(), "demo-investment-analysis-1");
             System.out.println("=== 投资分析决策结果 ===");
-            System.out.println(result.getValue("investment_decision"));
-            return (String) result.getValue("investment_decision");
+            System.out.println(result.getValue("investment-decision"));
+            return (String) result.getValue("investment-decision");
         } catch (Exception e) {
             throw new RuntimeException("投资分析决策工作流执行失败", e);
         }

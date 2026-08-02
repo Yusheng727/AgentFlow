@@ -54,12 +54,6 @@ public record AgentInput(
         return new AgentInput(nodeId, agentName, promptTemplate, context, inputs, List.of(), Map.of(), null, null);
     }
 
-    /** 测试/便捷工厂：带 mockResponse 但不带 trace（向后兼容旧测试）。 */
-    public static AgentInput ofMock(String nodeId, String agentName, String promptTemplate,
-                                    WorkflowContext context, Map<String, Object> inputs, String mockResponse) {
-        return new AgentInput(nodeId, agentName, promptTemplate, context, inputs, List.of(), Map.of(), mockResponse, null);
-    }
-
     /** 紧凑构造器：null 防御到不可变空集合，避免适配器侧 NPE。 */
     public AgentInput {
         if (tools == null) {
