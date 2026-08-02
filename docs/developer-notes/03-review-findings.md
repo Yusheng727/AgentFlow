@@ -57,6 +57,61 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 
 ---
 
+## U7/U11/U12 Review 概览（2026-08-02）
+
+- **审查方式**：ce-code-review 多 agent 流程，11 个 persona reviewer 并行
+- **diff 规模**：34 文件，~2338 行（U7 可观测性 + U11 合同审核 Demo + U12 投资分析 Demo）
+- **reviewer 清单**：correctness / testing / maintainability / project-standards / agent-native / learnings-researcher（always-on 6）+ security / performance / api-contract / reliability / adversarial（cross-cutting 5）
+- **关键机制**：cross-reviewer agreement——同一问题被多个 reviewer 独立报告，confidence 提权。本次最严重的 P0（recoverAndExecute 不接 trace）被 **4 个 reviewer 独立确认**（adversarial + correctness + reliability + agent-native），与 U5 的两个 P0 同等可信度。
+
+**面试讲法**：「U7 这次 review 又复现了 U5 的模式——最严重的 P0 被 4 个 reviewer 从不同视角独立确认：adversarial 构造了 checkpoint=SUCCESS 但 trace=FAILED 的状态分裂场景，correctness 从代码路径看出 recoverAndExecute 不引用 traceRegistry，reliability 指出 trace 终态与恢复路径不一致，agent-native 指出恢复工作流对 TraceController 不可见。四个视角独立得出同一根因，我才确信这是真问题——和 U5 的 ADV-1/ADV-2 一模一样的 cross-reviewer 交叉验证模式。」
+
+### P0-1: TraceController 缺 ownership check → IDOR
+
+**发现**：security（P0）+ api-contract（F4 P2）两票确认。
+**问题**：新增 `GET /api/workflows/{id}/trace` 端点只接 ApiKeyAuthFilter 认证（401），未注入 WorkflowOwnershipChecker。workflowId 是 @PathVariable 用户可控，任意合法 Key 持有者可读他人 workflow 的完整 trace（含 LLM 输出摘要、token、拓扑、error）。同仓 WorkflowController 的 status/retry 已落地 ownership 防线（U14 R21），trace 端点遗漏。代码注释自认"留 v1.1"，但 plan 把防 IDOR 列为 R21 P0。
+**修复**：TraceController 注入 WorkflowOwnershipChecker，getTrace 开头取 callerId 调 requireOwnership，非创建者 → 403。补 TraceControllerTest 6 测试（owner 200 / 非owner 403 / IDOR 隔离）。
+**为什么有价值**：这是典型的"同一个 /api/workflows 基路径下两个端点，鉴权模型分裂"——security reviewer 从 authz bypass 视角抓到，api-contract reviewer 从契约一致性视角独立佐证。单测覆盖不到（测的是"调通"，不是"非owner该被拒"）。
+
+### P0-2: recoverAndExecute 不接 trace → checkpoint 与 trace 状态分裂
+
+**发现**：adversarial（P0）+ correctness（#2）+ reliability（REL-2）+ agent-native（AN-1）**4 票独立确认**。
+**问题**：BspEngine.recoverAndExecute 硬编码 `null` 作为 trace 参数，从不调 `traceRegistry.register(workflowId)`。崩溃恢复成功后 checkpoint 翻 SUCCESS，但 registry 里仍是原崩溃 execute() 留下的 FAILED trace——TraceController 返回 FAILED 快照给一个实际成功的工作流。这是 U5 ADV-1/ADV-2 的同类问题：trace 没穿进恢复路径。
+**修复**：recoverAndExecute 开头注册 trace，runSuperStep 传 trace，成功/失败路径 markCompleted(COMPLETED/FAILED)。
+**为什么有价值**：和 U5 的两个 P0 是同一个"恢复路径遗漏"模式——adversarial reviewer 用"checkpoint vs trace 状态分裂"的时序攻击暴露，correctness 从代码路径独立确认，reliability 从终态一致性确认，agent-native 从可观测性覆盖确认。4 视角独立得出同一根因，可信度极高。这体现 ce-code-review 的核心价值：同一设计缺陷，不同 persona 从各自视角都能抓到。
+
+### P2: BspEngine.execute catch 不覆盖 RuntimeException → trace 永留 RUNNING
+
+**发现**：correctness（#1）+ adversarial（cascade 同源）2 票。
+**问题**：execute() 的 `catch(WorkflowExecutionException)` 不覆盖 reducer.merge/applyOutput 抛的其他 RuntimeException（如 CUSTOM reducer 异常），trace 永留 RUNNING，TraceController 误报状态。
+**修复**：finally 里兜底——trace 仍 RUNNING 则标 FAILED。
+
+### P2: ExecutionTraceRegistry 无清理 → 内存泄漏
+
+**发现**：security（R1）+ performance（perf-1）+ reliability（REL-1）+ correctness（residual）+ api-contract（residual）**5 票**——本次最高票数。
+**问题**：ConcurrentHashMap 永不清理，BspEngine.execute 每次 register 一个新 trace，无 remove。生产长跑 OOM。
+**处置**：**保留现状记为 residual**（非不修，是设计权衡）。理由：若 finally 里 remove，TraceController 在工作流完成后就查不到 trace（破坏核心用例）。正确解法是 TTL eviction 或 Caffeine LRU，属 v1.1 范围（plan 已声明"v1 不主动清理"）。5 票共识是"需生产前解决"，不是"现在阻断合并"。
+**面试讲法**：「5 个 reviewer 都指出了 registry 无清理会 OOM。但我没盲改——简单 remove 会破坏 TraceController 的核心用例（工作流跑完查 trace）。正确解法是 TTL eviction，记为 v1.1。这体现 review 修复要懂设计权衡，不是机械执行 reviewer 建议。」
+
+### P2: CostCalculator 畸形 JSON → ClassCastException 阻断启动
+
+**发现**：reliability（REL-3）+ adversarial（residual）+ security（SEC-R3）3 票。
+**问题**：`((Number) inVal).doubleValue()` 对 String/Array 抛 ClassCastException（非 IOException，不被 catch），畸形单价表阻断 Spring 启动，违背"启动不失败"契约。
+**修复**：`instanceof Number` 检查 + warn 跳过非数字条目。
+
+### P2: U12 下划线命名偏离项目约定
+
+**发现**：project-standards（PS-1）+ maintainability（#3 stale comment）2 票。
+**问题**：U12 用下划线 `company_finance` 绕开连字符正则 bug，但 U11 同分支已修正则支持连字符——下划线偏离无技术必要，且注释引用旧正则误导。U10/U11 都用连字符。
+**修复**：6 个 node id 下划线 → 连字符，注释更新。
+
+### 死代码删除（maintainability）
+
+- `AgentInput.ofMock()` 零调用删除（grep 确认）
+- `CostCalculator(String)` 1-arg 构造器零调用删除（所有调用用 no-arg + loadFromClasspath 链式）
+
+---
+
 ## 已知未修的 Residual Risks（记录备查，非合并阻塞）
 
 这些是 advisory 级，记在 `docs/handoff/u5-checkpoint-recovery.md`，演示前定即可：

@@ -171,6 +171,77 @@
 
 ---
 
+## U7 — 可观测性（★面试重点★：trace 穿线 + 成本核算 + 多 agent review）
+
+**可讲故事**：
+- **5 Micrometer 指标**：`workflow.executed`（执行计数）/`node.duration`（节点耗时 Timer）/`tokens.consumed`（token Counter）/`workflow.cost.estimated`（成本估算）/`workflow.cost.budget_exceeded`（预算超限）——Grafana Dashboard 直采
+- **trace 穿线难题（KTD-2）**：MockAgentFunction 是无状态单例、BspEngine 不持有 trace——mock 模式下 TraceController 返回空树。解法：`ExecutionTraceRegistry`（workflowId→trace 集中存放）+ BspEngine 5-arg 构造器注入 + AgentInput 第 9 字段透传 trace → MockAgentFunction/SpringAiAgentAdapter 从 `input.trace()` 取 trace 写 NodeTrace。traceRegistry=null 整条链路 no-op，旧构造器保留向后兼容
+- **成本核算（KTD-3）**：TokenCountingAdvisor 扩展 3-arg 构造器委托 AgentFlowMetrics 记成本（不新建类）。`CostCalculator` 三层定价：代码默认价 → classpath `agentflow-cost-pricings.json` 覆盖 → 程序化 `override()` 最高优先级。warn-once 去重 + 缺文件不崩（R4 规避硬编码过时）
+- **ce-code-review 闭环**：11 reviewer 并行审，2 个 P0 + 4 个 P2 全修。最严重的 P0（recoverAndExecute 不接 trace）被 **4 个 reviewer 独立确认**（adversarial + correctness + reliability + agent-native）——和 U5 的两个 P0 一样 4 票确认
+
+**深挖点**：
+- trace 穿线为什么不用 ThreadLocal？（Virtual Threads 跨任务边界 ThreadLocal 脆弱；用 record 字段显式传递更可靠，OQ-3 决议延伸）
+- 为什么 AgentInput 加字段而非新建 context 对象？（record 扩展是项目第 4 次同模式，有 grooved convention；v2 若暴露公共 SPI 再考虑 TraceContext carrier）
+- recoverAndExecute 的 P0 是什么？（恢复路径硬编码 null trace，恢复成功后 checkpoint=SUCCESS 但 registry 返回旧 FAILED trace——状态分裂，和 U5 ADV-1 同类：trace 没穿进恢复路径）
+- 单价表为什么放配置文件？（模型单价变化频繁，硬编码会过时——R4 风险。三层定价让运维改 JSON 不改代码）
+- mock 模式写 trace 破坏单例吗？（不破坏——per-workflow 隔离通过 AgentInput 传，不是 MockAgentFunction 自身状态）
+
+**反问准备**：
+- 面试官问「你怎么做可观测性」——答：不是只加日志，是三层——Micrometer 指标（Grafana 直采）+ 结构化 trace（ExecutionTrace 树，TraceController REST 查）+ 成本核算（token×单价表，预算告警）。trace 穿线解决了 mock 模式不可观测的盲区。
+
+---
+
+## U11 — 合同审核串行流水线 Demo（对比 U10 并行）
+
+**可讲故事**：
+- 4 节点串行链（合同解析 → 法律风险 → 合规建议 → 最终报告），每步 `mock_response` 用 `${previousStep}` 占位符引用上一步输出——验证 BSP 串行依赖链 + 上下文逐级传递
+- 4 super-step 各 1 节点（最长路径分层），与 U10 的 3 并行 + 1 汇总形成拓扑对比
+- **附带修复连字符 channel 正则**：MockAgentFunction PLACEHOLDER `[\\w.]` → `[\\w.-]`，让 `${contract-parse}` 这类带连字符的 channel 引用可解析（channel=nodeId，连字符是项目命名约定，U10 用了连字符但汇总节点没引用上游所以没暴露）
+
+**深挖点**：
+- 串行 vs 并行拓扑的 BSP 区别？（串行每层 1 节点 = N super-step；并行同层多节点 = 1 super-step。串行验证上下文逐级传递，并行验证 channel 隔离）
+- 连字符正则 bug 怎么发现的？（U11 要 `${contract-parse}` 引用上一步，发现不解析——U10 用连字符但 aggregate 的 mock_response 没引用上游，bug 潜伏。U11 是真正用占位符引用连字符 channel 的第一个 demo）
+- 失败隔离怎么验证？（内联 YAML 把 legal-risk 的 mock_response 去掉触发 MissingMockResponseException，断言前置 checkpoint 已存 + 工作流 FAILED）
+
+**反问准备**：暂无。
+
+---
+
+## U12 — 投资分析双层 fork-join Demo（复杂混合拓扑）
+
+**可讲故事**：
+- 6 节点 4 super-step 双层 fork-join：step0（公司财报 + 市场数据并行）→ step1（可行性分析串行）→ step2（风险评估 + 收益预测并行）→ step3（投资裁决汇总）
+- 验证 `DAGLayerer.computeSuperSteps` 最长路径分层对复杂混合拓扑的泛用性——用 `containsExactlyInAnyOrder` 断言 4 层分层
+- 最终汇总引用前 3 层全部 5 个输出，验证 channel 隔离 + 跨 super-step 上下文传递
+
+**深挖点**：
+- 双层 fork-join 怎么分层？（最长路径：company-finance→feasibility→risk→decision = 4 层；并行节点同层。DAGLayerer 算 `level[v]=max(level[u])+1`）
+- channel 隔离怎么验证？（step0 的 company-finance 和 market-data 各自 channel 独立，step1 的 feasibility 同时引用两者不串——断言 feasibility 含 company-finance 的"营收"且含 market-data 的"PE"）
+- 为什么 U12 一开始用下划线后改连字符？（初版用下划线绕开连字符正则 bug；ce-code-review 后 U11 已修正则，project-standards reviewer 指出下划线偏离项目约定，改回连字符对齐 U10/U11）
+
+**反问准备**：暂无。
+
+---
+
+## 前端 React UI（交付门面，5 Tab）
+
+**可讲故事**：
+- **技术栈**：React 18 + TypeScript + Vite + Tailwind CSS，按 `prototype-final.html` 原型转 5 Tab 组件
+- **5 Tab**：Dashboard（KPI 行 + 三列看板 + 最近执行表格）/ Submit（YAML 编辑器 + 配置表单 + 提交/Dry-run）/ WorkflowDefinitions（定义卡片网格）/ PipelineView（BSP Pipeline super-step 可视化）/ DiagnosisPanel（KPI 摘要 + 诊断结果）
+- **真实 API 优先 + mock fallback**（KTD-1）：`api.ts` 封装 fetch，先调真实 `/api/workflows` 等，后端不可达时降级 `mockData`（setTimeout 模拟）——保证 UI 独立可用不白屏
+- **YAML 编辑器**：contenteditable + 语法高亮 + 行号 + 实时校验（缺 nodes/agentflow 段警告）
+- 与后端 REST 契约对接：`/api/workflows`（POST 202 异步 + GET status + POST retry）+ `/api/workflows/{id}/trace`（U7 TraceController）+ `/api/diagnosis`
+
+**深挖点**：
+- 为什么真实 API 优先 + mock fallback？（演示时后端可能没起，UI 不能白屏；mock fallback 让 UI 独立可演示。KTD-1 决策）
+- Pipeline 怎么可视化 BSP？（按 super-step 分组渲染节点卡片，barrier 用分隔线——体现"同层并行 + barrier 同步"的 BSP 语义）
+- 为什么不用 Next.js/SSR？（这是个内部工具门面，SPA 够用；Vite 启动快，不引入 SSR 复杂度）
+
+**反问准备**：
+- 面试官问「前端怎么和后端协作」——答：UI 串行先行作交付门面，对接已有 REST API（U14 鉴权 + U7 trace + U6 diagnosis）。真实 API 优先 + mock fallback 保证 UI 独立可用。YAML 编辑器实时校验 + Pipeline 可视化 BSP super-step——让工作流拓扑可见。
+
+---
+
 ## 跨单元：工程化能力（★面试加分项★）
 
 **可讲故事**：

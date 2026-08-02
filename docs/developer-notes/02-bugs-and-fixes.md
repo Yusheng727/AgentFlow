@@ -274,3 +274,63 @@ U9 的 `MockAgentFunction` 在 `agentflow-adapters/spring-ai` 模块，而 DryRu
 U3 的 `ExecutionTrace` 记录了每个节点的 token/耗时/status/error，但只有数据没有分析。U6 的 `DiagnosisService` 读 `Snapshot`（不可变快照）做模式识别：连续超时（FAILED + error 含 timeout）、Token 异常消耗（> 均值 ×3 + >100 token 阈值）、SpEL 解析失败（error 含 SpelEvaluation）、Channel 缺失（error 含 channel/null）、节点重复执行（同一 nodeId SUCCESS > 1 次）。每种问题输出 description + suggestion（修复方向）。
 
 **面试讲法**：「执行轨迹只是数据，诊断服务做的是模式识别——比如某个节点的 token 消耗是其他节点的 3 倍以上，它会告诉你'这个 Agent 的 prompt 可能太长或模型参数需要调'。它不是替代人工排查，而是把常见问题自动分类、给排查方向。」
+
+---
+
+## U11 — 合同审核串行 Demo
+
+### Bug-13: MockAgentFunction 占位符正则不支持连字符 channel 名
+
+U11 的核心目的是验证 `${previousStep}` 上下文逐级传递，channel 名 = nodeId、U10 起即用连字符命名（`financial-analysis` 等）。但 MockAgentFunction 的 PLACEHOLDER 正则是 `\\$\\{([a-zA-Z_][\\w.]*)}`，字符类 `[\\w.]` 不含连字符，导致 `${contract-parse}` 这类带连字符的 channel 引用无法解析。
+
+U10 用了连字符 channel 名但 aggregate 节点的 mock_response 没引用上游（直接返回固定 JSON），所以 bug 潜伏未暴露。U11 是第一个用占位符引用连字符 channel 的 demo，立即触发。
+
+修复：字符类扩展为 `[\\w.-]`（连字符放末位是字面量，非范围）。加 `hyphenatedChannelResolves` 测试锁定。
+
+**面试讲法**：「这是个潜伏 bug——U10 用连字符 channel 名但没引用上游，bug 没暴露。U11 第一个用 `${contract-parse}` 引用上一步，立即发现占位符不解析。正则字符类漏了连字符，一行修复。说明 demo 不只是演示功能，也是真实的集成测试——每个 demo 都会暴露前一单元的隐藏问题。」
+
+---
+
+## U7 — 可观测性
+
+### Bug-14（P0）: TraceController 缺 ownership check（IDOR）
+
+详见 [03-review-findings.md P0-1](./03-review-findings.md#p0-1-tracecontroller-缺-ownership-check--idor)。
+
+新增 `GET /api/workflows/{id}/trace` 端点只接 ApiKeyAuthFilter 认证（401），未注入 WorkflowOwnershipChecker。workflowId 是 @PathVariable 用户可控，任意合法 Key 持有者可读他人 workflow 的完整 trace（含 LLM 输出摘要、token、拓扑、error）。同仓 WorkflowController 的 status/retry 已落地 ownership 防线（U14 R21），trace 端点遗漏。
+
+修复：注入 WorkflowOwnershipChecker + requireOwnership，非创建者 → 403，对齐 getStatus/retry 语义。
+
+### Bug-15（P0）: recoverAndExecute 不接 trace（checkpoint 与 trace 状态分裂）
+
+详见 [03-review-findings.md P0-2](./03-review-findings.md#p0-2-recoverandexecute-不接-trace--checkpoint-与-trace-状态分裂)。
+
+recoverAndExecute 硬编码 null trace，从不调 traceRegistry.register。崩溃恢复成功后 checkpoint=SUCCESS 但 registry 返回旧 FAILED trace——TraceController 返回 FAILED 快照给实际成功的工作流。U5 ADV-1/ADV-2 同类：trace 没穿进恢复路径。4 个 reviewer 独立确认。
+
+修复：开头注册 trace，runSuperStep 传 trace，成功/失败 markCompleted。
+
+### Bug-16: CostCalculator 畸形 JSON 抛 ClassCastException 阻断启动
+
+`((Number) inVal).doubleValue()` 对 String/Array 类型抛 ClassCastException（非 IOException，不被 catch），畸形单价表阻断 Spring 启动，违背"启动不失败"契约。3 个 reviewer 确认（reliability + adversarial + security）。
+
+修复：`instanceof Number` 检查 + warn 跳过非数字条目，整体沿用默认表。
+
+### Bug-17: BspEngine.execute catch 不覆盖 RuntimeException → trace 永留 RUNNING
+
+`catch(WorkflowExecutionException)` 不覆盖 reducer.merge/applyOutput 抛的其他 RuntimeException，trace 永留 RUNNING 误导诊断。2 个 reviewer 确认。
+
+修复：finally 里兜底——trace 仍 RUNNING 则标 FAILED。
+
+### 设计决策：trace 穿线用 AgentInput 第 9 字段而非 ThreadLocal
+
+MockAgentFunction 是无状态单例、BspEngine 不持有 trace。trace 怎么传到 AgentFunction？选项：① ThreadLocal（Virtual Threads 跨任务边界脆弱，OQ-3 决议已否）② AgentInput 加字段显式传 ③ 改 per-workflow 实例（破坏单例假设）。选 ②——AgentInput 加第 9 字段 trace，BspEngine 在 runSuperStep 构造 AgentInput 时塞入，AgentFunction 从 `input.trace()` 取。traceRegistry=null 整条链路 no-op，旧构造器保留向后兼容。
+
+这是项目第 4 次 record 字段扩展（U3 tools/outputSchema、U9 mockResponse、U7 trace），已形成 grooved convention：加字段 + 同步所有构造点 + 旧工厂保留 + null 防御。
+
+### 设计决策：成本单价表三层定价（R4 规避硬编码）
+
+模型单价变化频繁，硬编码会过时（R4 风险）。CostCalculator 三层定价：代码默认价（内置 gpt-4o 等）→ classpath `agentflow-cost-pricings.json` 覆盖 → 程序化 `override()` 最高优先级。缺文件 warn 不崩，畸形条目跳过。warn-once 去重（synchronizedSet）避免日志刷屏。运维改 JSON 不改代码。
+
+### 设计决策：ExecutionTraceRegistry 保留现状（v1.1 加 TTL）
+
+5 个 reviewer 指出 registry 无清理会 OOM。但简单 remove 会破坏 TraceController 核心用例（工作流跑完查 trace）。正确解法是 TTL eviction 或 Caffeine LRU，属 v1.1 范围。plan 已声明"v1 不主动清理"。保留现状记为 residual——体现 review 修复要懂设计权衡，不机械执行。

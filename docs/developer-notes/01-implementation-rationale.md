@@ -154,3 +154,41 @@
 - **U13 尚未完成**：U10 在 U13 前做，没有 @EnableAgentFlow 可用。如果硬等 U13，U10 的验收场景（mock 跑通 <30s）无法验证。
 
 **为什么不选**：等 U13 再跑 Demo 会推迟引擎验证——U10 的 Recovery 测试、并行验证、channel 传递验证都是引擎核心能力的回归点，越早跑越早发现 bug。
+
+---
+
+## 为什么 trace 穿线用 AgentInput 字段而非 ThreadLocal？
+
+**决策**：U7 让 BspEngine 在 runSuperStep 构造 AgentInput 时塞入 `ExecutionTrace` 引用（AgentInput 第 9 字段），AgentFunction 从 `input.trace()` 取 trace 写 NodeTrace。traceRegistry=null 整条链路 no-op。
+
+**为什么**：
+- **Virtual Threads 跨任务边界 ThreadLocal 脆弱**（OQ-3 决议延伸）：BspEngine 用 VT 并行跑同 super-step 节点，trace 写入发生在 AgentFunction 内部，ThreadLocal 在 VT 调度切换时语义不可靠。record 字段显式传递是确定性的。
+- **MockAgentFunction 是无状态单例**：per-agent-name 复用，不能持有 per-workflow 状态。trace 引用必须从调用入参（AgentInput）来，不能从单例字段来。
+- **向后兼容**：trace 字段可空，旧构造器/旧工厂传 null，traceRegistry=null 时整条链路 no-op。U3 已有 `SpringAiAgentAdapter` 构造器注入 trace 的路径（OQ-3），U7 优先 `input.trace()`、构造器 trace 作 fallback。
+
+**为什么不选**：改 per-workflow 实例破坏 MockAgentFunction 无状态单例假设（任意 agent name 复用）；新建 TraceContext carrier 对象对 v1 内部 API 是过度设计（v2 暴露公共 SPI 再考虑）。
+
+---
+
+## 为什么成本单价表三层定价（代码默认 → JSON → 程序化）？
+
+**决策**：CostCalculator 三层定价——代码内置默认价（gpt-4o 等）→ classpath `agentflow-cost-pricings.json` 覆盖 → `override()` 程序化最高优先级。缺文件 warn 不崩，畸形条目跳过。
+
+**为什么**：
+- **R4 规避硬编码过时**：模型单价变化频繁，全硬编码会过时。代码默认价保底（永远有值），JSON 让运维改配置不改代码，程序化 `override()` 给测试和特殊场景最高优先级。
+- **启动不失败契约**：缺文件 → warn + 用默认；畸形 JSON（非数字单价）→ 跳过该条 + warn；只有代码默认价全错才崩。生产环境改单价表不重启代码。
+- **warn-once 去重**：未知模型 fallback 用 `synchronizedSet` 记已 warn 的 model，避免日志刷屏。
+
+**为什么不选**：全配置化（无代码默认）会让缺文件时单价全 unknown，成本指标失真。代码默认价保证"开箱即有合理成本估算"。
+
+---
+
+## 为什么 ExecutionTraceRegistry 保留无清理（v1.1 加 TTL）？
+
+**决策**：5 个 reviewer 指出 registry 无清理会 OOM，但保留现状记为 residual，v1.1 加 TTL eviction 或 Caffeine LRU。
+
+**为什么**：
+- **简单 remove 破坏核心用例**：若 BspEngine.execute finally 里 `registry.remove(workflowId)`，TraceController 在工作流完成后就查不到 trace——而"跑完查 trace"正是 TraceController 的核心用例。
+- **正确解法需设计**：TTL eviction（trace 存活 N 分钟后自动清）或 Caffeine LRU（容量上限）是 v1.1 范围，plan 已声明"v1 不主动清理"。demo 规模 <100 workflow 内存占用 <1MB，不阻断 v1 演示。
+
+**为什么不选**：盲目按 reviewer 建议 remove 会破坏用例——体现 review 修复要懂设计权衡，不是机械执行。5 票共识是"需生产前解决"，不是"现在阻断合并"。

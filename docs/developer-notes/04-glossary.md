@@ -128,3 +128,44 @@ Java 21 轻量级线程。~KB 级，可创建数千个，JVM 调度到 carrier t
 
 ### workflow_executions / workflow_node_outputs / workflow_checkpoints
 U5 的三张表。 executions = 工作流实例元数据（状态/版本）；node_outputs = 节点级 checkpoint；checkpoints = barrier 级 checkpoint。
+
+---
+
+## 可观测性（U7）
+
+### ExecutionTrace
+执行追踪树（U3 引入，U7 穿线）。根（workflow 级）+ 子（每节点 NodeTrace）。`Snapshot` 是不可变冻结视图，供 TraceController/DiagnosisService 读取。线程安全：CopyOnWriteArrayList 承载子 trace，volatile 承载根级 end/status。
+
+### NodeTrace
+节点执行 trace。构造时记 start，`succeed(outputSummary, promptTokens, completionTokens)` / `fail(error)` 记终态。Status: RUNNING → SUCCESS | FAILED。
+
+### ExecutionTraceRegistry
+按 workflowId 集中存放 ExecutionTrace（U7 引入，ConcurrentHashMap）。BspEngine.execute 开头 `register(workflowId)`，通过 AgentInput.trace() 透传给 AgentFunction，TraceController 从此取 snapshot。v1 不清理（v1.1 加 TTL）。
+
+### trace 穿线（KTD-2）
+BspEngine 5-arg 构造器注入 registry → execute() 注册 trace → AgentInput 第 9 字段透传 → MockAgentFunction/SpringAiAgentAdapter 从 input.trace() 取 trace 写 NodeTrace。不用 ThreadLocal（VT 脆弱），用 record 字段显式传。
+
+### AgentFlowMetrics
+5 Micrometer 指标封装：workflow.executed（Counter）/ node.duration（Timer）/ tokens.consumed（Counter，tag agent+model）/ workflow.cost.estimated（Counter，tag model）/ workflow.cost.budget_exceeded（Counter）。
+
+### CostCalculator
+token×模型单价表。三层定价：代码默认价 → classpath agentflow-cost-pricings.json → 程序化 override()。warn-once 去重未知 model。cost(model, promptTokens, completionTokens) 返回 USD。
+
+### TraceController
+`GET /api/workflows/{id}/trace` REST 端点（U7）。注入 WorkflowOwnershipChecker 防 IDOR（非创建者 403），从 ExecutionTraceRegistry 取 snapshot 返回。mock 模式也返回完整树（KTD-2 补齐）。
+
+---
+
+## 前端 UI
+
+### React 5 Tab UI
+agentflow-ui 模块，React 18 + TypeScript + Vite + Tailwind CSS。5 Tab：Dashboard / Submit / WorkflowDefinitions / PipelineView / DiagnosisPanel。真实 API 优先 + mock fallback（KTD-1）。
+
+### mock fallback（KTD-1）
+api.ts 封装 fetch，先调真实 REST API，后端不可达时降级 mockData（setTimeout 模拟）。保证 UI 独立可用不白屏。
+
+### PipelineView
+BSP Pipeline 可视化组件。按 super-step 分组渲染节点卡片，barrier 用分隔线——体现"同层并行 + barrier 同步"的 BSP 语义。
+
+### YamlEditor
+contenteditable + 语法高亮 + 行号 + 实时校验（缺 nodes/agentflow 段警告）。提交工作流前校验 YAML 结构。
