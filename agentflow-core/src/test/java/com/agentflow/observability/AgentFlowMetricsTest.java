@@ -43,6 +43,9 @@ class AgentFlowMetricsTest {
         assertThat(timer.count()).isEqualTo(1L);
         assertThat(timer.totalTime(java.util.concurrent.TimeUnit.NANOSECONDS))
                 .isGreaterThanOrEqualTo(1_000_000L);
+        // ②.5 node.duration 开 percentile histogram：暴露 .histogram 子 meter
+        //（供 Grafana node.duration 面板 histogram_quantile 算 P50/P95/P99）
+        assertThat(registry.find(AgentFlowMetrics.NODE_DURATION + ".histogram")).isNotNull();
 
         // ③ tokens.consumed（agent+model tag）= 150 total
         assertThat(registry.counter(AgentFlowMetrics.TOKENS_CONSUMED,

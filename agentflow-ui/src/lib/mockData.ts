@@ -69,7 +69,7 @@ export const mockDefinitions: WorkflowDefinitionInfo[] = [
   { id: 'def-4', name: 'greeting-test', version: '1.0', nodes: 1, desc: '最小示例：单节点问候' },
 ]
 
-export const mockPipelineNodes: PipelineNode[] = [
+const mockPipelineNodes: PipelineNode[] = [
   { id: 'financial-analysis', agent: 'finance-agent', status: 'success', time: 12, output: '财务风险：低 | 资产负债率：35% | 现金流：稳定' },
   { id: 'compliance-check', agent: 'compliance-agent', status: 'success', time: 10, output: '合规风险：中 | 营业执照：有效 | 1 次环保违规' },
   { id: 'reputation', agent: 'reputation-agent', status: 'success', time: 11, output: '声誉风险：低 | 行业口碑：良好 | 5 年合作' },

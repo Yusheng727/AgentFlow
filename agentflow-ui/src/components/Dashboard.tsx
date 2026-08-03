@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react'
 import { CheckCircle2, Clock, Play, Zap } from 'lucide-react'
 import type { WorkflowStatusUi, WorkflowSummary } from '../types'
-import { listWorkflows, retryWorkflow } from '../lib/api'
+import { ApiError, listWorkflows, retryWorkflow } from '../lib/api'
 import { durationChart, mockKpi, trendChart } from '../lib/mockData'
 import type { TabId } from './Layout'
+import { KpiCard } from './common/KpiCard'
+import { MockSourceBadge } from './common/MockSourceBadge'
 
 interface DashboardProps {
   onNavigate: (tab: TabId, workflowId?: string) => void
@@ -53,7 +55,14 @@ export function Dashboard({ onNavigate, showToast }: DashboardProps) {
   const handleRetry = (wf: WorkflowSummary) => {
     retryWorkflow(wf.id)
       .then(() => showToast(`重试已提交：${wf.name}`))
-      .catch(() => showToast(`（mock）重试已提交：${wf.name} — 后端不可达，仅演示`))
+      .catch((err: unknown) => {
+        // 后端可达但拒绝（如 401/403）——真实拒绝，不能当 mock 成功
+        if (err instanceof ApiError) {
+          showToast(`重试失败：HTTP ${err.status}`)
+          return
+        }
+        showToast(`（mock）重试已提交：${wf.name} — 后端不可达，仅演示`)
+      })
   }
 
   return (
@@ -63,11 +72,7 @@ export function Dashboard({ onNavigate, showToast }: DashboardProps) {
           <h2 className="text-[22px] font-bold tracking-tight">工作流看板</h2>
           <p className="mt-1 flex items-center gap-2 text-[13px] text-muted">
             BSP 引擎执行概览与状态监控
-            {source === 'mock' && (
-              <span className="rounded-full bg-hover px-2 py-0.5 text-[11px] font-semibold text-dim">
-                mock 模式（后端未连接）
-              </span>
-            )}
+            {source === 'mock' && <MockSourceBadge />}
           </p>
         </div>
         <button
@@ -158,19 +163,6 @@ export function Dashboard({ onNavigate, showToast }: DashboardProps) {
 }
 
 // ──────────────────────────── 子组件 ────────────────────────────
-
-function KpiCard({ icon, label, value, sub, subClass }: { icon: React.ReactNode; label: string; value: string; sub: string; subClass?: string }) {
-  return (
-    <div className="rounded-[10px] border border-line bg-surface p-4 shadow-card transition-all hover:border-accent hover:shadow-card-lg">
-      <div className="flex items-center gap-1.5 text-xs text-muted">
-        {icon}
-        {label}
-      </div>
-      <div className="mt-1.5 text-[28px] font-bold tracking-tight">{value}</div>
-      <div className={`mt-0.5 text-xs ${subClass ?? 'text-dim'}`}>{sub}</div>
-    </div>
-  )
-}
 
 function ChartPanel({ title, bars, labels }: { title: string; bars: { height: number; color: string }[]; labels: string[] }) {
   return (

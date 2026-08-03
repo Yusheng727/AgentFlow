@@ -122,7 +122,8 @@ AgentFlow/
 │   └── src/main/java/com/agentflow/dsl/   # U1 已落地
 ├── agentflow-adapters/spring-ai/# SpringAiAgentAdapter（U3 引入 Spring AI 2.0）
 ├── agentflow-api/               # REST 端点 + 鉴权（U6/U14）
-└── agentflow-starter/           # @EnableAgentFlow + AutoConfiguration（U9/U13）
+├── agentflow-starter/           # @EnableAgentFlow + AutoConfiguration（U9/U13）
+└── agentflow-ui/                # React 18 + Vite + Tailwind，5 Tab 交付门面（U1/U2）
 ```
 
 ## 怎么构建 / 测试

@@ -1,5 +1,8 @@
 package com.agentflow.observability;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.time.Duration;
 
 /**
@@ -28,9 +31,19 @@ public final class NodeTrace {
     private volatile String error;
 
     public NodeTrace(String nodeId, String agentName) {
+        this(nodeId, agentName, System.nanoTime());
+    }
+
+    /** 测试钩子：固定 startNanos（纳秒），使 duration/durationMs 断言确定（生产用 {@link System#nanoTime}）。 */
+    NodeTrace(String nodeId, String agentName, long startNanos) {
         this.nodeId = nodeId;
         this.agentName = agentName;
-        this.startNanos = System.nanoTime();
+        this.startNanos = startNanos;
+    }
+
+    /** 测试钩子：固定 end 时间戳（纳秒）。 */
+    void endNanosForTest(long endNanos) {
+        this.endNanos = endNanos;
     }
 
     /** 节点执行成功，记录耗时 + token + 输出摘要。 */
@@ -49,45 +62,64 @@ public final class NodeTrace {
         this.error = error;
     }
 
+    @JsonProperty("nodeId")
     public String nodeId() {
         return nodeId;
     }
 
+    @JsonProperty("agentName")
     public String agentName() {
         return agentName;
     }
 
+    @JsonProperty("status")
     public Status status() {
         return status;
     }
 
+    @JsonProperty("promptTokens")
     public long promptTokens() {
         return promptTokens;
     }
 
+    @JsonProperty("completionTokens")
     public long completionTokens() {
         return completionTokens;
     }
 
+    @JsonProperty("totalTokens")
     public long totalTokens() {
         return promptTokens + completionTokens;
     }
 
+    @JsonProperty("outputSummary")
     public String outputSummary() {
         return outputSummary;
     }
 
+    @JsonProperty("error")
     public String error() {
         return error;
     }
 
-    /** 已用时长。未结束则返回到当前的实时时长。 */
+    /**
+     * 已用时长（毫秒）——与 UI NodeTrace 类型 + StructuredLogger 的 {@code durationMs} 字段
+     * 保持 wire 契约一致。未结束则返回到当前的实时时长。
+     */
+    @JsonProperty("durationMs")
+    public long durationMs() {
+        return duration().toMillis();
+    }
+
+    /** 已用时长。未结束则返回到当前的实时时长。（不参与 JSON 序列化，wire 用 {@link #durationMs}） */
+    @JsonIgnore
     public Duration duration() {
         long end = endNanos > 0 ? endNanos : System.nanoTime();
         return Duration.ofNanos(end - startNanos);
     }
 
     /** 是否已终结（SUCCESS / FAILED）。 */
+    @JsonIgnore
     public boolean isTerminal() {
         return status == Status.SUCCESS || status == Status.FAILED;
     }

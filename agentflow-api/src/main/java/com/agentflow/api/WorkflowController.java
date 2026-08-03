@@ -91,14 +91,14 @@ public class WorkflowController {
      * <p>请求体：
      * <pre>{@code
      * {
-     *   "workflow_name": "supplier-risk",
+     *   "workflowName": "supplier-risk",
      *   "version": "1.0",
-     *   "yaml_content": "agentflow:\n  version: \"1.0\"\nchannels: ...",
+     *   "yamlContent": "agentflow:\n  version: \"1.0\"\nchannels: ...",
      *   "inputs": { "company": "Acme Corp" }
      * }
      * }</pre>
      *
-     * <p>返回：202 + workflow_id + status 链接
+     * <p>返回：202 + workflowId + status 链接（wire 契约 camelCase，与前端 UI 类型一致）
      */
     @PostMapping
     public ResponseEntity<SubmitResponse> submit(

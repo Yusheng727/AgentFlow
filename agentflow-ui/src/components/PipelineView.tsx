@@ -3,6 +3,7 @@ import { CheckCircle2, Loader2, XCircle } from 'lucide-react'
 import { getWorkflowTrace } from '../lib/api'
 import { mockTrace } from '../lib/mockData'
 import type { ExecutionTraceSnapshot, NodeTrace } from '../types'
+import { MockSourceBadge } from './common/MockSourceBadge'
 
 interface PipelineViewProps {
   /** 全局选中的工作流 ID（从看板卡片「查看轨迹」跳入时带入）。 */
@@ -71,11 +72,7 @@ export function PipelineView({ workflowId }: PipelineViewProps) {
           <h2 className="text-[22px] font-bold tracking-tight">执行轨迹</h2>
           <p className="mt-1 flex items-center gap-2 font-mono text-[13px] text-muted">
             {workflowId ?? '未选择工作流（演示数据）'}
-            {source === 'mock' && (
-              <span className="rounded-full bg-hover px-2 py-0.5 font-sans text-[11px] font-semibold text-dim">
-                mock 模式
-              </span>
-            )}
+            {source === 'mock' && <MockSourceBadge />}
           </p>
         </div>
         {badge && (

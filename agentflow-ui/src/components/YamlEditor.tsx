@@ -95,6 +95,17 @@ export function YamlEditor({ value, onChange, fileName = 'workflow.yml', minLine
             const text = e.clipboardData.getData('text/plain')
             document.execCommand('insertText', false, text)
           }}
+          onDragOver={(e) => {
+            // 阻止默认，避免浏览器把拖入的富文本/文件直接塞进 contenteditable，绕过 onPaste 净化
+            e.preventDefault()
+          }}
+          onDrop={(e) => {
+            // 同样强制纯文本：与 onPaste 走同一条 execCommand 路径，保证所有内容入口都被净化并触发 onInput
+            e.preventDefault()
+            const text = e.dataTransfer.getData('text/plain')
+            if (!text) return
+            document.execCommand('insertText', false, text)
+          }}
           className="min-h-[400px] whitespace-pre-wrap py-3 pl-[52px] pr-4 font-mono text-[13px] leading-[22px] outline-none"
         />
       </div>

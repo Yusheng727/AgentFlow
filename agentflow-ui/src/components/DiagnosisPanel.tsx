@@ -3,6 +3,8 @@ import { AlertTriangle, CheckCircle2, Clock, Code, Repeat, Unplug, Zap, type Luc
 import { diagnoseWorkflow, getWorkflowTrace } from '../lib/api'
 import { mockDiagnosisReport, mockTrace } from '../lib/mockData'
 import type { Diagnosis, DiagnosisReport } from '../types'
+import { KpiCard } from './common/KpiCard'
+import { MockSourceBadge } from './common/MockSourceBadge'
 
 interface DiagnosisPanelProps {
   /** 全局选中的工作流 ID（从看板卡片「诊断」跳入时带入）。 */
@@ -58,11 +60,7 @@ export function DiagnosisPanel({ workflowId }: DiagnosisPanelProps) {
           <h2 className="text-[22px] font-bold tracking-tight">诊断报告</h2>
           <p className="mt-1 flex items-center gap-2 font-mono text-[13px] text-muted">
             {workflowId ?? '未选择工作流（演示数据）'}
-            {report !== null && source === 'mock' && (
-              <span className="rounded-full bg-hover px-2 py-0.5 font-sans text-[11px] font-semibold text-dim">
-                mock 模式
-              </span>
-            )}
+            {report !== null && source === 'mock' && <MockSourceBadge />}
           </p>
         </div>
         <button
@@ -113,15 +111,6 @@ export function DiagnosisPanel({ workflowId }: DiagnosisPanelProps) {
           ))}
         </div>
       )}
-    </div>
-  )
-}
-
-function KpiCard({ label, value, valueClass }: { label: string; value: string; valueClass?: string }) {
-  return (
-    <div className="rounded-[10px] border border-line bg-surface p-4 shadow-card transition-all hover:border-accent hover:shadow-card-lg">
-      <div className="text-xs text-muted">{label}</div>
-      <div className={`mt-1.5 text-[28px] font-bold tracking-tight ${valueClass ?? ''}`}>{value}</div>
     </div>
   )
 }

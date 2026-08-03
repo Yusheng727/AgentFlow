@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { submitWorkflow } from '../lib/api'
+import { ApiError, submitWorkflow } from '../lib/api'
 import type { TabId } from './Layout'
 import { YamlEditor } from './YamlEditor'
 
@@ -63,11 +63,16 @@ export function SubmitForm({ navigate, showToast, prefillName, onPrefillConsumed
   const [inputsText, setInputsText] = useState('{"supplier": "Acme Corp"}')
   const [submitting, setSubmitting] = useState(false)
   const timers = useRef<number[]>([])
+  // 组件是否仍在挂载：异步回调 / 定时器触发前先检查，防止卸载后仍 setState / 跳转
+  const mounted = useRef(true)
 
-  // 卸载时清理待触发定时器，避免跳转后 setState / 用户切走后被打断跳走
+  // 卸载时清理待触发定时器并标记卸载，避免跳转后 setState / 用户切走后被打断跳走
   useEffect(() => {
     const pending = timers.current
-    return () => pending.forEach((t) => window.clearTimeout(t))
+    return () => {
+      mounted.current = false
+      pending.forEach((t) => window.clearTimeout(t))
+    }
   }, [])
 
   // prefillName 仅在挂载时消费一次（消费完通知 App 清空，防止下次进入又预填）
@@ -96,17 +101,32 @@ export function SubmitForm({ navigate, showToast, prefillName, onPrefillConsumed
     setSubmitting(true)
     submitWorkflow({ workflowName: trimmed, version: '1.0', yamlContent: yaml, inputs })
       .then((res) => {
+        if (!mounted.current) return
         setSubmitting(false)
         showToast(`工作流提交成功：${res.workflowId}`)
-        later(() => navigate('trace', res.workflowId), 800)
-      })
-      .catch(() => {
-        // 后端不可达：按 prototype 的 setTimeout 模拟降级——mock 也走通 spinner→toast→跳转全流程
         later(() => {
+          if (!mounted.current) return
+          navigate('trace', res.workflowId)
+        }, 800)
+      })
+      .catch((err: unknown) => {
+        if (!mounted.current) return
+        // 后端可达但拒绝了请求（INVALID_YAML 400 / 鉴权 401/403）——真实拒绝，不能当成功演示
+        if (err instanceof ApiError) {
+          setSubmitting(false)
+          showToast(`提交被拒绝：HTTP ${err.status} ${err.message}`)
+          return
+        }
+        // 网络/超时（TypeError/AbortError）等不可达错误：按 prototype 的 setTimeout 模拟降级——mock 也走通 spinner→toast→跳转全流程
+        later(() => {
+          if (!mounted.current) return
           setSubmitting(false)
           const mockId = `wf-${Date.now()}`
           showToast(`（mock）工作流提交成功：${trimmed} — 后端不可达，仅演示`)
-          later(() => navigate('trace', mockId), 800)
+          later(() => {
+            if (!mounted.current) return
+            navigate('trace', mockId)
+          }, 800)
         }, 1500)
       })
   }
