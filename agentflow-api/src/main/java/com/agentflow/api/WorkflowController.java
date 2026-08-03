@@ -117,6 +117,12 @@ public class WorkflowController {
                     new SubmitResponse(null, "INVALID_YAML", e.getMessage(), null));
         }
 
+        // 1.5 兜底：可解析但缺 nodes（如 "agentflow:" 空声明）也当非法 YAML——否则下方遍历 NPE→500
+        if (def.nodes() == null || def.nodes().isEmpty()) {
+            return ResponseEntity.badRequest().body(
+                    new SubmitResponse(null, "INVALID_YAML", "工作流定义缺少 nodes 段", null));
+        }
+
         // 2. 工具级授权检查（v4.3）
         if (callerId != null) {
             for (var node : def.nodes()) {

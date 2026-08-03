@@ -15,8 +15,9 @@ import java.util.function.Function;
  * {@link com.agentflow.engine.NodeExecutor} / {@link com.agentflow.engine.BspEngine} 的 resolver
  * （最小改动接入，ce-code-review seam）。
  *
- * <p>解析语义：找不到已注册 agent → 抛 {@link IllegalStateException}（YAML 引用了未声明的 agent，
- * 属配置错误）。{@link com.agentflow.engine.NodeExecutor} 会把 resolver 抛出的异常包成
+ * <p>解析语义：找不到已注册 agent——若有 fallback resolver 则委托给 fallback（mock 模式：任意
+ * agent 名 → MockAgentFunction），否则抛 {@link IllegalStateException}（YAML 引用了未声明的
+ * agent，属配置错误）。{@link com.agentflow.engine.NodeExecutor} 会把 resolver 抛出的异常包成
  * {@link NodeResult.Failure}，不破坏 no-throw 不变量。
  *
  * <p>注册语义：同名重复注册 → 抛 {@link IllegalStateException}（防止 Spring 容器内同名 Bean 静默覆盖，
@@ -25,14 +26,27 @@ import java.util.function.Function;
 public final class NodeRegistry implements Function<String, AgentFunction> {
 
     private final Map<String, AgentFunction> agents = new ConcurrentHashMap<>();
+    /** 未知名 fallback（可空）：mock 模式提供"任意名 → MockAgentFunction"，生产不设则未知名抛错。 */
+    private final Function<String, AgentFunction> fallback;
 
     public NodeRegistry() {
+        this((Function<String, AgentFunction>) null);
     }
 
     public NodeRegistry(Map<String, AgentFunction> initial) {
+        this(initial, null);
+    }
+
+    /** fallback：resolve 命中注册表才用注册表，否则委托 fallback（null = 未知名抛错）。 */
+    public NodeRegistry(Function<String, AgentFunction> fallback) {
+        this(null, fallback);
+    }
+
+    public NodeRegistry(Map<String, AgentFunction> initial, Function<String, AgentFunction> fallback) {
         if (initial != null) {
             initial.forEach(this::register);
         }
+        this.fallback = fallback;
     }
 
     /** 注册一个 agent。同名已存在 → 抛 IllegalStateException。 */
@@ -51,10 +65,13 @@ public final class NodeRegistry implements Function<String, AgentFunction> {
         }
     }
 
-    /** 解析 agent 名 → AgentFunction。未注册 → 抛 IllegalStateException。 */
+    /** 解析 agent 名 → AgentFunction。未注册：有 fallback 则委托，否则抛 IllegalStateException。 */
     public AgentFunction resolve(String name) {
         AgentFunction fn = agents.get(name);
         if (fn == null) {
+            if (fallback != null) {
+                return Objects.requireNonNull(fallback.apply(name), "fallback 返回 null agent: " + name);
+            }
             throw new IllegalStateException("未注册 agent: " + name);
         }
         return fn;

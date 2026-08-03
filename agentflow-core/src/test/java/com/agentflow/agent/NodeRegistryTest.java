@@ -73,6 +73,28 @@ class NodeRegistryTest {
     }
 
     @Test
+    @DisplayName("fallback 解析：注册表命中优先，未知名委托 fallback（mock 模式任意 agent 名）")
+    void fallbackResolvesUnknownNames() {
+        AgentFunction fb = echo();
+        NodeRegistry registry = new NodeRegistry(name -> fb);
+        // 未知名 → fallback
+        assertThat(registry.resolve("arbitrary-agent")).isSameAs(fb);
+        assertThat(registry.apply("any-name")).isSameAs(fb);
+        // 注册表命中优先于 fallback
+        AgentFunction known = echo();
+        registry.register("known", known);
+        assertThat(registry.resolve("known")).isSameAs(known);
+    }
+
+    @Test
+    @DisplayName("fallback 返回 null → NPE（显式失败，不静默）")
+    void fallbackReturningNullThrows() {
+        NodeRegistry registry = new NodeRegistry(name -> null);
+        assertThatThrownBy(() -> registry.resolve("x"))
+                .isInstanceOf(NullPointerException.class);
+    }
+
+    @Test
     @DisplayName("register null name/fn → NPE")
     void registerNullArgs() {
         NodeRegistry registry = new NodeRegistry();

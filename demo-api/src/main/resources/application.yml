@@ -1,0 +1,22 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: agentflow-api
+  # mock-only demo：不调 LLM（NodeRegistry 全走 MockAgentFunction）、不用数据库（InMemoryCheckpointManager）。
+  # spring-ai OpenAI 六自动配置 + AgentFlowAutoConfiguration 在 AgentFlowApiApplication 注解级 exclude。
+  # JDBC DataSource 自动配置位于 spring-boot-jdbc 模块（Boot 4.1 包 org.springframework.boot.jdbc.autoconfigure），
+  # 不在本模块编译类路径，故此处用字符串排除（无 DB + InMemory——避免无 driver/URL 时 Hikari 启动失败）。
+  autoconfigure:
+    exclude: "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration"
+
+agentflow:
+  api:
+    # 合法 X-API-Key（逗号分隔，env AGENTFLOW_API_KEYS 可覆盖整行）。
+    # UI 默认 demo-key-1234567890abcdef 由 ApiConfig 恒注册（与 api.ts 一致）。
+    api-keys: "other-demo-key"
+
+logging:
+  level:
+    com.agentflow: INFO
