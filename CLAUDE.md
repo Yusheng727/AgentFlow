@@ -51,8 +51,8 @@ U3 ✅ → U4 ✅ → U5 ✅ → U14 ✅ → U9 ✅ → U10 ✅ → U13 ✅（P0
 > - U7/U11/U12 已合 main（远程 `55125f1` 起，含 ce-code-review 2 P0 + 4 P2 修复 + developer-notes 文档）
 > - **本窗口新增**：本地并行实现同批任务后发现与远程分叉 → 以远程为基整合。cherry-pick 本地独家 **U1/U2 React UI**（`84f8ff6`/`1a7188c`）+ 提交 **U4 Grafana Dashboard**（`e062c0f`，含 `AgentFlowMetrics.recordNodeDuration` 开 percentile histogram）。本地后端重复实现已弃用（备份分支 `backup/2026-08-local` + `backup/2026-08-local-backend`，可逆）
 > - `mvn verify` **8 模块全绿** + `npm run build` 绿（UI tsc strict）
-> - **待 push**（外向操作需用户确认）：main 领先 origin 3 commit（U1/U2/U4）
-> - 下一批（plan Deferred）：UI React 单测（Vitest）+ Grafana 真实部署验证 + U8 版本管理
+> - **已 push origin main**（`55125f1..57d8057`，U1/U2/obs+Grafana/CLAUDE.md/review-fix 6 commit）
+> - 下一批（后续任务 + plan Deferred）：可运行 API server wiring（真实 API 路径可验证）+ PipelineView 真实 super-step 分组 + /diagnosis 反序列化 + 看板列表端点；UI React 单测（Vitest）+ Grafana 真实部署验证 + U8 版本管理
 
 > **当前状态（2026-08-02）**：
 > - P0 全交付 + U6/U7/U11/U12 落地，`mvn verify` **8 模块全绿（305 tests pass）**，JaCoCo 80% 达标
