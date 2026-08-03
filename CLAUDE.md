@@ -1,6 +1,6 @@
 # AgentFlow — 接手指南（给 Claude Code）
 
-> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-02（U6/U7/U11/U12 落地于 `feat/u7-observability` 分支，8 模块 305 tests 绿，待 ce-code-review + 合 main）。
+> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-03（U7/U11/U12 经 ce-code-review 合 main + U1/U2 React UI + U4 Grafana，8 模块 `mvn verify` 绿 + `npm run build` 绿，待 push）。
 
 ## 这是什么项目
 
@@ -30,6 +30,8 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 | U7 | 可观测性：`AgentFlowMetrics`（5 Micrometer 指标：workflow.executed / node.duration / tokens.consumed / workflow.cost.estimated / workflow.cost.budget_exceeded）+ `CostCalculator`（token×模型单价表，单价表放 `agentflow-cost-pricings.json` 配置文件启动期加载，R4 规避）+ `ExecutionTraceRegistry`（workflowId→trace 集中存放，ConcurrentHashMap）+ `TraceController`（GET /api/workflows/{id}/trace 返回 ExecutionTrace.Snapshot）。**Trace 穿线**（KTD-2 难题 R1）：BspEngine 5-arg 构造器注入 registry → execute() 注册 trace → AgentInput 第 9 字段穿线 → MockAgentFunction/SpringAiAgentAdapter 从 AgentInput.trace() 取 trace 写 NodeTrace（mock 模式补齐，OQ-3 决议扩展）→ TraceController 从 registry 取 snapshot。traceRegistry=null 整条链路 no-op，旧构造器保留向后兼容。TokenCountingAdvisor 新增 3-arg 构造器委托 AgentFlowMetrics 记成本（2-arg 旧构造器保留）。**经 ce-code-review 11 reviewer 审查**：2 P0（TraceController IDOR / recoverAndExecute 不接 trace，后者 4 票确认）+ 4 P2 全修（trace 兜底/死代码清理/CostCalculator 畸形 JSON/U12 命名连字符）| 305→306 tests，JaCoCo 80% 达标，`mvn verify` 8 模块 SUCCESS，`feat/u7-observability` 分支（含 U11/U12 + review 修复） |
 | U11 | 合同审核串行 Demo（对比 U10 并行拓扑）：新 `demo-contract-review` 模块，4 节点串行链（合同解析→法律风险→合规建议→最终报告），每步 mock_response 用 `${previousStep}` 占位符引用上一步输出，验证 BSP 串行依赖链 + 上下文逐级传递。4 super-step 各 1 节点。**附带修复**：MockAgentFunction PLACEHOLDER 正则 `[\\w.]` → `[\\w.-]` 支持连字符 channel 名（`${contract-parse}` 之前不解析，channel=nodeId 用连字符是项目约定），加 `hyphenatedChannelResolves` 测试锁定 | 5 tests，`mvn verify` SUCCESS |
 | U12 | 投资分析双层 fork-join Demo：新 `demo-investment-analysis` 模块，6 节点 4 super-step 双层 fork-join（step0 公司财报+市场数据并行 → step1 可行性分析串行 → step2 风险评估+收益预测并行 → step3 投资裁决汇总），验证 BSP 最长路径分层泛用性 + channel 隔离。用 `DAGLayerer.computeSuperSteps` 断言 4 层分层。node id 用下划线（`company_finance`）避开连字符占位符问题（U11 已修连字符正则，但 U12 保持自包含） | 6 tests，`mvn verify` SUCCESS |
+| U1/U2 | React UI 5 Tab（看板/提交/工作流定义/执行轨迹/诊断报告）：`agentflow-ui` 按 prototype-final.html 转 React 18 + Vite 5 + Tailwind 3 + TypeScript strict + lucide-react。Layout 深色侧边栏 5 菜单；**KTD-1 真实 API 优先 + mock fallback**（api.ts fetch 5s 超时失败降级 mockData，后端未起不白屏，UI 显示 mock 徽标）；Vite proxy `/api`→localhost:8080 规避 CORS。Dashboard 三列看板按状态分组 + 最近执行表；SubmitForm YAML 编辑器（contenteditable 手写高亮+行号+实时校验 nodes/agentflow 段，零新依赖）→ spinner→toast→跳轨迹页（真实 API 失败走 mock 模拟全流程）；WorkflowDefinitions 卡片选中高亮跳转提交页预填；PipelineView BSP super-step 分组渲染（并行→barrier→汇总）；DiagnosisPanel KPI+5 类问题卡片。React 单元测试留后续（plan Deferred） | `npm run build` 绿（tsc strict）+ dev HTTP 200 |
+| U4 | Grafana Dashboard JSON（R9）：`agentflow-starter/src/main/resources/grafana/agentflow-dashboard.json`，6 面板（工作流执行趋势按 status / 各 Agent P50-P95-P99 / token 消耗 Top10 / LLM 成本按 model / 预算超限+窗口总成本 / 失败率），Prometheus 数据源 + 模板变量，指标名对齐 AgentFlowMetrics 常量。配套：`AgentFlowMetrics.recordNodeDuration` 开 `publishPercentileHistogram`（暴露 `_bucket` 序列供 histogram_quantile 算分位，count/sum/max 语义不变） | JSON 合法（node 解析）+ 指标名对齐 + `mvn verify` 全绿 |
 
 **OQ-2 决议**：plan 当初猜 Spring AI 2.0 要 Boot 3.5——实际不够。3.5 仍带 Jackson 2.19，而 Spring AI 2.0.0 的 @Tool schema 路径用 Jackson 3（`tools.jackson.core`，需 `JsonSerializeAs`）。**正确版本是 Spring Boot 4.1.0 GA**（自带 Jackson 3.1.4 + Spring Framework 7）。U3 起全仓升 Boot 4.1。
 
@@ -44,6 +46,13 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 
 **后续顺序**（按 `05-implementation-units.md` 的 Unit Priority 矩阵 P0 先行）：
 U3 ✅ → U4 ✅ → U5 ✅ → U14 ✅ → U9 ✅ → U10 ✅ → U13 ✅（P0 全部交付）。P1/P2：U6 ✅ → U7 ✅ → U11 ✅ → U12 ✅ → **U8（版本管理）→ UI（React 5 Tab）→ Grafana Dashboard**。详见 `docs/plans/2026-07-31-001-feat-ui-observability-aux-demos-plan.md`。
+
+> **当前状态（2026-08-03）**：
+> - U7/U11/U12 已合 main（远程 `55125f1` 起，含 ce-code-review 2 P0 + 4 P2 修复 + developer-notes 文档）
+> - **本窗口新增**：本地并行实现同批任务后发现与远程分叉 → 以远程为基整合。cherry-pick 本地独家 **U1/U2 React UI**（`84f8ff6`/`1a7188c`）+ 提交 **U4 Grafana Dashboard**（`e062c0f`，含 `AgentFlowMetrics.recordNodeDuration` 开 percentile histogram）。本地后端重复实现已弃用（备份分支 `backup/2026-08-local` + `backup/2026-08-local-backend`，可逆）
+> - `mvn verify` **8 模块全绿** + `npm run build` 绿（UI tsc strict）
+> - **待 push**（外向操作需用户确认）：main 领先 origin 3 commit（U1/U2/U4）
+> - 下一批（plan Deferred）：UI React 单测（Vitest）+ Grafana 真实部署验证 + U8 版本管理
 
 > **当前状态（2026-08-02）**：
 > - P0 全交付 + U6/U7/U11/U12 落地，`mvn verify` **8 模块全绿（305 tests pass）**，JaCoCo 80% 达标
