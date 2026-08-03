@@ -81,8 +81,10 @@ public final class AgentFlowMetrics {
         if (meterRegistry == null) {
             return;
         }
+        // publishPercentileHistogram：暴露 _bucket 序列，供 Grafana node.duration 面板 histogram_quantile 算 P50/P95/P99
         Timer.builder(NODE_DURATION)
                 .tags(Tags.of("agent", agentName == null || agentName.isBlank() ? "unknown" : agentName))
+                .publishPercentileHistogram()
                 .register(meterRegistry)
                 .record(java.time.Duration.ofNanos(durationNanos));
     }
