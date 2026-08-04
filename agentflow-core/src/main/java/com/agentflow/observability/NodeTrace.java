@@ -1,5 +1,6 @@
 package com.agentflow.observability;
 
+import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -46,6 +47,31 @@ public final class NodeTrace {
     /** 测试钩子：固定 end 时间戳（纳秒）。 */
     void endNanosForTest(long endNanos) {
         this.endNanos = endNanos;
+    }
+
+    /**
+     * Jackson 反序列化工厂（U10 后续 #11）：{@code /api/diagnosis} 提交真实 trace 快照时按 JSON
+     * 还原 NodeTrace，供 {@code DiagnosisService} 分析。结构字段（nodeId/agent/status/token/error/step）
+     * 完整还原；startNanos 置 0 → {@code duration()/durationMs()} 返回 0——诊断 5 条规则不依赖耗时精度。
+     */
+    @JsonCreator
+    static NodeTrace fromJson(
+            @JsonProperty("nodeId") String nodeId,
+            @JsonProperty("agentName") String agentName,
+            @JsonProperty("status") Status status,
+            @JsonProperty("promptTokens") long promptTokens,
+            @JsonProperty("completionTokens") long completionTokens,
+            @JsonProperty("outputSummary") String outputSummary,
+            @JsonProperty("error") String error,
+            @JsonProperty("step") int step) {
+        NodeTrace n = new NodeTrace(nodeId, agentName, 0L);
+        n.status = status != null ? status : Status.RUNNING;
+        n.promptTokens = promptTokens;
+        n.completionTokens = completionTokens;
+        n.outputSummary = outputSummary;
+        n.error = error;
+        n.step = step;
+        return n;
     }
 
     /** 节点执行成功，记录耗时 + token + 输出摘要。 */
@@ -100,7 +126,8 @@ public final class NodeTrace {
         return completionTokens;
     }
 
-    @JsonProperty("totalTokens")
+    /** 派生汇总（serialize 输出；READ_ONLY——反序列化时由 prompt+completion 派生，不参与写入）。 */
+    @JsonProperty(value = "totalTokens", access = JsonProperty.Access.READ_ONLY)
     public long totalTokens() {
         return promptTokens + completionTokens;
     }
@@ -119,7 +146,9 @@ public final class NodeTrace {
      * 已用时长（毫秒）——与 UI NodeTrace 类型 + StructuredLogger 的 {@code durationMs} 字段
      * 保持 wire 契约一致。未结束则返回到当前的实时时长。
      */
-    @JsonProperty("durationMs")
+    /** 已用时长（毫秒）——与 UI NodeTrace 类型 + StructuredLogger 的 {@code durationMs} 字段保持 wire 契约一致。
+     * READ_ONLY：仅序列化输出（UI 读）；反序列化时忽略（诊断不使用耗时精度）。 */
+    @JsonProperty(value = "durationMs", access = JsonProperty.Access.READ_ONLY)
     public long durationMs() {
         return duration().toMillis();
     }

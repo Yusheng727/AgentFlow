@@ -66,4 +66,24 @@ class NodeTraceJacksonTest {
         assertThat(trace.durationMs()).isEqualTo(149L);
         assertThat(Duration.ofNanos(150_000_000L - 1_000_000L).toMillis()).isEqualTo(149L);
     }
+
+    @Test
+    @DisplayName("反序列化 round-trip：#11 /diagnosis 提交真实 trace 快照时按 JSON 还原 NodeTrace")
+    void deserializationRoundTrip() throws Exception {
+        NodeTrace original = new NodeTrace("risk", "risk-agent", 1_000_000L);
+        original.succeed("高风险", 300, 50);
+        original.step(1);
+
+        String json = mapper.writeValueAsString(original);
+        NodeTrace restored = mapper.readValue(json, NodeTrace.class);
+
+        assertThat(restored.nodeId()).isEqualTo("risk");
+        assertThat(restored.agentName()).isEqualTo("risk-agent");
+        assertThat(restored.status()).isEqualTo(NodeTrace.Status.SUCCESS);
+        assertThat(restored.totalTokens()).isEqualTo(350);
+        assertThat(restored.outputSummary()).isEqualTo("高风险");
+        assertThat(restored.step()).isEqualTo(1);
+        // 结构字段齐全即可（诊断 5 条规则基于 status/error/token/nodeId）；耗时精度不还原、
+        // duration() 在 endNanos=0 时按"未结束"返回实时时长，故不在此断言。
+    }
 }

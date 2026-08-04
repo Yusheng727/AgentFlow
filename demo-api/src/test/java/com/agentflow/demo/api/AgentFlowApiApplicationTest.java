@@ -16,11 +16,14 @@ import com.agentflow.observability.ExecutionTraceRegistry;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -77,10 +80,14 @@ class AgentFlowApiApplicationTest {
         WorkflowOwnershipChecker ownership = new WorkflowOwnershipChecker(cp);
         CallerToolAllowlist allowlist = new CallerToolAllowlist(Map.of());
 
+        // 与生产一致：Boot web ObjectMapper 支持 JavaTimeModule（Snapshot 的 Instant 字段反序列化）
+        ObjectMapper webMapper = JsonMapper.builder().addModule(new JavaTimeModule()).build();
+
         mockMvc = standaloneSetup(
                 new WorkflowController(new WorkflowDSLParser(), engine, cp, ownership, allowlist, nodeRegistry),
                 new TraceController(registry, ownership),
                 new DiagnosisController())
+                .setMessageConverters(new MappingJackson2HttpMessageConverter(webMapper))
                 .addFilters(new ApiKeyAuthFilter(Set.of(DEMO_KEY, OTHER_KEY)))
                 .build();
     }
@@ -131,6 +138,31 @@ class AgentFlowApiApplicationTest {
                 .andExpect(status().isBadRequest())
                 .andReturn();
         assertThat(resp.getResponse().getContentAsString()).contains("INVALID_YAML");
+    }
+
+    @Test
+    @DisplayName("#11 诊断 round-trip：真实 trace → POST /diagnosis → 200 报告（NodeTrace 反序列化还原结构字段）")
+    void diagnosisRoundTrip() throws Exception {
+        String workflowId = submitAndGetId(DEMO_KEY, "diag-wf");
+        assertThat(pollStatus(workflowId, DEMO_KEY)).isEqualTo("SUCCESS");
+
+        // GET 真实 trace，塞回诊断请求体（把 TraceController 返回的 Snapshot 原样回传）
+        String traceBody = getBody("/api/workflows/" + workflowId + "/trace", DEMO_KEY, 200);
+        JsonNode trace = objectMapper.readTree(traceBody);
+        String diagBody = objectMapper.writeValueAsString(
+                objectMapper.valueToTree(Map.of("workflowId", workflowId, "trace", trace)));
+
+        MvcResult resp = mockMvc.perform(post("/api/diagnosis")
+                        .header("X-API-Key", DEMO_KEY)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(diagBody))
+                .andExpect(status().isOk())
+                .andReturn();
+
+        // 反序列化还原 NodeTrace 结构字段 → 真实诊断（此前 NodeTrace 无 @JsonCreator，节点为空/400 走 mock）
+        JsonNode report = objectMapper.readTree(resp.getResponse().getContentAsString());
+        assertThat(report.path("totalNodes").asInt()).isEqualTo(1);
+        assertThat(report.path("failedNodes").asInt()).isEqualTo(0);
     }
 
     // ──────────────────── 辅助 ────────────────────
