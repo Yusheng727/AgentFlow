@@ -54,6 +54,14 @@ U3 ✅ → U4 ✅ → U5 ✅ → U14 ✅ → U9 ✅ → U10 ✅ → U13 ✅（P0
 > - **已 push origin main**（`55125f1..57d8057`，U1/U2/obs+Grafana/CLAUDE.md/review-fix 6 commit）
 > - 下一批（后续任务 + plan Deferred）：可运行 API server wiring（真实 API 路径可验证）+ PipelineView 真实 super-step 分组 + /diagnosis 反序列化 + 看板列表端点；UI React 单测（Vitest）+ Grafana 真实部署验证 + U8 版本管理
 
+> **当前状态（2026-08-04）——后续任务 #9–#12 全部交付**：
+> - **#9 可运行 REST API server**（`f7bfdb4`，demo-api 模块）：把 controllers + ApiKeyAuthFilter（含 UI 默认 demo key）接成可启动 Spring Boot app；NodeRegistry 加 mock fallback；Boot 4.1 注解级 exclude（starter + spring-ai OpenAi + JDBC DataSource 已移包）。真实 `spring-boot:run` 起服（Tomcat:8080）+ curl 全链路跑通
+> - **#10 ExecutionTrace 带 super-step 层号**（`cebe9e9`）：NodeTrace.step + BspEngine 记层，UI PipelineView 按真实拓扑分组（串行/双层 fork-join 不再错扁平），mock 回退启发式
+> - **#11 /diagnosis 真实 trace 反序列化**（`53317cb`）：NodeTrace @JsonCreator + 派生 getter READ_ONLY，诊断真实路径不再绑空/400
+> - **#12 看板列表端点 + 状态归一 + 指标防漂移**（`88a3d86`）：`GET /api/workflows`（CheckpointManager.listByCreatedBy + InMemory），UI status 归一（enum UPPER→lower），starter GrafanaDashboardMetricAlignmentTest 防指标名漂移
+> - 遗留（记录）：Postgres listByCreatedBy SQL 待补（U8）；VITE_API_KEY 生产加固（服务端注入 key）为 ops 决策；Postgres 版 diagnosis 未覆盖
+> - UI React 单测（Vitest）+ Grafana 真实部署验证 + U8 版本管理仍 Deferred
+
 > **当前状态（2026-08-02）**：
 > - P0 全交付 + U6/U7/U11/U12 落地，`mvn verify` **8 模块全绿（305 tests pass）**，JaCoCo 80% 达标
 > - 三个并行单元在 `feat/u7-observability` 分支：U7（`c888473`，可观测性）+ U11（`e869444`，合同审核串行 Demo）+ U12（`1b72166`，投资分析 fork-join Demo）
