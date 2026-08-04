@@ -189,6 +189,8 @@ public final class BspEngine {
                 WorkflowContext snapshot = context.readOnlySnapshot();
                 List<NodeResult> results = runSuperStep(step, dag, snapshot, nodeExecutor, cp, workflowId,
                         executor, effInputs, workflowStart, trace);
+                // U10 后续 #10：记录本 super-step 各节点所属层号（供 UI 按真实 BSP 拓扑分组）
+                recordSuperStepTrace(trace, step);
                 applyBarrier(step, results, context, dag, def, reducer, cp, workflowId);
             }
             if (trace != null) {
@@ -300,6 +302,8 @@ public final class BspEngine {
                         : step;
                 List<NodeResult> results = runSuperStep(stepToRun, dag, snapshot, nodeExecutor, cp, workflowId,
                         executor, Map.of(), workflowStart, trace);
+                // U10 后续 #10：记录本 super-step 各节点所属层号（用完整 step.nodeIds，含崩溃层跳过节点）
+                recordSuperStepTrace(trace, step);
                 applyBarrier(step, results, context, dag, def, reducer, cp, workflowId);
             }
             cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
@@ -323,10 +327,19 @@ public final class BspEngine {
         }
     }
 
+    /** 记录一个 super-step 内各节点所属的 BSP 层号（U10 后续 #10，供 UI 真实拓扑分组）。空 trace 则 no-op。 */
+    private void recordSuperStepTrace(ExecutionTrace trace, SuperStep step) {
+        if (trace == null) {
+            return;
+        }
+        for (String nodeId : step.nodeIds()) {
+            trace.recordStep(nodeId, step.index());
+        }
+    }
+
     /** 重放崩溃层已完成节点的输出进 context（走 Reducer，与 applyOutput 同语义）。 */
     private void applyReplayOutput(WorkflowContext context, AgentOutput output,
-                                   WorkflowDefinition def, ChannelReducer reducer) {
-        if (output == null || output.channelWrites() == null || output.channelWrites().isEmpty()) {
+                                   WorkflowDefinition def, ChannelReducer reducer) {        if (output == null || output.channelWrites() == null || output.channelWrites().isEmpty()) {
             return;
         }
         for (Map.Entry<String, Object> e : output.channelWrites().entrySet()) {

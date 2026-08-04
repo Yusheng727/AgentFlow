@@ -31,6 +31,8 @@ export interface PipelineNode {
   status: 'success' | 'running' | 'failed'
   time: number
   output: string
+  /** super-step 层号（U10 后续 #10，供 PipelineView 真实分组）。 */
+  step?: number
 }
 
 // ──────────────────── 后端 REST 契约（agentflow-api WorkflowController / DiagnosisController） ────────────────────
@@ -70,6 +72,8 @@ export interface NodeTrace {
   totalTokens: number
   outputSummary: string | null
   error: string | null
+  /** super-step 层号（U10 后续 #10，引擎写入；旧数据/ mock 无此字段时 UI 回退启发式分组）。 */
+  step?: number
 }
 
 /** ExecutionTrace.Snapshot（诊断请求 / U3 TraceController 响应）。 */

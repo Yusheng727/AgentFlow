@@ -38,6 +38,19 @@ public final class ExecutionTrace {
         }
     }
 
+    /**
+     * 记录某节点所属 super-step 层号（U10 后续 #10）：供 UI 按真实 BSP 拓扑分组渲染。
+     * 节点尚未追加（如崩溃恢复中跳过未重跑的节点）则 no-op。线程安全：遍历 COW 列表。
+     */
+    public void recordStep(String nodeId, int step) {
+        for (NodeTrace n : nodes) {
+            if (n.nodeId().equals(nodeId)) {
+                n.step(step);
+                return;
+            }
+        }
+    }
+
     /** 标记工作流终结。 */
     public void markCompleted(Status status) {
         this.endTime = Instant.now();

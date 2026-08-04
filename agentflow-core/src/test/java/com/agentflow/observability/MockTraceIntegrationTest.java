@@ -75,6 +75,48 @@ class MockTraceIntegrationTest {
         assertThat(snap.nodes()).allSatisfy(n ->
                 assertThat(n.status()).isEqualTo(NodeTrace.Status.SUCCESS));
         assertThat(snap.status()).isEqualTo(ExecutionTrace.Status.COMPLETED);
+
+        // U10 后续 #10：串行链 A→B→C = 3 super-step，各节点 step 应为 0/1/2（供 UI 真实拓扑分组）
+        Map<String, Integer> stepByNode = snap.nodes().stream()
+                .collect(java.util.stream.Collectors.toMap(NodeTrace::nodeId, NodeTrace::step));
+        assertThat(stepByNode)
+                .containsEntry("A", 0)
+                .containsEntry("B", 1)
+                .containsEntry("C", 2);
+    }
+
+    @Test
+    @DisplayName("U10 后续 #10：fork-join 拓扑 step 正确记录（A/B 并行同层=0，C 汇总=1）")
+    void traceRecordsSuperStepGrouping() throws Exception {
+        ExecutionTraceRegistry registry = new ExecutionTraceRegistry();
+        BspEngine engine = new BspEngine(new DAGLayerer(), null, null, null, registry);
+
+        String yaml = """
+                agentflow:
+                  version: "1.0"
+                nodes:
+                  - { id: A, agent: mock, mock_response: "a" }
+                  - { id: B, agent: mock, mock_response: "b" }
+                  - { id: C, agent: mock, mock_response: "${A}+${B}-c" }
+                edges:
+                  - { from: A, to: C }
+                  - { from: B, to: C }
+                """;
+        WorkflowDefinition def = new WorkflowDSLParser().parse(
+                new ByteArrayInputStream(yaml.getBytes(StandardCharsets.UTF_8)));
+
+        NodeRegistry reg = new NodeRegistry(Map.of("mock", TRACE_WRITING_MOCK));
+        String wfId = "wf-trace-forkjoin-1";
+        engine.execute(def, reg, Map.of(), new NoopCheckpointManager(), new ChannelReducer(), wfId);
+
+        ExecutionTrace.Snapshot snap = registry.snapshot(wfId);
+        Map<String, Integer> stepByNode = snap.nodes().stream()
+                .collect(java.util.stream.Collectors.toMap(NodeTrace::nodeId, NodeTrace::step));
+        // A/B 同 super-step（并行）→ step 0；C 汇总 → step 1
+        assertThat(stepByNode)
+                .containsEntry("A", 0)
+                .containsEntry("B", 0)
+                .containsEntry("C", 1);
     }
 
     @Test

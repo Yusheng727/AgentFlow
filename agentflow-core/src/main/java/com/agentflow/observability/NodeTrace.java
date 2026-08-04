@@ -29,6 +29,8 @@ public final class NodeTrace {
     private volatile long completionTokens;
     private volatile String outputSummary;
     private volatile String error;
+    /** super-step 层号（U10 后续 #10）：由 BspEngine 在超步骤执行后写入，供 UI 按真实拓扑分组（默认 0）。 */
+    private volatile int step;
 
     public NodeTrace(String nodeId, String agentName) {
         this(nodeId, agentName, System.nanoTime());
@@ -75,6 +77,17 @@ public final class NodeTrace {
     @JsonProperty("status")
     public Status status() {
         return status;
+    }
+
+    /** 所属 super-step 层号（默认 0）。由 BspEngine 在超步骤执行后写入（U10 后续 #10）。 */
+    @JsonProperty("step")
+    public int step() {
+        return step;
+    }
+
+    /** 引擎写入所属 super-step 层号（包级；U10 后续 #10）。 */
+    void step(int step) {
+        this.step = step;
     }
 
     @JsonProperty("promptTokens")

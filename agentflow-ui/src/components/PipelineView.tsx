@@ -18,11 +18,29 @@ const statusBadge: Record<ExecutionTraceSnapshot['status'], { text: string; cls:
 
 /**
  * 把扁平 NodeTrace 列表切成 super-step 分组。
- * v1 展示约定：ExecutionTrace.Snapshot 不含 super-step 信息（待 U3 TraceController 增强），
- * 按 prototype 的 supplier-risk 形态——末位节点为汇总步，其余并列为 Step 0。
+ * - 真实 trace（后端 U10 后续 #10 已在 Snapshot 节点带 super-step 层号 `step`）：
+ *   按 `step` 逐段切分（同层并行节点连续追加、step 单调不减），忠实反映 BSP 分层，
+ *   串行/双层 fork-join 等任意拓扑都按引擎真实分层展示，不伪造「末节点=汇总」。
+ * - mock/旧数据（无 `step` 字段）：回退按 prototype 的 supplier-risk 形态——
+ *   末位为汇总步、其余并列为 Step 0（纯示意，仅在无后端信息时兜底）。
  */
 function groupIntoSteps(nodes: NodeTrace[]): NodeTrace[][] {
-  if (nodes.length <= 1) return nodes.length === 0 ? [] : [nodes]
+  if (nodes.length === 0) return []
+  // 后端已带真实 step → 按 step 逐段切分（同 step 的连续节点为一组）
+  if (nodes.every((n) => typeof n.step === 'number')) {
+    const groups: NodeTrace[][] = []
+    for (const n of nodes) {
+      const last = groups[groups.length - 1]
+      if (last && last[0].step === n.step) {
+        last.push(n)
+      } else {
+        groups.push([n])
+      }
+    }
+    return groups
+  }
+  // 无 step（mock/旧数据）：回退启发式——末节点=汇总，其余=Step 0（示意）
+  if (nodes.length === 1) return [nodes]
   return [nodes.slice(0, -1), [nodes[nodes.length - 1]]]
 }
 

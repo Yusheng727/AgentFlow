@@ -39,7 +39,9 @@ class NodeTraceJacksonTest {
                 .contains("\"totalTokens\":150")
                 .contains("\"outputSummary\":\"解析完成\"")
                 // 关键：UI/PipelineView 读 durationMs（真实轨迹此前渲染 "undefinedms"）
-                .contains("\"durationMs\"");
+                .contains("\"durationMs\"")
+                // U10 后续 #10：super-step 层号（UI 真实拓扑分组）
+                .contains("\"step\"");
         // duration()/isTerminal 不外泄（内部实现/派生布尔，非 wire 契约）
         assertThat(json).doesNotContain("\"duration\":").doesNotContain("\"terminal\"");
     }
