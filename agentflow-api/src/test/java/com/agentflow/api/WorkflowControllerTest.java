@@ -12,6 +12,8 @@ import com.agentflow.engine.BspEngine;
 import com.agentflow.engine.ChannelReducer;
 import com.agentflow.engine.checkpoint.InMemoryCheckpointManager;
 import com.agentflow.engine.checkpoint.WorkflowStatus;
+import com.agentflow.version.InMemoryWorkflowDefinitionStore;
+import com.agentflow.version.WorkflowVersionManager;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -44,6 +46,8 @@ class WorkflowControllerTest {
     private WorkflowOwnershipChecker ownershipChecker;
     private CallerToolAllowlist toolAllowlist;
     private NodeRegistry nodeRegistry;
+    private final WorkflowVersionManager versionManager =
+            new WorkflowVersionManager(new InMemoryWorkflowDefinitionStore());
 
     private WorkflowController controller;
 
@@ -56,7 +60,7 @@ class WorkflowControllerTest {
         toolAllowlist = new CallerToolAllowlist(Map.of()); // 空 allowlist = 无限制
         nodeRegistry = new NodeRegistry(Map.of("a", input -> AgentOutput.of("output-from-a")));
         controller = new WorkflowController(parser, engine, checkpointManager,
-                ownershipChecker, toolAllowlist, nodeRegistry);
+                ownershipChecker, toolAllowlist, nodeRegistry, versionManager);
     }
 
     private static HttpServletRequest requestWithCaller(String callerId) {
@@ -109,7 +113,7 @@ class WorkflowControllerTest {
         // allowlist 只允许 caller-A 用 toolA，提交引用 toolB
         toolAllowlist = new CallerToolAllowlist(Map.of("caller-A", Set.of("toolA")));
         controller = new WorkflowController(parser, engine, checkpointManager,
-                ownershipChecker, toolAllowlist, nodeRegistry);
+                ownershipChecker, toolAllowlist, nodeRegistry, versionManager);
 
         String yaml = """
                 agentflow: { version: "1.0" }
@@ -168,6 +172,39 @@ class WorkflowControllerTest {
         assertThat(response.getBody().message()).contains("仅 FAILED");
     }
 
+    // ─────────────────── GET /workflows/{id}/version-check（U8） ───────────────────
+
+    @Test
+    @DisplayName("version-check：创建者 200 无冲突（执行版本=最新定义版本）")
+    void versionCheckOwnerNoConflict() throws Exception {
+        String wfId = submitWithVersion("ver-ok", "1.0");
+        var res = controller.versionCheck(wfId, requestWithCaller("caller-A"));
+        assertThat(res.getStatusCode().value()).isEqualTo(200);
+        assertThat(res.getBody().workflowName()).isEqualTo("ver-ok");
+        assertThat(res.getBody().executedVersion()).isEqualTo("1.0");
+        assertThat(res.getBody().conflict()).isFalse();
+    }
+
+    @Test
+    @DisplayName("version-check：版本 bump 后旧实例报冲突（执行 1.0 vs 最新 2.0，WARN 不阻断）")
+    void versionCheckReportsConflictWhenOutdated() throws Exception {
+        String wfV1 = submitWithVersion("ver-conflict", "1.0");
+        // 同 name 再提交 v2 → v1 执行实例 version-check 报 conflict
+        submitWithVersion("ver-conflict", "2.0");
+        var res = controller.versionCheck(wfV1, requestWithCaller("caller-A"));
+        assertThat(res.getStatusCode().value()).isEqualTo(200);
+        assertThat(res.getBody().conflict()).isTrue();
+        assertThat(res.getBody().latestVersion()).isEqualTo("2.0");
+    }
+
+    @Test
+    @DisplayName("version-check：非创建者 → 403（IDOR 防护）")
+    void versionCheckForbiddenForNonOwner() throws Exception {
+        String wfId = submitWithVersion("ver-403", "1.0");
+        var res = controller.versionCheck(wfId, requestWithCaller("caller-B"));
+        assertThat(res.getStatusCode().value()).isEqualTo(403);
+    }
+
     // ─────────────────── 辅助 ───────────────────
 
     private String submitWorkflow(String callerId) {
@@ -180,6 +217,21 @@ class WorkflowControllerTest {
         WorkflowController.SubmitRequest body = new WorkflowController.SubmitRequest(
                 "test-wf", "1.0", yaml, Map.of());
         return controller.submit(body, requestWithCaller(callerId)).getBody().workflowId();
+    }
+
+    /** 按指定版本提交工作流（U8 版本管理测试用），返回 workflowId。 */
+    private String submitWithVersion(String name, String version) {
+        String yaml = """
+                agentflow: { version: "%s" }
+                nodes:
+                  - { id: A, agent: a }
+                edges: []
+                """.formatted(version);
+        WorkflowController.SubmitRequest body = new WorkflowController.SubmitRequest(
+                name, version, yaml, Map.of());
+        var res = controller.submit(body, requestWithCaller("caller-A"));
+        assertThat(res.getStatusCode().value()).isEqualTo(202);
+        return res.getBody().workflowId();
     }
 
     /** 轮询工作流状态直到目标状态或超时（异步执行需等待）。 */

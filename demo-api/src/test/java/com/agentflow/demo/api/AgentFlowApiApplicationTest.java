@@ -13,6 +13,8 @@ import com.agentflow.dsl.WorkflowDSLParser;
 import com.agentflow.engine.BspEngine;
 import com.agentflow.engine.checkpoint.InMemoryCheckpointManager;
 import com.agentflow.observability.ExecutionTraceRegistry;
+import com.agentflow.version.InMemoryWorkflowDefinitionStore;
+import com.agentflow.version.WorkflowVersionManager;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -79,12 +81,13 @@ class AgentFlowApiApplicationTest {
         NodeRegistry nodeRegistry = new NodeRegistry(name -> new MockAgentFunction());
         WorkflowOwnershipChecker ownership = new WorkflowOwnershipChecker(cp);
         CallerToolAllowlist allowlist = new CallerToolAllowlist(Map.of());
+        WorkflowVersionManager versionManager = new WorkflowVersionManager(new InMemoryWorkflowDefinitionStore());
 
         // 与生产一致：Boot web ObjectMapper 支持 JavaTimeModule（Snapshot 的 Instant 字段反序列化）
         ObjectMapper webMapper = JsonMapper.builder().addModule(new JavaTimeModule()).build();
 
         mockMvc = standaloneSetup(
-                new WorkflowController(new WorkflowDSLParser(), engine, cp, ownership, allowlist, nodeRegistry),
+                new WorkflowController(new WorkflowDSLParser(), engine, cp, ownership, allowlist, nodeRegistry, versionManager),
                 new TraceController(registry, ownership),
                 new DiagnosisController())
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(webMapper))
@@ -183,6 +186,22 @@ class AgentFlowApiApplicationTest {
         assertThat(list.get(1).path("workflowId").asText()).isEqualTo(wfA);
         assertThat(list.get(0).path("workflowName").asText()).isEqualTo("list-b");
         assertThat(list.get(0).path("status").asText()).isIn("PENDING", "RUNNING", "SUCCESS");
+    }
+
+    @Test
+    @DisplayName("#U8 version-check：提交后执行版本=最新定义版本→无冲突；非创建者→403")
+    void versionCheckEndpoint() throws Exception {
+        String workflowId = submitAndGetId(DEMO_KEY, "ver-wf");
+
+        // 本人（创建者）→ 200 + 无冲突（最新定义版本=执行版本 "1.0"）
+        String body = getBody("/api/workflows/" + workflowId + "/version-check", DEMO_KEY, 200);
+        JsonNode check = objectMapper.readTree(body);
+        assertThat(check.path("workflowName").asText()).isEqualTo("ver-wf");
+        assertThat(check.path("executedVersion").asText()).isEqualTo("1.0");
+        assertThat(check.path("conflict").asBoolean()).isFalse();
+
+        // 非创建者 → 403（IDOR）
+        assertThat(getStatus("/api/workflows/" + workflowId + "/version-check", OTHER_KEY)).isEqualTo(403);
     }
 
     // ──────────────────── 辅助 ────────────────────

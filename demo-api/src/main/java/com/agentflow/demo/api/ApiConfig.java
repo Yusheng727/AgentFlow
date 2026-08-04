@@ -13,6 +13,9 @@ import com.agentflow.engine.checkpoint.CheckpointManager;
 import com.agentflow.engine.checkpoint.InMemoryCheckpointManager;
 import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.observability.ExecutionTraceRegistry;
+import com.agentflow.version.InMemoryWorkflowDefinitionStore;
+import com.agentflow.version.WorkflowDefinitionStore;
+import com.agentflow.version.WorkflowVersionManager;
 
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -93,6 +96,18 @@ public class ApiConfig {
     @Bean
     public CallerToolAllowlist callerToolAllowlist() {
         return new CallerToolAllowlist(Map.of());
+    }
+
+    // ─── U8 版本管理：内存定义存储（mock/demo） + 版本管理器（WorkflowController 注入） ───
+
+    @Bean
+    public WorkflowDefinitionStore workflowDefinitionStore() {
+        return new InMemoryWorkflowDefinitionStore();
+    }
+
+    @Bean
+    public WorkflowVersionManager workflowVersionManager(WorkflowDefinitionStore workflowDefinitionStore) {
+        return new WorkflowVersionManager(workflowDefinitionStore);
     }
 
     /** 鉴权过滤：{@code /api/*} 需 {@code X-API-Key}（含 UI 默认 demo key，另有 env {@code AGENTFLOW_API_KEYS} 追加）。 */

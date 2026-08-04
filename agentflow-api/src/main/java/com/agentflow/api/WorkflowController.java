@@ -14,6 +14,7 @@ import com.agentflow.engine.WorkflowExecutionException;
 import com.agentflow.engine.checkpoint.CheckpointManager;
 import com.agentflow.engine.checkpoint.WorkflowExecutionRecord;
 import com.agentflow.engine.checkpoint.WorkflowStatus;
+import com.agentflow.version.VersionConflictDetector;
 
 import jakarta.servlet.http.HttpServletRequest;
 
@@ -69,6 +70,7 @@ public class WorkflowController {
     private final WorkflowOwnershipChecker ownershipChecker;
     private final CallerToolAllowlist toolAllowlist;
     private final NodeRegistry nodeRegistry;
+    private final com.agentflow.version.WorkflowVersionManager versionManager;
     private final ExecutorService executor;
 
     public WorkflowController(WorkflowDSLParser parser,
@@ -76,13 +78,15 @@ public class WorkflowController {
                               CheckpointManager checkpointManager,
                               WorkflowOwnershipChecker ownershipChecker,
                               CallerToolAllowlist toolAllowlist,
-                              NodeRegistry nodeRegistry) {
+                              NodeRegistry nodeRegistry,
+                              com.agentflow.version.WorkflowVersionManager versionManager) {
         this.parser = Objects.requireNonNull(parser, "parser");
         this.engine = Objects.requireNonNull(engine, "engine");
         this.checkpointManager = Objects.requireNonNull(checkpointManager, "checkpointManager");
         this.ownershipChecker = Objects.requireNonNull(ownershipChecker, "ownershipChecker");
         this.toolAllowlist = Objects.requireNonNull(toolAllowlist, "toolAllowlist");
         this.nodeRegistry = Objects.requireNonNull(nodeRegistry, "nodeRegistry");
+        this.versionManager = Objects.requireNonNull(versionManager, "versionManager");
         this.executor = Executors.newVirtualThreadPerTaskExecutor();
     }
 
@@ -146,6 +150,12 @@ public class WorkflowController {
         String version = def.version();
         checkpointManager.initWorkflow(workflowId, request.workflowName(), version, callerId);
 
+        // 3.5 版本管理（U8 R14）：把本次解析定义按 (name, version) 存入 store——
+        // 恢复/retry 从 store 取定义（不再从 classpath 读），版本 bump 后旧实例仍按旧 DAG 执行。
+        versionManager.recordWorkflowDefinition(request.workflowName(), def);
+        versionManager.detectConflict(request.workflowName(), version).ifPresent(c ->
+                log.warn(c.message()));
+
         // 4. 派发异步执行
         Map<String, Object> inputs = request.inputs() != null ? request.inputs() : Map.of();
         executor.submit(() -> {
@@ -186,6 +196,39 @@ public class WorkflowController {
     public ResponseEntity<List<WorkflowExecutionRecord>> list(HttpServletRequest httpRequest) {
         String callerId = WorkflowOwnershipChecker.callerIdFrom(httpRequest);
         return ResponseEntity.ok(checkpointManager.listByCreatedBy(callerId));
+    }
+
+    // ──────────────────── GET /workflows/{id}/version-check（U8 R14） ────────────────────
+
+    /**
+     * 版本冲突检查（仅创建者可查）：报告执行记录的版本 vs 该工作流最新定义版本是否不一致。
+     * 不一致仅提示（WARN 语义），不阻断——已运行/恢复实例按各自版本执行到结束。
+     */
+    @GetMapping("/{workflowId}/version-check")
+    public ResponseEntity<VersionCheckResponse> versionCheck(
+            @PathVariable String workflowId,
+            HttpServletRequest httpRequest) {
+
+        String callerId = WorkflowOwnershipChecker.callerIdFrom(httpRequest);
+        try {
+            ownershipChecker.requireOwnership(workflowId, callerId);
+        } catch (WorkflowOwnershipChecker.OwnershipException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+
+        String name = checkpointManager.findWorkflowName(workflowId).orElse(null);
+        String executedVersion = checkpointManager.findVersion(workflowId)
+                .filter(v -> !v.isBlank()).orElse("1.0");
+        var conflict = versionManager.detectConflict(name == null ? "unknown" : name, executedVersion);
+
+        return ResponseEntity.ok(new VersionCheckResponse(
+                workflowId,
+                name,
+                executedVersion,
+                conflict.map(VersionConflictDetector.Conflict::latestVersion).orElse(null),
+                conflict.isPresent(),
+                conflict.map(VersionConflictDetector.Conflict::message)
+                        .orElse("版本一致或无历史定义")));
     }
 
     // ──────────────────────── GET /workflows/{id}/status ────────────────────────
@@ -285,6 +328,16 @@ public class WorkflowController {
 
     /** HATEOAS-lite 链接。 */
     public record StatusLinks(String status) {}
+
+    /** U8 版本冲突检查响应：执行版本 + 最新定义版本 + 冲突标记/消息（WARN 语义，不阻断）。 */
+    public record VersionCheckResponse(
+            String workflowId,
+            String workflowName,
+            String executedVersion,
+            String latestVersion,
+            boolean conflict,
+            String message
+    ) {}
 
     // ──────────────────────────── 辅助 ────────────────────────────
 

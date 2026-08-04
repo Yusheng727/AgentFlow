@@ -132,6 +132,18 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
         return Optional.ofNullable(workflowCreatedBy.get(workflowId));
     }
 
+    @Override
+    public Optional<String> findWorkflowName(String workflowId) {
+        String[] meta = workflowMeta.get(workflowId);
+        return meta == null ? Optional.empty() : Optional.ofNullable(meta[0]);
+    }
+
+    @Override
+    public Optional<String> findVersion(String workflowId) {
+        String[] meta = workflowMeta.get(workflowId);
+        return meta == null ? Optional.empty() : Optional.ofNullable(meta[1]);
+    }
+
     // ──────────────────────── 辅助方法 ────────────────────────
 
     private static String nodeKey(String workflowId, int superStep, String nodeId) {

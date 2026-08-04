@@ -231,6 +231,29 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                 ? Optional.empty() : Optional.of(results.getFirst());
     }
 
+    @Override
+    public Optional<String> findWorkflowName(String workflowId) {
+        List<String> results = jdbc.query(
+                """
+                SELECT workflow_name FROM workflow_executions WHERE id = ?
+                """,
+                (rs, rowNum) -> rs.getString("workflow_name"),
+                workflowId);
+        return results.isEmpty() ? Optional.empty() : Optional.of(results.getFirst());
+    }
+
+    @Override
+    public Optional<String> findVersion(String workflowId) {
+        List<String> results = jdbc.query(
+                """
+                SELECT workflow_version FROM workflow_executions WHERE id = ?
+                """,
+                (rs, rowNum) -> rs.getString("workflow_version"),
+                workflowId);
+        return results.isEmpty() || results.getFirst() == null
+                ? Optional.empty() : Optional.of(results.getFirst());
+    }
+
     // ──────────────────────── 辅助方法 ────────────────────────
 
     private void acquireSemaphore() {

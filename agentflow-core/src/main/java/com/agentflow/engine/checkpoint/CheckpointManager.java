@@ -120,4 +120,21 @@ public interface CheckpointManager {
     default List<WorkflowExecutionRecord> listByCreatedBy(String createdBy) {
         return List.of();
     }
+
+    /**
+     * 查询工作流执行记录的工作流名（U8 版本管理用：恢复/冲突检测需 name 定位定义）。
+     * 不存在返回 {@code Optional.empty()}。
+     */
+    default Optional<String> findWorkflowName(String workflowId) {
+        return Optional.empty();
+    }
+
+    /**
+     * 查询工作流执行记录的版本（U8 R14：恢复按 name+version 从 {@code WorkflowDefinitionStore} 取定义，
+     * 冲突检测比较执行版本与最新定义版本）。
+     * 不存在返回 {@code Optional.empty()}（U5 早期实例可能无版本）。
+     */
+    default Optional<String> findVersion(String workflowId) {
+        return Optional.empty();
+    }
 }
