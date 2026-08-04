@@ -32,6 +32,7 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 | U12 | 投资分析双层 fork-join Demo：新 `demo-investment-analysis` 模块，6 节点 4 super-step 双层 fork-join（step0 公司财报+市场数据并行 → step1 可行性分析串行 → step2 风险评估+收益预测并行 → step3 投资裁决汇总），验证 BSP 最长路径分层泛用性 + channel 隔离。用 `DAGLayerer.computeSuperSteps` 断言 4 层分层。node id 用下划线（`company_finance`）避开连字符占位符问题（U11 已修连字符正则，但 U12 保持自包含） | 6 tests，`mvn verify` SUCCESS |
 | U1/U2 | React UI 5 Tab（看板/提交/工作流定义/执行轨迹/诊断报告）：`agentflow-ui` 按 prototype-final.html 转 React 18 + Vite 5 + Tailwind 3 + TypeScript strict + lucide-react。Layout 深色侧边栏 5 菜单；**KTD-1 真实 API 优先 + mock fallback**（api.ts fetch 5s 超时失败降级 mockData，后端未起不白屏，UI 显示 mock 徽标）；Vite proxy `/api`→localhost:8080 规避 CORS。Dashboard 三列看板按状态分组 + 最近执行表；SubmitForm YAML 编辑器（contenteditable 手写高亮+行号+实时校验 nodes/agentflow 段，零新依赖）→ spinner→toast→跳轨迹页（真实 API 失败走 mock 模拟全流程）；WorkflowDefinitions 卡片选中高亮跳转提交页预填；PipelineView BSP super-step 分组渲染（并行→barrier→汇总）；DiagnosisPanel KPI+5 类问题卡片。React 单元测试留后续（plan Deferred） | `npm run build` 绿（tsc strict）+ dev HTTP 200 |
 | U4 | Grafana Dashboard JSON（R9）：`agentflow-starter/src/main/resources/grafana/agentflow-dashboard.json`，6 面板（工作流执行趋势按 status / 各 Agent P50-P95-P99 / token 消耗 Top10 / LLM 成本按 model / 预算超限+窗口总成本 / 失败率），Prometheus 数据源 + 模板变量，指标名对齐 AgentFlowMetrics 常量。配套：`AgentFlowMetrics.recordNodeDuration` 开 `publishPercentileHistogram`（暴露 `_bucket` 序列供 histogram_quantile 算分位，count/sum/max 语义不变） | JSON 合法（node 解析）+ 指标名对齐 + `mvn verify` 全绿 |
+| U8 | Workflow 版本管理（R14）：`com.agentflow.version` 包（`WorkflowDefinitionStore` 接口 + `InMemory`/`Postgres` 实现 + `WorkflowVersionManager` + `VersionConflictDetector`）。按 `(workflow_name, version)` 把解析后的定义存 `workflow_definitions` JSONB 表（V3 迁移）；提交时 `submit` 记录定义（恢复/retry 不再从 classpath 读）→ 版本 bump 后旧实例仍按旧 DAG 执行；`VersionConflictDetector` 仅 WARN 不阻断；`GET /workflows/{id}/version-check` 报执行版本 vs 最新定义版本冲突。`CheckpointManager` 增 `findWorkflowName/findVersion`（InMemory+Postgres）。demo-api ApiConfig 注册 InMemory 存储 | core VersionTest 7 + api WorkflowControllerTest 10 + demo-api 6；core+api JaCoCo 门禁 verify 绿 |
 
 **OQ-2 决议**：plan 当初猜 Spring AI 2.0 要 Boot 3.5——实际不够。3.5 仍带 Jackson 2.19，而 Spring AI 2.0.0 的 @Tool schema 路径用 Jackson 3（`tools.jackson.core`，需 `JsonSerializeAs`）。**正确版本是 Spring Boot 4.1.0 GA**（自带 Jackson 3.1.4 + Spring Framework 7）。U3 起全仓升 Boot 4.1。
 
@@ -59,8 +60,9 @@ U3 ✅ → U4 ✅ → U5 ✅ → U14 ✅ → U9 ✅ → U10 ✅ → U13 ✅（P0
 > - **#10 ExecutionTrace 带 super-step 层号**（`cebe9e9`）：NodeTrace.step + BspEngine 记层，UI PipelineView 按真实拓扑分组（串行/双层 fork-join 不再错扁平），mock 回退启发式
 > - **#11 /diagnosis 真实 trace 反序列化**（`53317cb`）：NodeTrace @JsonCreator + 派生 getter READ_ONLY，诊断真实路径不再绑空/400
 > - **#12 看板列表端点 + 状态归一 + 指标防漂移**（`88a3d86`）：`GET /api/workflows`（CheckpointManager.listByCreatedBy + InMemory），UI status 归一（enum UPPER→lower），starter GrafanaDashboardMetricAlignmentTest 防指标名漂移
-> - 遗留（记录）：Postgres listByCreatedBy SQL 待补（U8）；VITE_API_KEY 生产加固（服务端注入 key）为 ops 决策；Postgres 版 diagnosis 未覆盖
-> - UI React 单测（Vitest）+ Grafana 真实部署验证 + U8 版本管理仍 Deferred
+> - **U8 Workflow 版本管理**（`f32582d`，R14）：version 包（定义存储 InMemory/Postgres `workflow_definitions` + Manager + 冲突检测），提交记录定义、恢复/retry 取旧 DAG、`GET /version-check` 报冲突，WARN 不阻断
+> - 遗留（记录）：Postgres listByCreatedBy SQL 待补（U8 已建 workflow_definitions 表，可顺带）；VITE_API_KEY 生产加固为 ops 决策；Postgres 版 diagnosis 未覆盖
+> - UI React 单测（Vitest）+ Grafana 真实部署验证仍 Deferred
 
 > **当前状态（2026-08-02）**：
 > - P0 全交付 + U6/U7/U11/U12 落地，`mvn verify` **8 模块全绿（305 tests pass）**，JaCoCo 80% 达标
