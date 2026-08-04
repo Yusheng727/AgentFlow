@@ -165,6 +165,26 @@ class AgentFlowApiApplicationTest {
         assertThat(report.path("failedNodes").asInt()).isEqualTo(0);
     }
 
+    @Test
+    @DisplayName("#12 看板列表：GET /api/workflows 返回调用者工作流（按创建倒序 + 401 + 只见自己的）")
+    void listWorkflowsEndpoint() throws Exception {
+        String wfA = submitAndGetId(DEMO_KEY, "list-a");
+        String wfB = submitAndGetId(DEMO_KEY, "list-b");
+        submitAndGetId(OTHER_KEY, "list-other"); // OTHER 的，DEMO_KEY 看不到
+
+        // 无 Key → 401
+        assertThat(getStatus("/api/workflows", null)).isEqualTo(401);
+
+        // DEMO_KEY 看到自己的 2 个（倒序：后提交的 b 在前），不含 OTHER 的
+        String body = getBody("/api/workflows", DEMO_KEY, 200);
+        JsonNode list = objectMapper.readTree(body);
+        assertThat(list).hasSize(2);
+        assertThat(list.get(0).path("workflowId").asText()).isEqualTo(wfB);
+        assertThat(list.get(1).path("workflowId").asText()).isEqualTo(wfA);
+        assertThat(list.get(0).path("workflowName").asText()).isEqualTo("list-b");
+        assertThat(list.get(0).path("status").asText()).isIn("PENDING", "RUNNING", "SUCCESS");
+    }
+
     // ──────────────────── 辅助 ────────────────────
 
     private String submitAndGetId(String key, String name) throws Exception {

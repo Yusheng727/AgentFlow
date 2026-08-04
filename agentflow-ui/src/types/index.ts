@@ -15,6 +15,15 @@ export interface WorkflowSummary {
   desc: string
 }
 
+/** GET /api/workflows 返回的后端执行记录（U10 后续 #12，看板列表数据源）。 */
+export interface WorkflowExecutionRecord {
+  workflowId: string
+  workflowName: string
+  /** WorkflowStatus 枚举名（UPPER）：PENDING / RUNNING / SUCCESS / FAILED / UNKNOWN */
+  status: string
+  createdAt: string | null
+}
+
 /** 工作流定义卡片（U2 定义 Tab 用）。 */
 export interface WorkflowDefinitionInfo {
   id: string

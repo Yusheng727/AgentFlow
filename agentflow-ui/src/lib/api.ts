@@ -4,6 +4,8 @@ import type {
   StatusResponse,
   SubmitRequest,
   SubmitResponse,
+  WorkflowExecutionRecord,
+  WorkflowStatusUi,
   WorkflowSummary,
 } from '../types'
 import { mockTrace, mockWorkflows } from './mockData'
@@ -72,16 +74,34 @@ export interface WorkflowListResult {
 }
 
 /**
- * 工作流列表（看板数据源）。
- * 注：后端 v1 尚无列表端点（仅 GET /api/workflows/{id}/status），此处预留契约——
- * GET /api/workflows 404 或不可达时自动降级 mockData；列表端点上线后零改动切换。
+ * 工作流列表（看板数据源，U10 后续 #12）。
+ * 后端 GET /api/workflows 返回 WorkflowExecutionRecord（workflowId/workflowName/status/createdAt，
+ * status 为 UPPER 枚举）。此处归一化映射：status → lowercase（pending 并入 running，供看板三列分桶）、
+ * mock 专属展示字段（nodes/steps/time/desc）给出缺省。后端不可达/404 → 降级 mockData。
  */
 export async function listWorkflows(): Promise<WorkflowListResult> {
   const { data, source } = await withMockFallback(
-    () => request<WorkflowSummary[]>('/workflows'),
+    () => request<WorkflowExecutionRecord[]>('/workflows').then((list) => list.map(toWorkflowSummary)),
     () => mockWorkflows,
   )
   return { workflows: data, source }
+}
+
+/** 后端执行记录 → 看板摘要（状态大小写归一，避免 real enum UPPER 静默错分列/成功率）。 */
+function toWorkflowSummary(r: WorkflowExecutionRecord): WorkflowSummary {
+  const raw = r.status.toLowerCase()
+  // pending 是瞬时态，并入 running（看板三列 running/success/failed 分桶；对应后端 status=UPPER）
+  const status: WorkflowStatusUi = raw === 'pending' ? 'running' : (raw as WorkflowStatusUi)
+  return {
+    id: r.workflowId,
+    name: r.workflowName,
+    status,
+    nodes: 0,
+    steps: 0,
+    time: '--',
+    date: r.createdAt ? new Date(r.createdAt).toLocaleTimeString() : '--',
+    desc: r.status,
+  }
 }
 
 /** POST /api/workflows — 提交 YAML + inputs，异步执行（202）。 */

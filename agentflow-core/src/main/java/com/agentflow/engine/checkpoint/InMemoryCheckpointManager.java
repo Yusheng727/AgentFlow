@@ -41,6 +41,7 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
     private final ConcurrentHashMap<String, WorkflowStatus> workflowStatuses = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String[]> workflowMeta = new ConcurrentHashMap<>(); // [name, version]
     private final ConcurrentHashMap<String, String> workflowCreatedBy = new ConcurrentHashMap<>(); // U14 所有权校验
+    private final ConcurrentHashMap<String, Instant> workflowCreatedAt = new ConcurrentHashMap<>(); // U10 后续 #12 列表排序
 
     // ──────────────────────────── 写入 ────────────────────────────
 
@@ -94,9 +95,26 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
     public void initWorkflow(String workflowId, String workflowName, String version, String createdBy) {
         workflowMeta.put(workflowId, new String[]{workflowName, version});
         workflowStatuses.put(workflowId, WorkflowStatus.PENDING);
+        workflowCreatedAt.put(workflowId, Instant.now()); // U10 后续 #12 列表排序（就近创建优先）
         if (createdBy != null) {
             workflowCreatedBy.put(workflowId, createdBy);
         }
+    }
+
+    @Override
+    public List<WorkflowExecutionRecord> listByCreatedBy(String createdBy) {
+        // 按创建时间倒序（最近优先），供看板「最近执行」；createdBy 为空则返回全部（兼容 U5 未设 createdBy）
+        return workflowCreatedAt.entrySet().stream()
+                .filter(e -> createdBy == null || createdBy.equals(workflowCreatedBy.get(e.getKey())))
+                .sorted(Map.Entry.<String, Instant>comparingByValue().reversed())
+                .map(e -> {
+                    String[] meta = workflowMeta.get(e.getKey());
+                    WorkflowStatus status = workflowStatuses.getOrDefault(e.getKey(), WorkflowStatus.PENDING);
+                    return new WorkflowExecutionRecord(e.getKey(),
+                            meta != null && meta[0] != null ? meta[0] : e.getKey(),
+                            status, e.getValue());
+                })
+                .collect(Collectors.toList());
     }
 
     @Override

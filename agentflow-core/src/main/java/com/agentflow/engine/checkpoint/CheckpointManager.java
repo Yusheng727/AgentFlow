@@ -110,4 +110,14 @@ public interface CheckpointManager {
      * @return 创建者 hash，若不存在（U5 未设 createdBy）则返回 {@code Optional.empty()}
      */
     Optional<String> findCreatedBy(String workflowId);
+
+    /**
+     * 列出某创建者在当前进程/库里的工作流执行实例（U10 后续 #12，看板列表端点用）。
+     *
+     * <p><b>v1 默认返回空</b>（Postgres 生产查询待实现，见 TODO）；{@link InMemoryCheckpointManager}
+     * 提供内存实现（mock/demo，供 UI 看板真实数据）。createdBy 为创建者 API Key 的 SHA-256 hash。
+     */
+    default List<WorkflowExecutionRecord> listByCreatedBy(String createdBy) {
+        return List.of();
+    }
 }

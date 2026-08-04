@@ -12,9 +12,12 @@ import com.agentflow.engine.BspEngine;
 import com.agentflow.engine.ChannelReducer;
 import com.agentflow.engine.WorkflowExecutionException;
 import com.agentflow.engine.checkpoint.CheckpointManager;
+import com.agentflow.engine.checkpoint.WorkflowExecutionRecord;
 import com.agentflow.engine.checkpoint.WorkflowStatus;
 
 import jakarta.servlet.http.HttpServletRequest;
+
+import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -167,6 +170,22 @@ public class WorkflowController {
                 new StatusLinks("/api/workflows/" + workflowId + "/status"));
 
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(response);
+    }
+
+    // ──────────────────────── GET /workflows（列表，U10 后续 #12） ────────────────────────
+
+    /**
+     * 列出当前调用者可访问（自己创建）的工作流执行实例（看板数据源）。
+     *
+     * <p>受 {@link ApiKeyAuthFilter} 保护（401）；按创建者过滤（每 API Key 只看到自己的工作流）。
+     * Postgres 生产实现的 {@link #listByCreatedBy} 待补（U8，见 CheckpointManager 默认空实现）。
+     *
+     * @return 200 + {@link List}<{@link WorkflowExecutionRecord}>（按创建时间倒序）
+     */
+    @GetMapping
+    public ResponseEntity<List<WorkflowExecutionRecord>> list(HttpServletRequest httpRequest) {
+        String callerId = WorkflowOwnershipChecker.callerIdFrom(httpRequest);
+        return ResponseEntity.ok(checkpointManager.listByCreatedBy(callerId));
     }
 
     // ──────────────────────── GET /workflows/{id}/status ────────────────────────
