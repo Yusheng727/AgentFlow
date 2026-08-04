@@ -12,6 +12,7 @@
 | [02-bugs-and-fixes.md](./02-bugs-and-fixes.md) | 实现过程踩的坑 + 根因分析 + 修复（按单元） | 「遇到最难的问题」「线上 bug 怎么排查」 |
 | [03-review-findings.md](./03-review-findings.md) | ce-code-review 多 agent 审查发现的高价值问题 + 修复思路 | 「代码质量」「工程 rigor」展示 |
 | [04-glossary.md](./04-glossary.md) | 项目术语表（BSP/super-step/channel/Reducer/checkpoint 等）+ 一句话解释 | 自我介绍/讲项目时不卡壳 |
+| [05-observability-ui-followup.md](./05-observability-ui-followup.md) | 后续 #9–#12：可运行 API Server wiring + 3 个 Boot 4.1 坑、trace 超级步分层、NodeTrace 反序列化、看板列表端点/状态归一/指标防漂移 | 「真实路径为什么跑不通」「遇到最难的问题」 |
 
 ## 维护约定
 
