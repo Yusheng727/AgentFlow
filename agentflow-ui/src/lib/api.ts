@@ -19,8 +19,35 @@ import { mockTrace, mockWorkflows } from './mockData'
  */
 const BASE: string = import.meta.env.VITE_API_BASE ?? '/api'
 
-/** 鉴权头（ApiKeyAuthFilter，X-API-Key）；默认演示 key，可用 VITE_API_KEY 覆盖。 */
-const API_KEY: string = import.meta.env.VITE_API_KEY ?? 'demo-key-1234567890abcdef'
+/** 仅演示/本地 mock 用的公开 demo key（与 demo-api ApiConfig 注册的 key 一致）。非生产凭证。 */
+const DEMO_API_KEY = 'demo-key-1234567890abcdef'
+
+/**
+ * 解析请求头 `<b>X-API-Key</b>：`VITE_API_KEY` 优先；未配置则回退 demo key。
+ *
+ * <p>生产加固：生产构建（{@code import.meta.env.PROD}）未配置 `VITE_API_KEY` 时，
+ * 打 `console.error` 显式告警，避免在真实后端前静默使用公开 demo key（后端生产应配
+ * `AGENTFLOW_API_KEYS` 拒绝/替换 demo key，见 README）。演示态用 demo key + isDemo 标记。
+ */
+export function resolveApiKey(
+  envKey: string | undefined,
+  isProd: boolean,
+): { key: string; isDemo: boolean } {
+  if (envKey && envKey.trim() !== '') {
+    return { key: envKey, isDemo: false }
+  }
+  if (isProd) {
+    // 不能静默回退到公开 demo key——运维需显式配置 VITE_API_KEY
+    console.error(
+      '[agentflow] 生产构建未配置 VITE_API_KEY，回退到公开演示 key。' +
+        '请设置 VITE_API_KEY 并在后端配置 AGENTFLOW_API_KEYS（否则演示 key 可能被拒绝/无权）。',
+    )
+  }
+  return { key: DEMO_API_KEY, isDemo: true }
+}
+
+/** 鉴权 key（ApiKeyAuthFilter，X-API-Key）；解析结果在模块加载时求值一次。 */
+const API_KEY: string = resolveApiKey(import.meta.env.VITE_API_KEY, import.meta.env.PROD).key
 
 /** 单请求超时：超过即视为后端不可达，触发 mock fallback。 */
 const TIMEOUT_MS = 5000

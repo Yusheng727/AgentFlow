@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   ApiError,
+  resolveApiKey,
   listWorkflows,
   submitWorkflow,
   getWorkflowStatus,
@@ -55,6 +56,39 @@ describe('ApiError', () => {
     expect(e.message).toBe('GET /x → HTTP 404')
   })
 })
+
+// ──────────────────── resolveApiKey（VITE_API_KEY 生产加固）────────────────────
+
+describe('resolveApiKey', () => {
+  it('配置了 VITE_API_KEY → 用之，isDemo=false', () => {
+    const r = resolveApiKey('prod-key-123', true)
+    expect(r.key).toBe('prod-key-123')
+    expect(r.isDemo).toBe(false)
+  })
+
+  it('未配置 → 回退 demo key，isDemo=true（dev 不告警）', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const r = resolveApiKey(undefined, false)
+    expect(r.key).toBe('demo-key-1234567890abcdef')
+    expect(r.isDemo).toBe(true)
+    expect(spy).not.toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('生产未配置 → 回退 demo key 且 console.error 显式告警（不静默）', () => {
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const r = resolveApiKey(undefined, true)
+    expect(r.isDemo).toBe(true)
+    expect(spy).toHaveBeenCalled()
+    spy.mockRestore()
+  })
+
+  it('空串/空白 key 视同未配置 → 回退 demo key', () => {
+    expect(resolveApiKey('', true).isDemo).toBe(true)
+    expect(resolveApiKey('   ', false).isDemo).toBe(true)
+  })
+})
+
 
 // ──────────────────── listWorkflows（看板列表）────────────────────
 
