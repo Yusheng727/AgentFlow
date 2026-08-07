@@ -13,8 +13,11 @@ import org.flywaydb.core.Flyway;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
 
 import javax.sql.DataSource;
+import java.sql.ResultSet;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.List;
@@ -51,6 +54,38 @@ public final class PostgresCheckpointManager implements CheckpointManager {
     private final JdbcTemplate jdbc;
     private final ObjectMapper jsonMapper;
     private final Semaphore writeSemaphore = new Semaphore(MAX_CONCURRENT_WRITES);
+
+    /**
+     * 看板列表端点（#12）的 {@code workflow_executions} 查询 SQL + 行映射。
+     *
+     * <p>SQL 与 RowMapper 均为 package-private static（单一真相源）：{@code listByCreatedBy} 直接复用，
+     * 集成测试 ({@code PostgresCheckpointManagerTest}) 用 H2 建兼容表跑同一 SQL + 映射验证 WHERE/ORDER BY 语义，
+     * 不在测试里复制 SQL 导致漂移。
+     */
+    static final String SELECT_EXECUTION_RECORDS =
+            """
+            SELECT id, workflow_name, status, created_at
+            FROM workflow_executions
+            ORDER BY created_at DESC
+            """;
+
+    static final String SELECT_EXECUTION_RECORDS_BY_CREATOR =
+            """
+            SELECT id, workflow_name, status, created_at
+            FROM workflow_executions
+            WHERE created_by = ?
+            ORDER BY created_at DESC
+            """;
+
+    static final RowMapper<WorkflowExecutionRecord> EXECUTION_RECORD_MAPPER =
+            (ResultSet rs, int rowNum) -> {
+                Timestamp ts = rs.getTimestamp("created_at");
+                return new WorkflowExecutionRecord(
+                        rs.getString("id"),
+                        rs.getString("workflow_name"),
+                        WorkflowStatus.valueOf(rs.getString("status")),
+                        ts != null ? ts.toInstant() : null);
+            };
 
     /**
      * 创建 PostgresCheckpointManager 并运行 Flyway 迁移。
@@ -252,6 +287,18 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                 workflowId);
         return results.isEmpty() || results.getFirst() == null
                 ? Optional.empty() : Optional.of(results.getFirst());
+    }
+
+    @Override
+    public List<WorkflowExecutionRecord> listByCreatedBy(String createdBy) {
+        // 与 InMemoryCheckpointManager 语义一致：createdBy 为空则返回全部（兼容 U5 早期未设 created_by 的实例），
+        // 否则仅返回该创建者的记录，均按创建时间倒序（看板「最近执行」就近优先）。
+        // workflow_name 在 schema 中 NOT NULL，无需像 InMemory 那样回退到 workflowId。
+        // 已有 idx_workflow_created_by 索引支撑 created_by 过滤。
+        if (createdBy == null) {
+            return jdbc.query(SELECT_EXECUTION_RECORDS, EXECUTION_RECORD_MAPPER);
+        }
+        return jdbc.query(SELECT_EXECUTION_RECORDS_BY_CREATOR, EXECUTION_RECORD_MAPPER, createdBy);
     }
 
     // ──────────────────────── 辅助方法 ────────────────────────

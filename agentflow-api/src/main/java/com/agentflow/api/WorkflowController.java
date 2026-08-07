@@ -188,7 +188,7 @@ public class WorkflowController {
      * 列出当前调用者可访问（自己创建）的工作流执行实例（看板数据源）。
      *
      * <p>受 {@link ApiKeyAuthFilter} 保护（401）；按创建者过滤（每 API Key 只看到自己的工作流）。
-     * Postgres 生产实现的 {@link #listByCreatedBy} 待补（U8，见 CheckpointManager 默认空实现）。
+     * {@link CheckpointManager#listByCreatedBy}（InMemory + Postgres 均已实现）。
      *
      * @return 200 + {@link List}<{@link WorkflowExecutionRecord}>（按创建时间倒序）
      */

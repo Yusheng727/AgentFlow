@@ -114,9 +114,9 @@ public interface CheckpointManager {
     /**
      * 列出某创建者在当前进程/库里的工作流执行实例（U10 后续 #12，看板列表端点用）。
      *
-     * <p><b>v1 默认返回空</b>（Postgres 生产查询待实现，见 TODO）；{@link InMemoryCheckpointManager}
-     * 提供内存实现（mock/demo，供 UI 看板真实数据）。createdBy 为创建者 API Key 的 SHA-256 hash。
-     */
+     * <p>createdBy 为创建者 API Key 的 SHA-256 hash；为空则返回全部（兼容 U5 早期未设 created_by 的实例）。
+     * 按创建时间倒序。{@link InMemoryCheckpointManager} 与 {@link PostgresCheckpointManager} 均已实现；
+     * 无实现（Noop）时默认返回空。 */
     default List<WorkflowExecutionRecord> listByCreatedBy(String createdBy) {
         return List.of();
     }
