@@ -1,0 +1,70 @@
+# AgentFlow v1 交付状态 · 剩余工作 · v2 路线图
+
+> 本文档是 2026-08-07 对 v1 的交付盘点与 v2 边界的一手来源，供接手/面试口径自洽。
+> 更新日期：2026-08-07。计划权威件：`docs/plans/agentflow/`（本文档不替代 plan，只做状态与路线的快照）。
+
+---
+
+## 1. v1 已交付（截至 2026-08-07，全部 `mvn verify` 绿 + 合 main + push）
+
+| 板块 | 内容 | 验证 |
+|:---|:---|:---|
+| 15 个实现单元 U0–U14 | DSL(U1) / BSP 引擎(U2) / Spring AI 适配器(U3) / 容错(U4) / 两级 Checkpoint+Recovery(U5) / 调试(U6) / 可观测(U7) / 版本管理(U8) / Mock(U9) + 三 Demo(U10–U12) / Starter(U13) / API 安全(U14) | 8 模块 verify 绿 + JaCoCo 80% 门禁 |
+| 后续任务 #9–#12 | 可运行 REST server / trace 带超步层号 / diagnosis 反序列化 / 看板列表端点 | verify 绿 |
+| UI | React 5 Tab + Vitest 单测（api 12 + Dashboard 4 + resolveApiKey 4 = 20） | `npm test` 绿 + build 绿 |
+| Grafana 可观测**全闭环** | exporter 接线 + U7 指标挂钩引擎（workflow.executed / node.duration）+ mock token/成本记账（tokens.consumed / cost.estimated / budget_exceeded） | 本地起服验证 `/actuator/prometheus` 返回**全部 5 类指标族** |
+| 工程收尾 | Postgres listByCreatedBy / PostgresCheckpointManagerIT（真 PG Failsafe）/ VITE_API_KEY 加固 / UI 入 CI | verify 绿 |
+| CI/CD | GitHub Actions（Java verify + Sonar + Docker）+ UI job | — |
+
+Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打通并本地验证。
+
+---
+
+## 2. v1 剩余工作（按"能否现在做"分三档）
+
+### 档 A — 需环境（Deferred，代码/IT 已就位，只差实际环境）
+- **Grafana 真实部署验证**：需 Docker/Grafana/Prometheus，`import` dashboard 后看 6 面板数据落盘。代码/指标已就绪（见 `docs/GRAFANA.md`）。
+- **真 PG `verify` 实跑绿**：`PostgresCheckpointManagerIT` 已写（Failsafe，CI 有真 PG 全跑 / 本地无 PG 跳过）。需 CI 回执或本地起 PG 实跑，顺带验证真 PG 下 listByCreatedBy / diagnosis 端到端。
+
+### 档 B — 真实未落地的 v1 代码缺口（可立刻做）
+| 项 | 引用 | 现状 |
+|:---|:---|:---|
+| **WorkflowSubmissionGuard**（DAG 节点数 / token 成本上界，超限 422 拒绝） | 06 OQ `POST /workflows 无 DAG/token 预算上界`（security-lens, conf 75） | ❌ 未做——恶意/超载提交可起无界 VT + 烧成本，现只有 post-hoc `budget_exceeded` 无预防性拦截 |
+| **R20 agentflow-archetypes** | R20 | ❌ 声明但无实现单元交付（Maven archetype 生成 Agent 骨架） |
+| **per-workflow 预算字段** `budget_tokens`/`budget_cost` | R10 | ❌ 未加——预算现为全局 mock 阈值，非 per-workflow 告警语义 |
+| **Reducer 冲突路径刻意演练**（overwrite/concat/max/custom 触发测试） | 06 OQ `Reducer 冲突无 demo` | ❌ 抽象有了但验收未覆盖冲突路径 |
+
+### 档 C — 叙事 / 面试口径（演示前定即可，非代码）
+- 06 OQ `From 2026-06-28 review` 13 条叙事/范围项，如：从0 vs 扩 LangGraph4j 的 buy-vs-build 论证、七三开(后端70%+Agent30%)折算、KTD-1 BSP vs Actor/CSP、@Tool 与 InterviewCoach 边界、Spring AI 差异化口径。
+- API Key 完整签发/轮换 registry：现为 demo key + env `AGENTFLOW_API_KEYS` 追加，完整签发/轮换属 ops。
+
+---
+
+## 3. v1.1 路线图（介于 v1 / v2）
+
+- **分布式模式**：Redis + Kafka（R18③ / R19，v1 用内存 @Async + DB 任务表轻量替代）
+- **`LangChain4jAgentAdapter`**（R5，v1 只有 Spring AI 适配器）
+- **工具级授权 DB 表 + 管理 API**（R21，v1 为 config/env 硬编码 `CallerToolAllowlist`）
+- **checkpoint 敏感数据列级加密**（R22 注明的升级点，v1 文档标注"明文存储 + R21 鉴权保护"）
+
+---
+
+## 4. v2 范围（plan 明示，非 v1 目标）
+
+| v2 能力 | 说明 |
+|:---|:---|
+| **运行时条件分支 / 动态跳转** | `on_error: goto cleanupNode`，Agent 输出动态决定下一步（KTD-9，v1 仅静态 DAG + super-step） |
+| **完整 Human-in-the-Loop 审批中间件** | 中断→外部审批→恢复执行 |
+| **Web 可视化工作流编辑器** | |
+| **多租户 SaaS 平台** | v2+ |
+
+> 注意：v1 明确只做**静态 DAG**（KTD-9）；条件分支、动态路由、ErrorHandler 跳转路径均属 v2。
+
+---
+
+## 5. 建议的 v1 收尾优先级
+
+1. **WorkflowSubmissionGuard**（档 B，真安全缺口，本地可做可验）—— 建议作为下一个 v1 收尾 feature。
+2. Grafana / 真 PG 部署验证（档 A，等环境/CI）。
+3. R20 archetypes、per-workflow budget、Reducer 冲突演练（档 B，按需）。
+4. 档 C 面试口径 → 定稿一份 30s/5min 自述稿附到 `07-sources-revision-interview.md` 或本仓库面试文档（待定）。

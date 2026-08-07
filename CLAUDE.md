@@ -1,6 +1,8 @@
 # AgentFlow — 接手指南（给 Claude Code）
 
-> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-07（U1–U14 + 后续任务 #9–#12 + U8 版本管理 + UI + Grafana 全交付，补 Postgres listByCreatedBy 收尾 + UI Vitest 单测，8 模块 `mvn verify` 绿 + `npm run build` 绿 + `npm test` 16 绿）。
+> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-07（U1–U14 + 后续任务 #9–#12 + U8 版本管理 + UI + Grafana 全交付，补 Postgres listByCreatedBy 收尾 + UI Vitest 单测，8 模块 `mvn verify` 绿 + `npm run build` 绿 + `npm test` 20 绿）。
+>
+> **状态/路线文档**：`docs/ROADMAP.md`（v1 交付盘点 · 剩余工作 · v2 路线图）+ `docs/GRAFANA.md`（可观测/Grafana 部署与验证）——接手或规划下一步先看这两份。
 
 ## 这是什么项目
 
