@@ -1,6 +1,6 @@
 # AgentFlow — 接手指南（给 Claude Code）
 
-> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-03（U7/U11/U12 经 ce-code-review 合 main + U1/U2 React UI + U4 Grafana，8 模块 `mvn verify` 绿 + `npm run build` 绿，待 push）。
+> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-07（U1–U14 + 后续任务 #9–#12 + U8 版本管理 + UI + Grafana 全交付，补 Postgres listByCreatedBy 收尾，8 模块 `mvn verify` 绿 + `npm run build` 绿）。
 
 ## 这是什么项目
 
@@ -55,13 +55,20 @@ U3 ✅ → U4 ✅ → U5 ✅ → U14 ✅ → U9 ✅ → U10 ✅ → U13 ✅（P0
 > - **已 push origin main**（`55125f1..57d8057`，U1/U2/obs+Grafana/CLAUDE.md/review-fix 6 commit）
 > - 下一批（后续任务 + plan Deferred）：可运行 API server wiring（真实 API 路径可验证）+ PipelineView 真实 super-step 分组 + /diagnosis 反序列化 + 看板列表端点；UI React 单测（Vitest）+ Grafana 真实部署验证 + U8 版本管理
 
+> **当前状态（2026-08-07）——补 Postgres listByCreatedBy（#12 遗留收尾）**：
+> - `PostgresCheckpointManager.listByCreatedBy`（`821f251`，feat/pg-list-by-created-by 分支）：从 `workflow_executions` 按 created_by 过滤（空则返回全部，兼容 U5 未设 created_by）+ created_at 倒序，对齐 InMemory 语义；抽 SELECT_EXECUTION_RECORDS/BY_CREATOR + EXECUTION_RECORD_MAPPER 为 package-private 单真相源
+> - 测试 `PostgresCheckpointManagerTest`（4 个）：生产 Flyway 含 PG 专属类型（TIMESTAMPTZ/JSONB）无法跑 H2，故用 H2 建兼容 `workflow_executions` 表跑真实 SQL+mapper，验证过滤/倒序/status 归一/空表/Null createdBy
+> - `mvn verify` 8 模块全绿（core 204 + api 47 + adapter 55 + demo 等），JaCoCo 全 met；`npm run build` 绿（基线 08-07 复核）
+> - 本机无 Docker/PG，未能对真实 PG 做端到端验证（docker-compose.test.yml 留作本地/CI 集成验证路径）
+> - 仍遗留：VITE_API_KEY 生产加固（ops 决策）；Postgres 版 diagnosis 未覆盖；UI React 单测（Vitest）+ Grafana 部署验证 Deferred
+
 > **当前状态（2026-08-04）——后续任务 #9–#12 全部交付**：
 > - **#9 可运行 REST API server**（`f7bfdb4`，demo-api 模块）：把 controllers + ApiKeyAuthFilter（含 UI 默认 demo key）接成可启动 Spring Boot app；NodeRegistry 加 mock fallback；Boot 4.1 注解级 exclude（starter + spring-ai OpenAi + JDBC DataSource 已移包）。真实 `spring-boot:run` 起服（Tomcat:8080）+ curl 全链路跑通
 > - **#10 ExecutionTrace 带 super-step 层号**（`cebe9e9`）：NodeTrace.step + BspEngine 记层，UI PipelineView 按真实拓扑分组（串行/双层 fork-join 不再错扁平），mock 回退启发式
 > - **#11 /diagnosis 真实 trace 反序列化**（`53317cb`）：NodeTrace @JsonCreator + 派生 getter READ_ONLY，诊断真实路径不再绑空/400
 > - **#12 看板列表端点 + 状态归一 + 指标防漂移**（`88a3d86`）：`GET /api/workflows`（CheckpointManager.listByCreatedBy + InMemory），UI status 归一（enum UPPER→lower），starter GrafanaDashboardMetricAlignmentTest 防指标名漂移
 > - **U8 Workflow 版本管理**（`f32582d`，R14）：version 包（定义存储 InMemory/Postgres `workflow_definitions` + Manager + 冲突检测），提交记录定义、恢复/retry 取旧 DAG、`GET /version-check` 报冲突，WARN 不阻断
-> - 遗留（记录）：Postgres listByCreatedBy SQL 待补（U8 已建 workflow_definitions 表，可顺带）；VITE_API_KEY 生产加固为 ops 决策；Postgres 版 diagnosis 未覆盖
+> - 遗留（记录）：~~Postgres listByCreatedBy SQL 待补~~（已补，见 2026-08-07 状态）；VITE_API_KEY 生产加固为 ops 决策；Postgres 版 diagnosis 未覆盖
 > - UI React 单测（Vitest）+ Grafana 真实部署验证仍 Deferred
 
 > **当前状态（2026-08-02）**：
