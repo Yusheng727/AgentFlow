@@ -17,6 +17,13 @@ agentflow:
     # UI 默认 demo-key-1234567890abcdef 由 ApiConfig 恒注册（与 api.ts 一致）。
     api-keys: "other-demo-key"
 
+# Actuator：暴露 prometheus 端点（默认只暴露 health）供 Prometheus/Grafana 抓取 AgentFlowMetrics 指标
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+
 logging:
   level:
     com.agentflow: INFO

@@ -18,7 +18,6 @@ import com.agentflow.version.WorkflowDefinitionStore;
 import com.agentflow.version.WorkflowVersionManager;
 
 import io.micrometer.core.instrument.MeterRegistry;
-import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
@@ -55,10 +54,9 @@ public class ApiConfig {
         return new ExecutionTraceRegistry();
     }
 
-    @Bean
-    public MeterRegistry meterRegistry() {
-        return new SimpleMeterRegistry();
-    }
+    // MeterRegistry 不在此处定义：由 Spring Boot 自动配置（micrometer-registry-prometheus 在类路径 →
+    // PrometheusMeterRegistry + /actuator/prometheus scrape endpoint）。agentFlowMetrics 注入该 registry，
+    // U7 的 5 指标族即可被 Prometheus 抓取（Grafana 数据地基，见 docs/GRAFANA.md）。
 
     @Bean
     public AgentFlowMetrics agentFlowMetrics(MeterRegistry meterRegistry) {

@@ -28,6 +28,16 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
         </dependency>
+        <!-- 可观测性（Grafana/Prometheus）：暴露 /actuator/prometheus 供 Prometheus 抓取。
+             AgentFlowMetrics（U7）注册的 5 指标族经 PrometheusMeterRegistry 输出（见 docs/GRAFANA.md）。 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-actuator</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.micrometer</groupId>
+            <artifactId>micrometer-registry-prometheus</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
