@@ -55,12 +55,20 @@ U3 ✅ → U4 ✅ → U5 ✅ → U14 ✅ → U9 ✅ → U10 ✅ → U13 ✅（P0
 > - **已 push origin main**（`55125f1..57d8057`，U1/U2/obs+Grafana/CLAUDE.md/review-fix 6 commit）
 > - 下一批（后续任务 + plan Deferred）：可运行 API server wiring（真实 API 路径可验证）+ PipelineView 真实 super-step 分组 + /diagnosis 反序列化 + 看板列表端点；UI React 单测（Vitest）+ Grafana 真实部署验证 + U8 版本管理
 
+> **当前状态（2026-08-07）——U7 指标挂钩引擎（feat/u7-metrics-hookup）**：
+> - 修复 Grafana 数据通路缺口：`recordWorkflowExecuted`/`recordNodeDuration` 此前仅测试调用、引擎从未记录
+> - BspEngine 注入可空 `AgentFlowMetrics`（6-arg 新构造，旧构造委托 null 向后兼容）：完成路径记 `workflow.executed{status}`（outcomeRecorded 防漏记/防双记 + finally 兜底），每节点记 `node.duration{agent}`（含重试，PercentileHistogram 供 P50/P95/P99）
+> - demo-api ApiConfig bspEngine 注入 metrics；BspEngineMetricsTest 3 个（成功/失败/noop）
+> - **端到端验证**：demo-api 起服 + 提交工作流 → `/actuator/prometheus` 现返回 `agentflow_workflow_executed_total{status=...}` + `agentflow_node_duration_seconds_bucket/count/max/sum`
+> - core 207 tests + 全仓 verify 绿 + JaCoCo met
+> - 仍遗留：真 PG/Grafana 部署验证依赖 CI/有 Docker 环境；Token/成本面板需真实 LLM token 流量（运行时行为）
+
 > **当前状态（2026-08-07）——遗留收尾（chore/remaining-items）**：
 > - **VITE_API_KEY 加固**：抽 `resolveApiKey(envKey, isProd)`；生产未配置 VITE_API_KEY → `console.error` 显式告警而非静默用公开 demo key；+4 测试（配置优先/dev demo/生产告警/空串回退）
 > - **UI 入 CI**：`ci.yml` 加 `ui` job（setup-node 20 + npm ci + `npm run build` + `npm test`），与 Java build 并行
 > - **Grafana 验证**：静态校验 JSON（6 面板 + DS_PROMETHEUS）+ `GrafanaDashboardMetricAlignmentTest` 通过；**exporter 已接线并本地起服验证**（demo-api 加 micrometer-registry-prometheus + actuator，移除手写 SimpleMeterRegistry，`/actuator/prometheus` HTTP 200 + JVM 指标）。<b>新发现缺口</b>：U7 的 `recordWorkflowExecuted`/`recordNodeDuration` 引擎从未调用（仅测试调用）→ mock 路径无 agentflow 指标，Grafana 面板仍空，需 U7 指标挂钩引擎 feature（见 docs/GRAFANA.md）
 > - **Postgres 集成 IT**：`PostgresCheckpointManagerIT`（Failsafe，CI 有真 PG 全跑 / 本地无 PG 跳过），覆盖 listByCreatedBy 真 PG + checkpoint/元数据往返
-> - 遗留仍待：**U7 指标挂钩引擎**（核心引擎 feature，独立于本批 cleanup）；真 PG/Grafana 部署验证依赖 CI/有 Docker 环境
+> - 遗留仍待：~~U7 指标挂钩引擎~~（已补，见 feat/u7-metrics-hookup）；真 PG/Grafana 部署验证依赖 CI/有 Docker 环境
 
 > **当前状态（2026-08-07）——UI React 单测（Vitest，Deferred 收尾）**：
 > - `feat/ui-vitest`：给 `agentflow-ui` 配 Vitest 工具链 + 首批单元测试
