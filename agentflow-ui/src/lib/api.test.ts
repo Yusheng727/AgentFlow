@@ -1,0 +1,202 @@
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import {
+  ApiError,
+  listWorkflows,
+  submitWorkflow,
+  getWorkflowStatus,
+  retryWorkflow,
+  getWorkflowTrace,
+  diagnoseWorkflow,
+  type WorkflowListResult,
+} from './api'
+import type { WorkflowExecutionRecord } from '../types'
+
+/**
+ * api.ts 单元测试（KTD-1 真实 API 优先 + mock fallback）。
+ *
+ * <p>mock 全局 fetch，验证：请求契约（URL / 方法 / X-API-Key header / JSON body）、
+ * 状态归一（后端 UPPER 枚举 → UI lowercase，PENDING 并入 running）、
+ * 非 2xx / 网络错误 → ApiError / mock fallback 降级。
+ */
+
+// ──────────────────── fetch mock 辅助 ────────────────────
+
+type FetchMock = ReturnType<typeof vi.fn>
+
+/** 构造一个形似 fetch Response 的最小对象（request() 只用 ok/status/json）。 */
+function fakeResponse(ok: boolean, status: number, data?: unknown) {
+  return {
+    ok,
+    status,
+    json: async () => data,
+  } as Response
+}
+
+let fetchMock: FetchMock
+
+beforeEach(() => {
+  fetchMock = vi.fn()
+  vi.stubGlobal('fetch', fetchMock)
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
+  vi.restoreAllMocks()
+})
+
+// ──────────────────── ApiError ────────────────────
+
+describe('ApiError', () => {
+  it('携带 status 且是 Error 实例', () => {
+    const e = new ApiError(404, 'GET /x → HTTP 404')
+    expect(e).toBeInstanceOf(Error)
+    expect(e).toBeInstanceOf(ApiError)
+    expect(e.status).toBe(404)
+    expect(e.message).toBe('GET /x → HTTP 404')
+  })
+})
+
+// ──────────────────── listWorkflows（看板列表）────────────────────
+
+describe('listWorkflows', () => {
+  it('真实 API 成功：状态归一 UPPER→lower（PENDING/RUNNING→running，SUCCESS→success，FAILED→failed）', async () => {
+    const records: WorkflowExecutionRecord[] = [
+      { workflowId: 'w1', workflowName: 'a', status: 'PENDING', createdAt: '2026-08-07T00:00:00Z' },
+      { workflowId: 'w2', workflowName: 'b', status: 'RUNNING', createdAt: '2026-08-07T00:00:01Z' },
+      { workflowId: 'w3', workflowName: 'c', status: 'SUCCESS', createdAt: null },
+      { workflowId: 'w4', workflowName: 'd', status: 'FAILED', createdAt: '2026-08-07T00:00:02Z' },
+    ]
+    fetchMock.mockResolvedValue(fakeResponse(true, 200, records))
+
+    const result: WorkflowListResult = await listWorkflows()
+
+    expect(result.source).toBe('api')
+    expect(result.workflows.map((w) => w.status)).toEqual(['running', 'running', 'success', 'failed'])
+    // createdAt 为 null → date 回退 '--'
+    expect(result.workflows[2].date).toBe('--')
+    // desc 保留原始 UPPER 形态（供 UI 展示真实枚举）
+    expect(result.workflows[2].desc).toBe('SUCCESS')
+  })
+
+  it('请求路径 /api/workflows + X-API-Key header', async () => {
+    fetchMock.mockResolvedValue(fakeResponse(true, 200, []))
+
+    await listWorkflows()
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/workflows')
+    expect(init.headers['Content-Type']).toBe('application/json')
+    expect(init.headers['X-API-Key']).toBe('demo-key-1234567890abcdef')
+  })
+
+  it('后端 5xx（非 2xx）→ 降级 mock 数据，source=mock', async () => {
+    fetchMock.mockResolvedValue(fakeResponse(false, 500))
+
+    const result = await listWorkflows()
+
+    expect(result.source).toBe('mock')
+    // mock 工作流列表（5 条演示数据）
+    expect(result.workflows.length).toBeGreaterThan(0)
+    expect(result.workflows.map((w) => w.name)).toContain('supplier-risk-v2')
+  })
+
+  it('网络错误（fetch reject）→ 降级 mock 数据，source=mock', async () => {
+    fetchMock.mockRejectedValue(new TypeError('Network request failed'))
+
+    const result = await listWorkflows()
+
+    expect(result.source).toBe('mock')
+  })
+})
+
+// ──────────────────── submitWorkflow（提交）────────────────────
+
+describe('submitWorkflow', () => {
+  it('POST /api/workflows 且 body 为序列化请求，返回 202 响应', async () => {
+    const resp = { workflowId: 'wf-x', status: 'ACCEPTED', message: null, links: { status: '/api/workflows/wf-x/status' } }
+    fetchMock.mockResolvedValue(fakeResponse(true, 202, resp))
+
+    const req = { workflowName: 'supplier', version: '1.0', yamlContent: 'nodes: []', inputs: {} }
+    const out = await submitWorkflow(req)
+
+    expect(out.workflowId).toBe('wf-x')
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/workflows')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual(req)
+  })
+
+  it('后端拒绝（401）→ 抛 ApiError(401) 而非静默降级（真实拒绝须露出）', async () => {
+    fetchMock.mockResolvedValue(fakeResponse(false, 401))
+
+    await expect(submitWorkflow({ workflowName: 'x', version: '1.0', yamlContent: '', inputs: {} }))
+      .rejects.toBeInstanceOf(ApiError)
+    await expect(
+      submitWorkflow({ workflowName: 'x', version: '1.0', yamlContent: '', inputs: {} }),
+    ).rejects.toMatchObject({ status: 401 })
+  })
+})
+
+// ──────────────────── getWorkflowStatus / retryWorkflow ────────────────────
+
+describe('getWorkflowStatus & retryWorkflow', () => {
+  it('getWorkflowStatus GET 对应路径', async () => {
+    fetchMock.mockResolvedValue(fakeResponse(true, 200, { workflowId: 'wf-x', status: 'RUNNING', queriedAt: 't' }))
+
+    const out = await getWorkflowStatus('wf-x')
+
+    expect(out.status).toBe('RUNNING')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/workflows/wf-x/status')
+  })
+
+  it('retryWorkflow POST retry 路径', async () => {
+    fetchMock.mockResolvedValue(fakeResponse(true, 202, { workflowId: 'wf-x', status: 'ACCEPTED', message: null, links: null }))
+
+    await retryWorkflow('wf-x')
+
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/workflows/wf-x/retry')
+    expect(fetchMock.mock.calls[0][1].method).toBe('POST')
+  })
+})
+
+// ──────────────────── getWorkflowTrace（轨迹）────────────────────
+
+describe('getWorkflowTrace', () => {
+  it('真实 API 成功 → source=api', async () => {
+    const trace = { workflowId: 'wf-x', startTime: null, endTime: null, status: 'COMPLETED', nodes: [], totalTokens: 0 }
+    fetchMock.mockResolvedValue(fakeResponse(true, 200, trace))
+
+    const out = await getWorkflowTrace('wf-x')
+
+    expect(out.source).toBe('api')
+    expect(out.trace.workflowId).toBe('wf-x')
+  })
+
+  it('端点不可达 → 降级 mock 轨迹，workflowId 用请求 id', async () => {
+    fetchMock.mockRejectedValue(new TypeError('fail'))
+
+    const out = await getWorkflowTrace('wf-req')
+
+    expect(out.source).toBe('mock')
+    expect(out.trace.workflowId).toBe('wf-req') // mockTrace 覆盖为请求 id
+  })
+})
+
+// ──────────────────── diagnoseWorkflow（诊断）────────────────────
+
+describe('diagnoseWorkflow', () => {
+  it('POST /diagnosis，body 含 {workflowId, trace}', async () => {
+    const trace = { workflowId: 'wf-x', startTime: null, endTime: null, status: 'FAILED', nodes: [], totalTokens: 0 }
+    const report = { workflowId: 'wf-x', totalNodes: 0, failedNodes: 0, findings: [] }
+    fetchMock.mockResolvedValue(fakeResponse(true, 200, report))
+
+    const out = await diagnoseWorkflow('wf-x', trace)
+
+    expect(out.workflowId).toBe('wf-x')
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/diagnosis')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body)).toEqual({ workflowId: 'wf-x', trace })
+  })
+})

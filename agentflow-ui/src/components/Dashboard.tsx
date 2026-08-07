@@ -106,7 +106,7 @@ export function Dashboard({ onNavigate, showToast }: DashboardProps) {
               <div className="mb-2 flex items-center gap-2 border-b border-line pb-2 text-[13px] font-semibold text-muted">
                 <span className={col.dotClass}>●</span>
                 {col.label}
-                <span className="rounded-full bg-hover px-2 py-0.5 text-[11px] font-semibold">{group.length}</span>
+                <span data-testid={`count-${col.key}`} className="rounded-full bg-hover px-2 py-0.5 text-[11px] font-semibold">{group.length}</span>
               </div>
               {loading ? (
                 <div className="py-6 text-center text-xs text-dim">加载中…</div>
