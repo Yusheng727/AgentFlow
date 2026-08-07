@@ -17,6 +17,7 @@ import com.agentflow.engine.checkpoint.WorkflowStatus;
 import com.agentflow.engine.fault.ErrorHandler;
 import com.agentflow.engine.fault.RetryPolicy;
 import com.agentflow.engine.fault.TimeoutPolicy;
+import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.ExecutionTraceRegistry;
 
@@ -71,6 +72,9 @@ public final class BspEngine {
     /** U7 可观测性：trace 注册表。可空（null = 不注册 trace，mock 模式下 TraceController 返回空树）。
      *  非空时 execute() 开头为每个 workflowId 创建 ExecutionTrace 并通过 AgentInput.trace() 透传给 AgentFunction。 */
     private final ExecutionTraceRegistry traceRegistry;
+    /** U7 指标挂钩：可空（null = 不记指标，与 U7 之前行为一致，向后兼容）。
+     *  非空时工作流完成记 {@code agentflow.workflow.executed}{status}、每节点完成记 {@code agentflow.node.duration}{agent}。 */
+    private final AgentFlowMetrics metrics;
 
     public BspEngine() {
         this(new DAGLayerer());
@@ -96,11 +100,22 @@ public final class BspEngine {
     public BspEngine(DAGLayerer layerer, RetryPolicy retryPolicy,
                      ErrorHandler errorHandler, TimeoutPolicy timeoutPolicy,
                      ExecutionTraceRegistry traceRegistry) {
+        this(layerer, retryPolicy, errorHandler, timeoutPolicy, traceRegistry, null);
+    }
+
+    /**
+     * U7 指标挂钩入口：在 trace 基础上注入 {@link AgentFlowMetrics}。
+     * metrics 为 null 表示不记指标（与 U7 之前行为一致，向后兼容）。
+     */
+    public BspEngine(DAGLayerer layerer, RetryPolicy retryPolicy,
+                     ErrorHandler errorHandler, TimeoutPolicy timeoutPolicy,
+                     ExecutionTraceRegistry traceRegistry, AgentFlowMetrics metrics) {
         this.layerer = Objects.requireNonNull(layerer, "layerer");
         this.retryPolicy = retryPolicy;
         this.errorHandler = errorHandler;
         this.timeoutPolicy = timeoutPolicy;
         this.traceRegistry = traceRegistry;
+        this.metrics = metrics;
     }
 
     /** 便捷入口（Map 形式）：无 checkpoint、无自定义 reducer（开发/测试）。 */
@@ -179,6 +194,7 @@ public final class BspEngine {
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         NodeExecutor nodeExecutor = new NodeExecutor(agentResolver, executor);
         Instant workflowStart = Instant.now();
+        boolean outcomeRecorded = false; // U7 指标：兜底防漏记/防双记
         try {
             for (SuperStep step : steps) {
                 // 工作流总超时：super-step 间检查（超时则 abort，不推进下游）
@@ -196,11 +212,15 @@ public final class BspEngine {
             if (trace != null) {
                 trace.markCompleted(ExecutionTrace.Status.COMPLETED);
             }
+            recordWorkflowOutcome(AgentFlowMetrics.STATUS_SUCCESS);
+            outcomeRecorded = true;
             return context;
         } catch (WorkflowExecutionException we) {
             if (trace != null) {
                 trace.markCompleted(ExecutionTrace.Status.FAILED);
             }
+            recordWorkflowOutcome(AgentFlowMetrics.STATUS_FAILED);
+            outcomeRecorded = true;
             // U5 P0 修复（ADV-2）：abort 前显式标记 FAILED——RecoveryProtocol 据此鉴别崩溃层可能含
             // timeout 后在飞 VT 写出的 stray COMPLETED 记录，整体重跑该层，避免读到未经 barrier
             // 合并的孤立 channel 输出。best-effort：状态写入失败不掩盖原始 abort 异常。
@@ -217,7 +237,17 @@ public final class BspEngine {
             if (trace != null && trace.status() == ExecutionTrace.Status.RUNNING) {
                 trace.markCompleted(ExecutionTrace.Status.FAILED);
             }
+            if (!outcomeRecorded) {
+                recordWorkflowOutcome(AgentFlowMetrics.STATUS_FAILED);
+            }
             executor.shutdownNow();
+        }
+    }
+
+    /** U7 指标：记一次工作流执行结果（metrics 为 null 则 no-op）。 */
+    private void recordWorkflowOutcome(String status) {
+        if (metrics != null) {
+            metrics.recordWorkflowExecuted(status);
         }
     }
 
@@ -284,6 +314,7 @@ public final class BspEngine {
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         NodeExecutor nodeExecutor = new NodeExecutor(agentResolver, executor);
         Instant workflowStart = Instant.now();
+        boolean outcomeRecorded = false; // U7 指标：兜底防漏记/防双记
         try {
             cp.updateStatus(workflowId, WorkflowStatus.RUNNING);
             for (SuperStep step : remaining) {
@@ -310,11 +341,15 @@ public final class BspEngine {
             if (trace != null) {
                 trace.markCompleted(ExecutionTrace.Status.COMPLETED);
             }
+            recordWorkflowOutcome(AgentFlowMetrics.STATUS_SUCCESS);
+            outcomeRecorded = true;
             return context;
         } catch (WorkflowExecutionException we) {
             if (trace != null) {
                 trace.markCompleted(ExecutionTrace.Status.FAILED);
             }
+            recordWorkflowOutcome(AgentFlowMetrics.STATUS_FAILED);
+            outcomeRecorded = true;
             try {
                 cp.updateStatus(workflowId, WorkflowStatus.FAILED);
             } catch (RuntimeException se) {
@@ -323,6 +358,9 @@ public final class BspEngine {
             }
             throw we;
         } finally {
+            if (!outcomeRecorded) {
+                recordWorkflowOutcome(AgentFlowMetrics.STATUS_FAILED);
+            }
             executor.shutdownNow();
         }
     }
@@ -361,6 +399,7 @@ public final class BspEngine {
                     node.tools(), node.outputSchema(), node.mockResponse(), trace);
             // 并行执行 + 节点级 checkpoint（完成当下即持久化，R3）
             futures.add(CompletableFuture.supplyAsync(() -> {
+                long startNs = System.nanoTime(); // U7 指标：节点从提交到终结的耗时（含重试）
                 try {
                     // U4：retryPolicy 包在 NodeExecutor 外层（null = 不重试，backward compat）
                     NodeResult r = retryPolicy != null
@@ -380,6 +419,11 @@ public final class BspEngine {
                 } catch (RuntimeException ex) {
                     // 防御性 catch-all：保持 no-throw 不变量，避免 allOf exceptional 丢失兄弟节点结果
                     return new NodeResult.Failure(id, ex);
+                } finally {
+                    // U7 指标：无论成败都记节点耗时（agent tag）；metrics 为 null 则 no-op
+                    if (metrics != null) {
+                        metrics.recordNodeDuration(node.agent(), System.nanoTime() - startNs);
+                    }
                 }
             }, executor));
         }

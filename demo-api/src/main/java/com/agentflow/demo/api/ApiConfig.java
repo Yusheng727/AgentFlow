@@ -63,10 +63,10 @@ public class ApiConfig {
         return new AgentFlowMetrics(meterRegistry);
     }
 
-    /** 默认行为引擎 + trace：等价 {@code new BspEngine()} 但注入 traceRegistry（U7 可观测入口）。 */
+    /** 默认行为引擎 + trace + 指标：等价 {@code new BspEngine()} 但注入 traceRegistry + AgentFlowMetrics（U7 可观测入口）。 */
     @Bean
-    public BspEngine bspEngine(ExecutionTraceRegistry executionTraceRegistry) {
-        return new BspEngine(new DAGLayerer(), null, null, null, executionTraceRegistry);
+    public BspEngine bspEngine(ExecutionTraceRegistry executionTraceRegistry, AgentFlowMetrics agentFlowMetrics) {
+        return new BspEngine(new DAGLayerer(), null, null, null, executionTraceRegistry, agentFlowMetrics);
     }
 
     @Bean
