@@ -24,24 +24,28 @@
 2. **指标名防漂移**：`GrafanaDashboardMetricAlignmentTest`（agentflow-starter test）通过——面板 PromQL 引用的 5 个指标族在 `AgentFlowMetrics` 常量中全部存在，Java 常量改名后本测试会失败。
 3. **Prometheus exporter 已接线 + 本地起服验证**：demo-api 加 `micrometer-registry-prometheus` + `spring-boot-starter-actuator`，移除手写 `SimpleMeterRegistry`（交 Spring Boot 自动配置成 `PrometheusMeterRegistry`），`application.yml` 暴露 `prometheus` 端点。本地 `spring-boot:run` 起服后 `GET /actuator/prometheus` → **HTTP 200 + JVM/系统指标**（192 行）确认 exporter 通路正常。
 
-## 已闭环（2026-08-07）：U7 指标挂钩引擎 + exporter 接线 + 本地端到端验证
+## 已闭环（2026-08-07）：U7 指标挂钩引擎 + exporter 接线 + mock token/成本记账，本地端到端验证
 
 之前缺口（`recordWorkflowExecuted`/`recordNodeDuration` 引擎从未调用）已修复：
 - **BspEngine 注入可空 `AgentFlowMetrics`**（新 6-arg 构造，旧构造器委托 null 向后兼容）：工作流完成记
   `workflow.executed{status}`（success/failed，`outcomeRecorded` 防漏记/防双记），每节点完成记
   `node.duration{agent}`（含重试，PercentileHistogram 供 P50/P95/P99）。
-- **demo-api 起服端到端验证**：提交工作流后 `/actuator/prometheus` 现返回
-  `agentflow_workflow_executed_total{status=...}` + `agentflow_node_duration_seconds_bucket/count/max/sum`。
-- 趋势 / 节点耗时(P50/P95/P99) / 失败率 面板现可有数据。**Token/成本面板需真实 LLM token 流量**（mock 无 token，属运行时行为，非代码缺口）。
+- **MockAgentFunction 模拟 token/成本**（`recordTokens` 供 mock 模式用）：按 prompt/响应长度模拟确定性
+  token 数 → `tokens.consumed{agent,model}` + `cost.estimated{model}`；注入预算阈值 → 每次记账后
+  `checkBudget` 触发 `budget_exceeded`。demo-api 注入 `gpt-4o-mini` + 演示阈值。
+- **demo-api 起服端到端验证**：提交工作流后 `/actuator/prometheus` 现返回全部 5 类指标族：
+  `workflow_executed_total`、`node_duration_seconds_bucket/count/max/sum`、
+  `tokens_consumed_total{agent,model}`、`cost_estimated_total{model}`、`cost_budget_exceeded_total`。
+- **6 面板现均可有数据**。
 
 ## 在真实 Grafana 环境验证（有 Docker/Grafana/Prometheus 时按此做）
 
 ```bash
-# 指标通路已就绪；Token/成本更完整展示需跑真实 LLM 路径（mock 只出 executed + node.duration）
+# 指标通路已全部就绪（mock 即出 tokens/cost/budget；真实 LLM 路径经 TokenCountingAdvisor 出真实值）
 # 1. 启动 Prometheus + Grafana，采集目标指向 http://<app>:8080/actuator/prometheus
 # 2. 起 agentflow app（demo-api），跑几个工作流产生指标
 cd demo-api && mvn -s ../settings.xml spring-boot:run
-# 3. Prometheus label values 应含 5 个 agentflow_* 指标族（mock 下 2 个：executed/node.duration）
+# 3. Prometheus label values 应含 5 个 agentflow_* 指标族
 # 4. Grafana import dashboard JSON（数据源选 Prometheus，Fill DS_PROMETHEUS）
-# 5. 验收：执行趋势 / 节点耗时 / 失败率面板有数据；Token/成本面板需真实 LLM 流量
+# 5. 验收：6 面板均有数据；Token/成本/预算面板由 mock 模拟或真实 LLM 流量填充
 ```

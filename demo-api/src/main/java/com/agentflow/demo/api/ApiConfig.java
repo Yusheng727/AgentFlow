@@ -79,11 +79,27 @@ public class ApiConfig {
         return new InMemoryCheckpointManager();
     }
 
-    /** mock 模式：NodeRegistry fallback → 任意 agent 名 → MockAgentFunction（共享无状态单例，零 LLM）。 */
+    /** mock 模式：NodeRegistry fallback → 任意 agent 名 → MockAgentFunction（共享无状态单例，零 LLM）。
+     *  注入 AgentFlowMetrics + mock model + 预算阈值 → mock 也记 token/cost/budget 指标（Grafana Token/成本面板数据源）。 */
     @Bean
-    public NodeRegistry nodeRegistry() {
-        MockAgentFunction mock = new MockAgentFunction();
+    public NodeRegistry nodeRegistry(
+            AgentFlowMetrics agentFlowMetrics,
+            @Value("${agentflow.mock.model:gpt-4o-mini}") String model,
+            @Value("${agentflow.mock.budget-threshold-usd:}") String budgetThresholdUsd) {
+        MockAgentFunction mock = new MockAgentFunction(agentFlowMetrics, model, parseBudget(budgetThresholdUsd));
         return new NodeRegistry(name -> mock);
+    }
+
+    /** 解析预算阈值：空串/非法 → null（不查预算）。 */
+    private static Double parseBudget(String s) {
+        if (s == null || s.isBlank()) {
+            return null;
+        }
+        try {
+            return Double.valueOf(s.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     @Bean

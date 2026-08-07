@@ -6,6 +6,7 @@ import com.agentflow.agent.AgentInput;
 import com.agentflow.agent.AgentOutput;
 import com.agentflow.agent.MissingMockResponseException;
 import com.agentflow.engine.WorkflowContext;
+import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.NodeTrace;
 
@@ -39,6 +40,30 @@ public final class MockAgentFunction implements AgentFunction {
      */
     private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{([a-zA-Z_][\\w.-]*)}");
 
+    /** U7 mock token 记账：可空。非空时按 prompt/响应长度模拟 token 数，经 {@link AgentFlowMetrics#recordTokens}
+     *  记 {@code tokens.consumed} + {@code cost.estimated}（供 Token 消耗/成本 Grafana 面板，mock 模式无 LLM 也能出数据）。 */
+    private final AgentFlowMetrics metrics;
+    /** mock 模拟的模型名（成本查表 key；可空 → CostCalculator 走 unknown/默认单价）。 */
+    private final String model;
+    /** mock 预算阈值（USD）：非空时每次记账后调 {@link AgentFlowMetrics#checkBudget} 触发 {@code budget_exceeded}。 */
+    private final Double budgetThresholdUsd;
+
+    public MockAgentFunction() {
+        this(null, null, null);
+    }
+
+    /** 便捷：带指标记账（token + cost），不查预算。 */
+    public MockAgentFunction(AgentFlowMetrics metrics, String model) {
+        this(metrics, model, null);
+    }
+
+    /** 完整：带指标记账 + 可选预算阈值（null = 不查预算）。 */
+    public MockAgentFunction(AgentFlowMetrics metrics, String model, Double budgetThresholdUsd) {
+        this.metrics = metrics;
+        this.model = model;
+        this.budgetThresholdUsd = budgetThresholdUsd;
+    }
+
     @Override
     public AgentOutput execute(AgentInput input) throws AgentExecutionException {
         // U7 KTD-2：mock 模式补齐 trace——若 AgentInput 携带 ExecutionTrace（BspEngine 通过
@@ -57,6 +82,9 @@ public final class MockAgentFunction implements AgentFunction {
             // 占位符替换：从 context 只读快照读 channel 值
             String resolved = resolvePlaceholders(mock, input.context());
             AgentOutput output = AgentOutput.of(resolved);
+            // U7 mock token 记账（供 Grafana Token/成本面板）：模拟 token 消耗 + 成本，按需查预算。
+            // 注：NodeTrace 仍记 token=0（真实执行路径无 LLM），此处仅影响 Micrometer 指标。
+            recordMockTokens(input, resolved);
             if (nodeTrace != null) {
                 // mock 模式 token=0（不发 LLM）；outputSummary 截断防止巨型 mock 内容撑爆 trace
                 nodeTrace.succeed(truncate(resolved), 0L, 0L);
@@ -81,6 +109,24 @@ public final class MockAgentFunction implements AgentFunction {
             return null;
         }
         return s.length() <= 200 ? s : s.substring(0, 200) + "...";
+    }
+
+    /**
+     * U7 mock token/cost 记账：mock 无真实 LLM token，按 prompt/响应长度模拟<b>确定性</b> token 数
+     * （~4 字符 ≈ 1 token），经 {@link AgentFlowMetrics#recordTokens} 记 {@code tokens.consumed}{agent,model}
+     * 与 {@code cost.estimated}{model}，并可选调 {@code checkBudget} 触发预算超限。metrics 为空则 no-op。
+     */
+    private void recordMockTokens(AgentInput input, String resolved) {
+        if (metrics == null) {
+            return; // 未注入指标 → 与 U6 前行为一致（mock 不记 token/cost）
+        }
+        long promptChars = input.promptTemplate() == null ? 0 : input.promptTemplate().length();
+        long promptTokens = Math.max(8, Math.round(promptChars / 4.0) + 8); // 基础 prompt 兜底
+        long completionTokens = Math.max(1, Math.round(resolved.length() / 4.0));
+        metrics.recordTokens(input.agentName(), model, promptTokens, completionTokens);
+        if (budgetThresholdUsd != null) {
+            metrics.checkBudget(budgetThresholdUsd);
+        }
     }
 
     /**

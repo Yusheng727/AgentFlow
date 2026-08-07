@@ -16,6 +16,11 @@ agentflow:
     # 合法 X-API-Key（逗号分隔，env AGENTFLOW_API_KEYS 可覆盖整行）。
     # UI 默认 demo-key-1234567890abcdef 由 ApiConfig 恒注册（与 api.ts 一致）。
     api-keys: "other-demo-key"
+  mock:
+    # mock LLM 记账（Token/成本 Grafana 面板数据源）：模拟的模型名（成本查表）+ 预算阈值（USD，留空禁用）。
+    # 预算阈值此处为 demo 演示用低阈值（1e-5，单个工作流即触发 budget_exceeded 让面板有数据）；生产按真实预算覆盖 env。
+    model: gpt-4o-mini
+    budget-threshold-usd: 0.00001
 
 # Actuator：暴露 prometheus 端点（默认只暴露 health）供 Prometheus/Grafana 抓取 AgentFlowMetrics 指标
 management:

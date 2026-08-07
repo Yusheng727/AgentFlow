@@ -4,6 +4,9 @@ import com.agentflow.agent.AgentInput;
 import com.agentflow.agent.AgentOutput;
 import com.agentflow.agent.MissingMockResponseException;
 import com.agentflow.engine.WorkflowContext;
+import com.agentflow.observability.AgentFlowMetrics;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -190,5 +193,56 @@ class MockAgentFunctionTest {
         assertThat(summary).endsWith("...");
         // 原始 content 不截断
         // （AgentOutput.content() 保留原值，仅 trace summary 截断——此处不直接断言，因 input mock 已是 huge）
+    }
+
+    // ─────────────────── U7 mock token/成本记账（Token/成本 Grafana 面板数据源）───────────────────
+
+    @Test
+    @DisplayName("注入 AgentFlowMetrics → 按 prompt/响应长度记 tokens.consumed + cost.estimated")
+    void recordsTokensAndCostWhenMetricsInjected() throws com.agentflow.agent.AgentExecutionException {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AgentFlowMetrics metrics = new AgentFlowMetrics(registry);
+        MockAgentFunction m = new MockAgentFunction(metrics, "gpt-4o-mini");
+        // prompt="你好"(2 字) → promptTokens = max(8, round(2/4)+8) = 9；响应 "hello world"(11) → completion = round(11/4)=3
+        AgentInput input = new AgentInput("N", "mock-agent", "你好", new WorkflowContext(),
+                Map.of(), List.of(), Map.of(), "hello world", null);
+
+        m.execute(input);
+
+        assertThat(registry.counter(AgentFlowMetrics.TOKENS_CONSUMED,
+                "agent", "mock-agent", "model", "gpt-4o-mini").count()).isEqualTo(12); // 9 prompt + 3 completion
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_ESTIMATED,
+                "model", "gpt-4o-mini").count()).isPositive(); // 按 gpt-4o-mini 单价算出 >0 成本
+    }
+
+    @Test
+    @DisplayName("注入 metrics + 预算阈值 → 累计成本超阈值触发 budget_exceeded")
+    void budgetThresholdTriggersBudgetExceeded() throws com.agentflow.agent.AgentExecutionException {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AgentFlowMetrics metrics = new AgentFlowMetrics(registry);
+        // 极小阈值：单节点模拟成本（~0.00003 USD）即超限
+        MockAgentFunction m = new MockAgentFunction(metrics, "gpt-4o-mini", 0.000001);
+        AgentInput input = new AgentInput("B", "mock-agent", "较长的 prompt 模板内容用于产生更多 token",
+                new WorkflowContext(), Map.of(), List.of(), Map.of(), "这是一段足够长的 mock 响应内容，用来确保模拟 token 与成本大于极小阈值。", null);
+
+        m.execute(input);
+
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_BUDGET_EXCEEDED).count()).isPositive();
+    }
+
+    @Test
+    @DisplayName("不注入 metrics（默认构造）→ 不记任何 token/cost/budget 指标（向后兼容）")
+    void noMetricsRecordsNothing() throws com.agentflow.agent.AgentExecutionException {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AgentFlowMetrics metrics = new AgentFlowMetrics(registry); // 仅供断言计数，未注入 mock
+        MockAgentFunction m = new MockAgentFunction(); // 无 metrics
+
+        m.execute(inputWithMock("X", "hello world 较长的 mock 响应", new WorkflowContext()));
+
+        assertThat(registry.counter(AgentFlowMetrics.TOKENS_CONSUMED,
+                "agent", "mock-agent", "model", "gpt-4o-mini").count()).isZero();
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_ESTIMATED,
+                "model", "gpt-4o-mini").count()).isZero();
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_BUDGET_EXCEEDED).count()).isZero();
     }
 }
