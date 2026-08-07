@@ -55,6 +55,12 @@ U3 ✅ → U4 ✅ → U5 ✅ → U14 ✅ → U9 ✅ → U10 ✅ → U13 ✅（P0
 > - **已 push origin main**（`55125f1..57d8057`，U1/U2/obs+Grafana/CLAUDE.md/review-fix 6 commit）
 > - 下一批（后续任务 + plan Deferred）：可运行 API server wiring（真实 API 路径可验证）+ PipelineView 真实 super-step 分组 + /diagnosis 反序列化 + 看板列表端点；UI React 单测（Vitest）+ Grafana 真实部署验证 + U8 版本管理
 
+> **当前状态（2026-08-07）——遗留收尾（chore/remaining-items）**：
+> - **VITE_API_KEY 加固**：抽 `resolveApiKey(envKey, isProd)`；生产未配置 VITE_API_KEY → `console.error` 显式告警而非静默用公开 demo key；+4 测试（配置优先/dev demo/生产告警/空串回退）
+> - **UI 入 CI**：`ci.yml` 加 `ui` job（setup-node 20 + npm ci + `npm run build` + `npm test`），与 Java build 并行
+> - **Grafana 验证**：静态校验 JSON（6 面板 + DS_PROMETHEUS）+ `GrafanaDashboardMetricAlignmentTest` 通过；`docs/GRAFANA.md` 记录面板/指标族 + **已知缺口**（demo-api 用 SimpleMeterRegistry + starter 无 micrometer-registry-prometheus → `/actuator/prometheus` 未接线，真实 Grafana 采集不到，功能级改动待决策）
+> - 遗留仍待：真 Postgres 集成 IT（CI 有 PG 但无 IT 用；本地无 PG 无法验证，待决策）
+
 > **当前状态（2026-08-07）——UI React 单测（Vitest，Deferred 收尾）**：
 > - `feat/ui-vitest`：给 `agentflow-ui` 配 Vitest 工具链 + 首批单元测试
 > - 工具链：vitest/jsdom/@testing-library（react/jest-dom/user-event）；`vite.config.ts` 加 test 段（jsdom + globals + `pool:threads` 规避 Windows fork worker 超时）；`tsconfig` 排除 `*.test.*`/`src/test` 保持 build 的 tsc 只查生产代码；`src/test/setup.ts` 注册 jest-dom + cleanup；`npm test` / `npm run test:watch`
