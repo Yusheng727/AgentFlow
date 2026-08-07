@@ -55,13 +55,20 @@ U3 ✅ → U4 ✅ → U5 ✅ → U14 ✅ → U9 ✅ → U10 ✅ → U13 ✅（P0
 > - **已 push origin main**（`55125f1..57d8057`，U1/U2/obs+Grafana/CLAUDE.md/review-fix 6 commit）
 > - 下一批（后续任务 + plan Deferred）：可运行 API server wiring（真实 API 路径可验证）+ PipelineView 真实 super-step 分组 + /diagnosis 反序列化 + 看板列表端点；UI React 单测（Vitest）+ Grafana 真实部署验证 + U8 版本管理
 
+> **当前状态（2026-08-07）——mock token/成本记账（Token/成本 Grafana 面板，feat/mock-token-cost-metrics）**：
+> - 补齐 Token/成本面板数据源：MockAgentFunction 注入可空 AgentFlowMetrics + model + 预算阈值，按 prompt/响应长度模拟确定性 token，经 recordTokens 记 `tokens.consumed{agent,model}` + `cost.estimated{model}`，可选 checkBudget 触发 `budget_exceeded`（recordTokens 本设计供 mock 模式用；null 兼容旧行为）
+> - demo-api 接 gpt-4o-mini + 演示阈值；MockAgentFunctionTest +3
+> - **端到端验证**：demoda-api 起服提交工作流 → `/actuator/prometheus` 现含全部 5 类指标族（executed/node.duration/tokens.consumed/cost.estimated/budget_exceeded）
+> - 全仓 verify 绿 + JaCoCo met；6 Grafana 面板现均有数据
+> - 仍遗留：真 PG/Grafana 部署验证依赖 CI/有 Docker 环境；真实 LLM 路径出真实 token（mock 出模拟值）
+
 > **当前状态（2026-08-07）——U7 指标挂钩引擎（feat/u7-metrics-hookup）**：
 > - 修复 Grafana 数据通路缺口：`recordWorkflowExecuted`/`recordNodeDuration` 此前仅测试调用、引擎从未记录
 > - BspEngine 注入可空 `AgentFlowMetrics`（6-arg 新构造，旧构造委托 null 向后兼容）：完成路径记 `workflow.executed{status}`（outcomeRecorded 防漏记/防双记 + finally 兜底），每节点记 `node.duration{agent}`（含重试，PercentileHistogram 供 P50/P95/P99）
 > - demo-api ApiConfig bspEngine 注入 metrics；BspEngineMetricsTest 3 个（成功/失败/noop）
 > - **端到端验证**：demo-api 起服 + 提交工作流 → `/actuator/prometheus` 现返回 `agentflow_workflow_executed_total{status=...}` + `agentflow_node_duration_seconds_bucket/count/max/sum`
 > - core 207 tests + 全仓 verify 绿 + JaCoCo met
-> - 仍遗留：真 PG/Grafana 部署验证依赖 CI/有 Docker 环境；Token/成本面板需真实 LLM token 流量（运行时行为）
+> - 仍遗留：真 PG/Grafana 部署验证依赖 CI/有 Docker 环境；Token/成本面板已由 mock 记账补齐（见 2026-08-07 mock 状态）
 
 > **当前状态（2026-08-07）——遗留收尾（chore/remaining-items）**：
 > - **VITE_API_KEY 加固**：抽 `resolveApiKey(envKey, isProd)`；生产未配置 VITE_API_KEY → `console.error` 显式告警而非静默用公开 demo key；+4 测试（配置优先/dev demo/生产告警/空串回退）
