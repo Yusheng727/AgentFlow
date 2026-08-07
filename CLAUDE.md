@@ -1,6 +1,6 @@
 # AgentFlow — 接手指南（给 Claude Code）
 
-> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-07（U1–U14 + 后续任务 #9–#12 + U8 版本管理 + UI + Grafana 全交付，补 Postgres listByCreatedBy 收尾，8 模块 `mvn verify` 绿 + `npm run build` 绿）。
+> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-07（U1–U14 + 后续任务 #9–#12 + U8 版本管理 + UI + Grafana 全交付，补 Postgres listByCreatedBy 收尾 + UI Vitest 单测，8 模块 `mvn verify` 绿 + `npm run build` 绿 + `npm test` 16 绿）。
 
 ## 这是什么项目
 
@@ -30,7 +30,7 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 | U7 | 可观测性：`AgentFlowMetrics`（5 Micrometer 指标：workflow.executed / node.duration / tokens.consumed / workflow.cost.estimated / workflow.cost.budget_exceeded）+ `CostCalculator`（token×模型单价表，单价表放 `agentflow-cost-pricings.json` 配置文件启动期加载，R4 规避）+ `ExecutionTraceRegistry`（workflowId→trace 集中存放，ConcurrentHashMap）+ `TraceController`（GET /api/workflows/{id}/trace 返回 ExecutionTrace.Snapshot）。**Trace 穿线**（KTD-2 难题 R1）：BspEngine 5-arg 构造器注入 registry → execute() 注册 trace → AgentInput 第 9 字段穿线 → MockAgentFunction/SpringAiAgentAdapter 从 AgentInput.trace() 取 trace 写 NodeTrace（mock 模式补齐，OQ-3 决议扩展）→ TraceController 从 registry 取 snapshot。traceRegistry=null 整条链路 no-op，旧构造器保留向后兼容。TokenCountingAdvisor 新增 3-arg 构造器委托 AgentFlowMetrics 记成本（2-arg 旧构造器保留）。**经 ce-code-review 11 reviewer 审查**：2 P0（TraceController IDOR / recoverAndExecute 不接 trace，后者 4 票确认）+ 4 P2 全修（trace 兜底/死代码清理/CostCalculator 畸形 JSON/U12 命名连字符）| 305→306 tests，JaCoCo 80% 达标，`mvn verify` 8 模块 SUCCESS，`feat/u7-observability` 分支（含 U11/U12 + review 修复） |
 | U11 | 合同审核串行 Demo（对比 U10 并行拓扑）：新 `demo-contract-review` 模块，4 节点串行链（合同解析→法律风险→合规建议→最终报告），每步 mock_response 用 `${previousStep}` 占位符引用上一步输出，验证 BSP 串行依赖链 + 上下文逐级传递。4 super-step 各 1 节点。**附带修复**：MockAgentFunction PLACEHOLDER 正则 `[\\w.]` → `[\\w.-]` 支持连字符 channel 名（`${contract-parse}` 之前不解析，channel=nodeId 用连字符是项目约定），加 `hyphenatedChannelResolves` 测试锁定 | 5 tests，`mvn verify` SUCCESS |
 | U12 | 投资分析双层 fork-join Demo：新 `demo-investment-analysis` 模块，6 节点 4 super-step 双层 fork-join（step0 公司财报+市场数据并行 → step1 可行性分析串行 → step2 风险评估+收益预测并行 → step3 投资裁决汇总），验证 BSP 最长路径分层泛用性 + channel 隔离。用 `DAGLayerer.computeSuperSteps` 断言 4 层分层。node id 用下划线（`company_finance`）避开连字符占位符问题（U11 已修连字符正则，但 U12 保持自包含） | 6 tests，`mvn verify` SUCCESS |
-| U1/U2 | React UI 5 Tab（看板/提交/工作流定义/执行轨迹/诊断报告）：`agentflow-ui` 按 prototype-final.html 转 React 18 + Vite 5 + Tailwind 3 + TypeScript strict + lucide-react。Layout 深色侧边栏 5 菜单；**KTD-1 真实 API 优先 + mock fallback**（api.ts fetch 5s 超时失败降级 mockData，后端未起不白屏，UI 显示 mock 徽标）；Vite proxy `/api`→localhost:8080 规避 CORS。Dashboard 三列看板按状态分组 + 最近执行表；SubmitForm YAML 编辑器（contenteditable 手写高亮+行号+实时校验 nodes/agentflow 段，零新依赖）→ spinner→toast→跳轨迹页（真实 API 失败走 mock 模拟全流程）；WorkflowDefinitions 卡片选中高亮跳转提交页预填；PipelineView BSP super-step 分组渲染（并行→barrier→汇总）；DiagnosisPanel KPI+5 类问题卡片。React 单元测试留后续（plan Deferred） | `npm run build` 绿（tsc strict）+ dev HTTP 200 |
+| U1/U2 | React UI 5 Tab（看板/提交/工作流定义/执行轨迹/诊断报告）：`agentflow-ui` 按 prototype-final.html 转 React 18 + Vite 5 + Tailwind 3 + TypeScript strict + lucide-react。Layout 深色侧边栏 5 菜单；**KTD-1 真实 API 优先 + mock fallback**（api.ts fetch 5s 超时失败降级 mockData，后端未起不白屏，UI 显示 mock 徽标）；Vite proxy `/api`→localhost:8080 规避 CORS。Dashboard 三列看板按状态分组 + 最近执行表；SubmitForm YAML 编辑器（contenteditable 手写高亮+行号+实时校验 nodes/agentflow 段，零新依赖）→ spinner→toast→跳轨迹页（真实 API 失败走 mock 模拟全流程）；WorkflowDefinitions 卡片选中高亮跳转提交页预填；PipelineView BSP super-step 分组渲染（并行→barrier→汇总）；DiagnosisPanel KPI+5 类问题卡片。React 单测（Vitest）2026-08-07 补齐（api.ts + Dashboard） | `npm run build` 绿（tsc strict）+ dev HTTP 200 + `npm test` 16 绿 |
 | U4 | Grafana Dashboard JSON（R9）：`agentflow-starter/src/main/resources/grafana/agentflow-dashboard.json`，6 面板（工作流执行趋势按 status / 各 Agent P50-P95-P99 / token 消耗 Top10 / LLM 成本按 model / 预算超限+窗口总成本 / 失败率），Prometheus 数据源 + 模板变量，指标名对齐 AgentFlowMetrics 常量。配套：`AgentFlowMetrics.recordNodeDuration` 开 `publishPercentileHistogram`（暴露 `_bucket` 序列供 histogram_quantile 算分位，count/sum/max 语义不变） | JSON 合法（node 解析）+ 指标名对齐 + `mvn verify` 全绿 |
 | U8 | Workflow 版本管理（R14）：`com.agentflow.version` 包（`WorkflowDefinitionStore` 接口 + `InMemory`/`Postgres` 实现 + `WorkflowVersionManager` + `VersionConflictDetector`）。按 `(workflow_name, version)` 把解析后的定义存 `workflow_definitions` JSONB 表（V3 迁移）；提交时 `submit` 记录定义（恢复/retry 不再从 classpath 读）→ 版本 bump 后旧实例仍按旧 DAG 执行；`VersionConflictDetector` 仅 WARN 不阻断；`GET /workflows/{id}/version-check` 报执行版本 vs 最新定义版本冲突。`CheckpointManager` 增 `findWorkflowName/findVersion`（InMemory+Postgres）。demo-api ApiConfig 注册 InMemory 存储 | core VersionTest 7 + api WorkflowControllerTest 10 + demo-api 6；core+api JaCoCo 门禁 verify 绿 |
 
@@ -55,12 +55,19 @@ U3 ✅ → U4 ✅ → U5 ✅ → U14 ✅ → U9 ✅ → U10 ✅ → U13 ✅（P0
 > - **已 push origin main**（`55125f1..57d8057`，U1/U2/obs+Grafana/CLAUDE.md/review-fix 6 commit）
 > - 下一批（后续任务 + plan Deferred）：可运行 API server wiring（真实 API 路径可验证）+ PipelineView 真实 super-step 分组 + /diagnosis 反序列化 + 看板列表端点；UI React 单测（Vitest）+ Grafana 真实部署验证 + U8 版本管理
 
+> **当前状态（2026-08-07）——UI React 单测（Vitest，Deferred 收尾）**：
+> - `feat/ui-vitest`：给 `agentflow-ui` 配 Vitest 工具链 + 首批单元测试
+> - 工具链：vitest/jsdom/@testing-library（react/jest-dom/user-event）；`vite.config.ts` 加 test 段（jsdom + globals + `pool:threads` 规避 Windows fork worker 超时）；`tsconfig` 排除 `*.test.*`/`src/test` 保持 build 的 tsc 只查生产代码；`src/test/setup.ts` 注册 jest-dom + cleanup；`npm test` / `npm run test:watch`
+> - 测试：`api.test.ts` 12 个（mock fetch 验证请求契约/X-API-Key header/状态归一 UPPER→lower/mock fallback/ApiError）+ `Dashboard.test.tsx` 4 个（三列分桶 data-testid 计数/成功率 KPI/mock 徽标显隐）；Dashboard 分组计数加 data-testid
+> - 验证：`npm test` 16 绿 + `npm run build` 绿（tsc strict）
+> - 已合 main + push：`fe72420`/`a10fabe`（`c4a5308..a10fabe`）
+
 > **当前状态（2026-08-07）——补 Postgres listByCreatedBy（#12 遗留收尾）**：
 > - `PostgresCheckpointManager.listByCreatedBy`（`821f251`，feat/pg-list-by-created-by 分支）：从 `workflow_executions` 按 created_by 过滤（空则返回全部，兼容 U5 未设 created_by）+ created_at 倒序，对齐 InMemory 语义；抽 SELECT_EXECUTION_RECORDS/BY_CREATOR + EXECUTION_RECORD_MAPPER 为 package-private 单真相源
 > - 测试 `PostgresCheckpointManagerTest`（4 个）：生产 Flyway 含 PG 专属类型（TIMESTAMPTZ/JSONB）无法跑 H2，故用 H2 建兼容 `workflow_executions` 表跑真实 SQL+mapper，验证过滤/倒序/status 归一/空表/Null createdBy
 > - `mvn verify` 8 模块全绿（core 204 + api 47 + adapter 55 + demo 等），JaCoCo 全 met；`npm run build` 绿（基线 08-07 复核）
 > - 本机无 Docker/PG，未能对真实 PG 做端到端验证（docker-compose.test.yml 留作本地/CI 集成验证路径）
-> - 仍遗留：VITE_API_KEY 生产加固（ops 决策）；Postgres 版 diagnosis 未覆盖；UI React 单测（Vitest）+ Grafana 部署验证 Deferred
+> - 仍遗留：VITE_API_KEY 生产加固（ops 决策）；Postgres 版 diagnosis 未覆盖；Grafana 部署验证 Deferred；UI React 单测（Vitest）已补（见 2026-08-07 状态）
 
 > **当前状态（2026-08-04）——后续任务 #9–#12 全部交付**：
 > - **#9 可运行 REST API server**（`f7bfdb4`，demo-api 模块）：把 controllers + ApiKeyAuthFilter（含 UI 默认 demo key）接成可启动 Spring Boot app；NodeRegistry 加 mock fallback；Boot 4.1 注解级 exclude（starter + spring-ai OpenAi + JDBC DataSource 已移包）。真实 `spring-boot:run` 起服（Tomcat:8080）+ curl 全链路跑通
@@ -69,7 +76,7 @@ U3 ✅ → U4 ✅ → U5 ✅ → U14 ✅ → U9 ✅ → U10 ✅ → U13 ✅（P0
 > - **#12 看板列表端点 + 状态归一 + 指标防漂移**（`88a3d86`）：`GET /api/workflows`（CheckpointManager.listByCreatedBy + InMemory），UI status 归一（enum UPPER→lower），starter GrafanaDashboardMetricAlignmentTest 防指标名漂移
 > - **U8 Workflow 版本管理**（`f32582d`，R14）：version 包（定义存储 InMemory/Postgres `workflow_definitions` + Manager + 冲突检测），提交记录定义、恢复/retry 取旧 DAG、`GET /version-check` 报冲突，WARN 不阻断
 > - 遗留（记录）：~~Postgres listByCreatedBy SQL 待补~~（已补，见 2026-08-07 状态）；VITE_API_KEY 生产加固为 ops 决策；Postgres 版 diagnosis 未覆盖
-> - UI React 单测（Vitest）+ Grafana 真实部署验证仍 Deferred
+> - UI React 单测（Vitest）已补（见 2026-08-07 状态）；Grafana 真实部署验证仍 Deferred
 
 > **当前状态（2026-08-02）**：
 > - P0 全交付 + U6/U7/U11/U12 落地，`mvn verify` **8 模块全绿（305 tests pass）**，JaCoCo 80% 达标
