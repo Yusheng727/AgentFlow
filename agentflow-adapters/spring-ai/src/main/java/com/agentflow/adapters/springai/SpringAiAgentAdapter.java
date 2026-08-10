@@ -9,6 +9,7 @@ import com.agentflow.agent.TransientException;
 import com.agentflow.engine.WorkflowContext;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.NodeTrace;
+import com.agentflow.prompt.SpelPromptResolver;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -107,11 +108,10 @@ public class SpringAiAgentAdapter implements AgentFunction {
             effectiveTrace.addNode(nodeTrace);
         }
 
-        // 1. SpEL 解析 prompt 模板
-        Map<String, Object> channelValues = flattenChannels(input.context());
+        // 1. SpEL 解析 prompt 模板（core 复用件：直接吃 WorkflowContext，channel 扁平化在其内部）
         String resolvedPrompt;
         try {
-            resolvedPrompt = promptResolver.resolve(input.promptTemplate(), channelValues, input.inputs());
+            resolvedPrompt = promptResolver.resolve(input.promptTemplate(), input.context(), input.inputs());
         } catch (SpelEvaluationException e) {
             nodeTrace.fail("SpEL 解析失败: " + e.getMessage());
             throw new FatalException("Prompt SpEL 解析失败 [" + input.nodeId() + "]: " + e.getMessage(), e);
@@ -220,15 +220,7 @@ public class SpringAiAgentAdapter implements AgentFunction {
     }
 
 
-    /** 把 WorkflowContext 的 ChannelValue 扁平成 channel 名 → 值，供 SpEL 根对象 context 视图。 */
-    private Map<String, Object> flattenChannels(WorkflowContext context) {
-        Map<String, Object> flat = new HashMap<>();
-        if (context == null) {
-            return flat;
-        }
-        context.values().forEach((k, cv) -> flat.put(k, cv.value()));
-        return flat;
-    }
+    /** 把 WorkflowContext 的 ChannelValue 扁平成 channel 名 → 值：已下沉 {@link SpelPromptResolver}（core），本类不再持有。 */
 
     private AgentExecutionException mapException(Throwable cause) {
         // SpEL 解析失败在上面的独立 try 中已映射为 FatalException，不会到此。

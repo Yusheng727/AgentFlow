@@ -1,4 +1,4 @@
-package com.agentflow.adapters.springai;
+package com.agentflow.prompt;
 
 import org.springframework.expression.EvaluationContext;
 import org.springframework.expression.Expression;
@@ -32,15 +32,31 @@ import java.util.regex.Pattern;
  * {@code ${T(java.lang.System).exit(0)}} 等表达式会抛 {@link SpelEvaluationException}，不执行。
  *
  * <p>缺占位符的模板原样返回；占位符求值为 null 替换为空串（避免字面 "null" 污染 prompt）。
+ *
+ * <p><b>v1.1 下沉 core</b>：原位于 spring-ai 适配器（包私有），LangChain4j 适配器（KTD-7 第二个
+ * 框架适配器）复用——prompt 模板解析是 DSL/Agent 域逻辑，与 LLM 框架无关，故提升到 core
+ * 供所有适配器共享（单一真相源，不重复造轮子）。
  */
-final class SpelPromptResolver {
+public final class SpelPromptResolver {
 
     private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{(.*?)}", Pattern.DOTALL);
 
     private final SpelExpressionParser parser = new SpelExpressionParser();
 
+    /**
+     * 解析 prompt 模板（便捷重载：直接吃 {@link com.agentflow.engine.WorkflowContext}）。
+     *
+     * <p>各 LLM 适配器（Spring AI / LangChain4j）共用此入口——channel 扁平化收敛在此，
+     * 避免每个适配器各写一份 flatten。
+     */
+    public String resolve(String template,
+                          com.agentflow.engine.WorkflowContext context,
+                          Map<String, Object> inputs) {
+        return resolve(template, flattenChannels(context), inputs);
+    }
+
     /** 解析 prompt 模板中的 ${...} 占位符。 */
-    String resolve(String template, Map<String, Object> channelValues, Map<String, Object> inputs) {
+    public String resolve(String template, Map<String, Object> channelValues, Map<String, Object> inputs) {
         if (template == null || template.isEmpty()) {
             return "";
         }
@@ -84,6 +100,16 @@ final class SpelPromptResolver {
         }
         matcher.appendTail(out);
         return out.toString();
+    }
+
+    /** 把 WorkflowContext 的 ChannelValue 扁平成 channel 名 → 值，供 SpEL 根对象 context 视图。 */
+    private static Map<String, Object> flattenChannels(com.agentflow.engine.WorkflowContext context) {
+        Map<String, Object> flat = new HashMap<>();
+        if (context == null) {
+            return flat;
+        }
+        context.values().forEach((k, cv) -> flat.put(k, cv.value()));
+        return flat;
     }
 
     /** SpEL 根对象：context（channel 扁平视图）+ inputs（工作流入参）。 */

@@ -22,11 +22,14 @@
         <java.version>21</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <agentflow.version>1.0.0-SNAPSHOT</agentflow.version>
+        <!-- LangChain4j 1.0.0 GA（v1.1 KTD-7 第二个框架适配器；alimaven 可拉） -->
+        <langchain4j.version>1.0.0</langchain4j.version>
     </properties>
 
     <modules>
         <module>agentflow-core</module>
         <module>agentflow-adapters/spring-ai</module>
+        <module>agentflow-adapters/langchain4j</module>
         <module>agentflow-api</module>
         <module>agentflow-starter</module>
         <module>demo-supplier-risk</module>
@@ -59,6 +62,23 @@
                 <groupId>com.agentflow</groupId>
                 <artifactId>agentflow-adapters-spring-ai</artifactId>
                 <version>${agentflow.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.agentflow</groupId>
+                <artifactId>agentflow-adapters-langchain4j</artifactId>
+                <version>${agentflow.version}</version>
+            </dependency>
+            <!-- LangChain4j 1.0.0 GA：ChatModel + @Tool + TokenUsage（KTD-7 第二适配器窄表面） -->
+            <dependency>
+                <groupId>dev.langchain4j</groupId>
+                <artifactId>langchain4j-open-ai</artifactId>
+                <version>${langchain4j.version}</version>
+            </dependency>
+            <!-- 主 artifact：ToolExecutor/DefaultToolExecutor（工具执行循环用） -->
+            <dependency>
+                <groupId>dev.langchain4j</groupId>
+                <artifactId>langchain4j</artifactId>
+                <version>${langchain4j.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.agentflow</groupId>

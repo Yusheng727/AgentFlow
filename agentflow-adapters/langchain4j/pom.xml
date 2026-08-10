@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.agentflow</groupId>
+        <artifactId>agentflow-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+        <relativePath>../../pom.xml</relativePath>
+    </parent>
+
+    <artifactId>agentflow-adapters-langchain4j</artifactId>
+    <name>AgentFlow Adapter :: LangChain4j</name>
+    <description>LangChain4jAgentAdapter（v1.1，R5/KTD-7 可移植性验证）：LangChain4j ChatModel + @Tool + TokenUsage
+        收敛于本适配器窄表面；依赖面仅 core + langchain4j，无 Spring AI——框架可替换的构建级证明。</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.agentflow</groupId>
+            <artifactId>agentflow-core</artifactId>
+        </dependency>
+        <!-- LangChain4j 1.0.0 GA：ChatModel + ChatRequest/ChatResponse + ToolSpecification + TokenUsage
+             （KTD-7 窄表面收敛于此适配器，2.x 迁移只碰本模块） -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j-open-ai</artifactId>
+        </dependency>
+        <!-- 主 artifact：DefaultToolExecutor/ToolExecutor（@Tool bean 工具执行循环用） -->
+        <dependency>
+            <groupId>dev.langchain4j</groupId>
+            <artifactId>langchain4j</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
