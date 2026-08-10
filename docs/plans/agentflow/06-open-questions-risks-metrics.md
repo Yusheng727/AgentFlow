@@ -80,9 +80,10 @@
 
   The competitive-risk mitigation names "YAML DSL + 分布式特性" as differentiation core against Spring AI 2.1, but distributed mode is v1.1 — v1 is single-node. v1's actual differentiator is only YAML DSL, thin given Spring AI 2.0 already ships 5 Agentic Patterns + Subagent. Open: cite v1-present differentiators (two-level Checkpoint + Recovery, BSP barrier, YAML + JSON Schema validation).
 
-- **No per-request DAG size or token budget bound on POST /workflows** — U14 / R21 / R10 (security-lens, confidence 75)
+- ✅ **2026-08-10 已解决** No per-request DAG size or token budget bound on POST /workflows — U14 / R21 / R10 (security-lens, confidence 75)
 
   POST /workflows accepts arbitrary YAML; an authenticated caller can submit a DAG with thousands of nodes, spawning unbounded Virtual Threads, exhausting HikariCP (20 conn) and running unlimited LLM cost before any barrier. R10's budget_exceeded is post-hoc, not preventive. Open: WorkflowSubmissionGuard rejecting node count > max or estimated cost > budget before execution (422).
+  → **Resolved 2026-08-10**：新增 `WorkflowSubmissionGuard`（v1 收尾，逻辑见 ROADMAP 档 B）——提交链节点数/预估成本超上界 422 拒绝，`a37d9dc`。
 
 - **R10 "budget 告警" has no threshold source; budget_exceeded counter can't fire** — R10 / U7 (scope-guardian, confidence 75)
 

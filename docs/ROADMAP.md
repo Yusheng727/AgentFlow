@@ -1,7 +1,7 @@
 # AgentFlow v1 交付状态 · 剩余工作 · v2 路线图
 
 > 本文档是 2026-08-07 对 v1 的交付盘点与 v2 边界的一手来源，供接手/面试口径自洽。
-> 更新日期：2026-08-07。计划权威件：`docs/plans/agentflow/`（本文档不替代 plan，只做状态与路线的快照）。
+> 更新日期：2026-08-07（2026-08-10 更新：WorkflowSubmissionGuard 已交付，见档 B）。计划权威件：`docs/plans/agentflow/`（本文档不替代 plan，只做状态与路线的快照）。
 
 ---
 
@@ -11,6 +11,7 @@
 |:---|:---|:---|
 | 15 个实现单元 U0–U14 | DSL(U1) / BSP 引擎(U2) / Spring AI 适配器(U3) / 容错(U4) / 两级 Checkpoint+Recovery(U5) / 调试(U6) / 可观测(U7) / 版本管理(U8) / Mock(U9) + 三 Demo(U10–U12) / Starter(U13) / API 安全(U14) | 8 模块 verify 绿 + JaCoCo 80% 门禁 |
 | 后续任务 #9–#12 | 可运行 REST server / trace 带超步层号 / diagnosis 反序列化 / 看板列表端点 | verify 绿 |
+| 提交守卫（档 B 收尾） | `WorkflowSubmissionGuard`：DAG 节点数 / 预估成本上界，超限 422 拒绝（06 OQ 安全缺口 #2） | verify 绿 + JaCoCo + 合 main（`a37d9dc`） |
 | UI | React 5 Tab + Vitest 单测（api 12 + Dashboard 4 + resolveApiKey 4 = 20） | `npm test` 绿 + build 绿 |
 | Grafana 可观测**全闭环** | exporter 接线 + U7 指标挂钩引擎（workflow.executed / node.duration）+ mock token/成本记账（tokens.consumed / cost.estimated / budget_exceeded） | 本地起服验证 `/actuator/prometheus` 返回**全部 5 类指标族** |
 | 工程收尾 | Postgres listByCreatedBy / PostgresCheckpointManagerIT（真 PG Failsafe）/ VITE_API_KEY 加固 / UI 入 CI | verify 绿 |
@@ -29,7 +30,7 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 ### 档 B — 真实未落地的 v1 代码缺口（可立刻做）
 | 项 | 引用 | 现状 |
 |:---|:---|:---|
-| **WorkflowSubmissionGuard**（DAG 节点数 / token 成本上界，超限 422 拒绝） | 06 OQ `POST /workflows 无 DAG/token 预算上界`（security-lens, conf 75） | ❌ 未做——恶意/超载提交可起无界 VT + 烧成本，现只有 post-hoc `budget_exceeded` 无预防性拦截 |
+| **WorkflowSubmissionGuard**（DAG 节点数 / token 成本上界，超限 422 拒绝） | 06 OQ `POST /workflows 无 DAG/token 预算上界`（security-lens, conf 75） | ✅ **已交付**（2026-08-10，`a37d9dc`）——`WorkflowSubmissionGuard`（api/security）+ 提交链 422`SUBMISSION_LIMIT`，节点数/预估成本超上界拒绝；demo-api 接 `agentflow.guard.*`；CLAUDE.md 已记 |
 | **R20 agentflow-archetypes** | R20 | ❌ 声明但无实现单元交付（Maven archetype 生成 Agent 骨架） |
 | **per-workflow 预算字段** `budget_tokens`/`budget_cost` | R10 | ❌ 未加——预算现为全局 mock 阈值，非 per-workflow 告警语义 |
 | **Reducer 冲突路径刻意演练**（overwrite/concat/max/custom 触发测试） | 06 OQ `Reducer 冲突无 demo` | ❌ 抽象有了但验收未覆盖冲突路径 |
@@ -64,7 +65,7 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 
 ## 5. 建议的 v1 收尾优先级
 
-1. **WorkflowSubmissionGuard**（档 B，真安全缺口，本地可做可验）—— 建议作为下一个 v1 收尾 feature。
+1. **WorkflowSubmissionGuard**（档 B，真安全缺口）—— ✅ 已交付（2026-08-10，`a37d9dc`，见档 B 表）。
 2. Grafana / 真 PG 部署验证（档 A，等环境/CI）。
 3. R20 archetypes、per-workflow budget、Reducer 冲突演练（档 B，按需）。
 4. 档 C 面试口径 → 定稿一份 30s/5min 自述稿附到 `07-sources-revision-interview.md` 或本仓库面试文档（待定）。
