@@ -7,11 +7,13 @@ import com.agentflow.agent.NodeRegistry;
 import com.agentflow.api.security.ApiKeyAuthFilter;
 import com.agentflow.api.security.CallerToolAllowlist;
 import com.agentflow.api.security.WorkflowOwnershipChecker;
+import com.agentflow.api.security.WorkflowSubmissionGuard;
 import com.agentflow.dsl.WorkflowDSLParser;
 import com.agentflow.engine.BspEngine;
 import com.agentflow.engine.ChannelReducer;
 import com.agentflow.engine.checkpoint.InMemoryCheckpointManager;
 import com.agentflow.engine.checkpoint.WorkflowStatus;
+import com.agentflow.observability.CostCalculator;
 import com.agentflow.version.InMemoryWorkflowDefinitionStore;
 import com.agentflow.version.WorkflowVersionManager;
 
@@ -128,6 +130,57 @@ class WorkflowControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(403);
         assertThat(response.getBody().status()).isEqualTo("FORBIDDEN");
+    }
+
+    @Test
+    @DisplayName("提交节点数超上限的 YAML → 422 + SUBMISSION_LIMIT（提交守卫拒绝）")
+    void submitDagExceedingMaxNodesReturns422() {
+        controller = new WorkflowController(parser, engine, checkpointManager,
+                ownershipChecker, toolAllowlist, nodeRegistry, versionManager,
+                new WorkflowSubmissionGuard(new CostCalculator(), null, 1, null)); // 上限 1 节点
+
+        // 2 节点 > 上限 1
+        String yaml = """
+                agentflow: { version: "1.0" }
+                nodes:
+                  - { id: A, agent: a }
+                  - { id: B, agent: a }
+                edges: []
+                """;
+        WorkflowController.SubmitRequest body = new WorkflowController.SubmitRequest(
+                "test-wf", "1.0", yaml, Map.of());
+
+        var response = controller.submit(body, requestWithCaller("caller-A"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(422);
+        assertThat(response.getBody().status()).isEqualTo("SUBMISSION_LIMIT");
+        assertThat(response.getBody().message()).contains("超过上限");
+        // 拒绝后不产生执行记录（无 initWorkflow）
+        assertThat(checkpointManager.listByCreatedBy("caller-A")).isEmpty();
+    }
+
+    @Test
+    @DisplayName("提交预估成本超预算的 YAML → 422 + SUBMISSION_LIMIT（成本守卫拒绝）")
+    void submitCostExceedingBudgetReturns422() {
+        // 极小预算强制拒绝：model + 预算启用成本检查
+        controller = new WorkflowController(parser, engine, checkpointManager,
+                ownershipChecker, toolAllowlist, nodeRegistry, versionManager,
+                new WorkflowSubmissionGuard(new CostCalculator(), "gpt-4o-mini", 1000, 0.0000001));
+
+        String yaml = """
+                agentflow: { version: "1.0" }
+                nodes:
+                  - { id: A, agent: a, prompt_template: "这是一个足以超预算的输入" }
+                edges: []
+                """;
+        WorkflowController.SubmitRequest body = new WorkflowController.SubmitRequest(
+                "test-wf", "1.0", yaml, Map.of());
+
+        var response = controller.submit(body, requestWithCaller("caller-A"));
+
+        assertThat(response.getStatusCode().value()).isEqualTo(422);
+        assertThat(response.getBody().status()).isEqualTo("SUBMISSION_LIMIT");
+        assertThat(response.getBody().message()).contains("预估成本");
     }
 
     // ─────────────────── GET /workflows/{id}/status ───────────────────

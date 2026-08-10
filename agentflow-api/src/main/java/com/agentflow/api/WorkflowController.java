@@ -5,6 +5,7 @@ import com.agentflow.agent.NodeRegistry;
 import com.agentflow.api.security.ApiKeyAuthFilter;
 import com.agentflow.api.security.CallerToolAllowlist;
 import com.agentflow.api.security.WorkflowOwnershipChecker;
+import com.agentflow.api.security.WorkflowSubmissionGuard;
 import com.agentflow.dsl.WorkflowDefinition;
 import com.agentflow.dsl.WorkflowDSLParser;
 import com.agentflow.dsl.WorkflowValidationException;
@@ -14,14 +15,14 @@ import com.agentflow.engine.WorkflowExecutionException;
 import com.agentflow.engine.checkpoint.CheckpointManager;
 import com.agentflow.engine.checkpoint.WorkflowExecutionRecord;
 import com.agentflow.engine.checkpoint.WorkflowStatus;
+import com.agentflow.observability.CostCalculator;
 import com.agentflow.version.VersionConflictDetector;
 
 import jakarta.servlet.http.HttpServletRequest;
 
-import java.util.List;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,6 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -69,6 +71,7 @@ public class WorkflowController {
     private final CheckpointManager checkpointManager;
     private final WorkflowOwnershipChecker ownershipChecker;
     private final CallerToolAllowlist toolAllowlist;
+    private final WorkflowSubmissionGuard submissionGuard;
     private final NodeRegistry nodeRegistry;
     private final com.agentflow.version.WorkflowVersionManager versionManager;
     private final ExecutorService executor;
@@ -80,11 +83,28 @@ public class WorkflowController {
                               CallerToolAllowlist toolAllowlist,
                               NodeRegistry nodeRegistry,
                               com.agentflow.version.WorkflowVersionManager versionManager) {
+        this(parser, engine, checkpointManager, ownershipChecker, toolAllowlist, nodeRegistry,
+                versionManager,
+                // 默认守卫：仅启用节点数上界（防无界 VT），成本检查需 model+预算由 wiring 显式配置
+                new WorkflowSubmissionGuard(new CostCalculator(), null,
+                        WorkflowSubmissionGuard.DEFAULT_MAX_NODES, null));
+    }
+
+    @Autowired
+    public WorkflowController(WorkflowDSLParser parser,
+                              BspEngine engine,
+                              CheckpointManager checkpointManager,
+                              WorkflowOwnershipChecker ownershipChecker,
+                              CallerToolAllowlist toolAllowlist,
+                              NodeRegistry nodeRegistry,
+                              com.agentflow.version.WorkflowVersionManager versionManager,
+                              WorkflowSubmissionGuard submissionGuard) {
         this.parser = Objects.requireNonNull(parser, "parser");
         this.engine = Objects.requireNonNull(engine, "engine");
         this.checkpointManager = Objects.requireNonNull(checkpointManager, "checkpointManager");
         this.ownershipChecker = Objects.requireNonNull(ownershipChecker, "ownershipChecker");
         this.toolAllowlist = Objects.requireNonNull(toolAllowlist, "toolAllowlist");
+        this.submissionGuard = Objects.requireNonNull(submissionGuard, "submissionGuard");
         this.nodeRegistry = Objects.requireNonNull(nodeRegistry, "nodeRegistry");
         this.versionManager = Objects.requireNonNull(versionManager, "versionManager");
         this.executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -143,6 +163,13 @@ public class WorkflowController {
                     }
                 }
             }
+        }
+
+        // 2.5 提交守卫（预防性）：DAG 节点数 / 预估成本超上界 → 422 拒绝（防无界 VT + 烧成本）
+        WorkflowSubmissionGuard.SubmissionResult guard = submissionGuard.check(def);
+        if (!guard.allowed()) {
+            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_ENTITY).body(
+                    new SubmitResponse(null, "SUBMISSION_LIMIT", guard.rejectionReason(), null));
         }
 
         // 3. 生成 workflow_id + 持久化

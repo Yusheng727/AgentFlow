@@ -5,6 +5,7 @@ import com.agentflow.agent.NodeRegistry;
 import com.agentflow.api.security.ApiKeyAuthFilter;
 import com.agentflow.api.security.CallerToolAllowlist;
 import com.agentflow.api.security.WorkflowOwnershipChecker;
+import com.agentflow.api.security.WorkflowSubmissionGuard;
 import com.agentflow.dsl.DAGLayerer;
 import com.agentflow.dsl.WorkflowDSLParser;
 import com.agentflow.engine.BspEngine;
@@ -12,6 +13,7 @@ import com.agentflow.engine.ChannelReducer;
 import com.agentflow.engine.checkpoint.CheckpointManager;
 import com.agentflow.engine.checkpoint.InMemoryCheckpointManager;
 import com.agentflow.observability.AgentFlowMetrics;
+import com.agentflow.observability.CostCalculator;
 import com.agentflow.observability.ExecutionTraceRegistry;
 import com.agentflow.version.InMemoryWorkflowDefinitionStore;
 import com.agentflow.version.WorkflowDefinitionStore;
@@ -102,6 +104,18 @@ public class ApiConfig {
         }
     }
 
+    /** 解析整数配置：空/非法 → defaultValue（守卫默认启用节点数上界）。 */
+    private static Integer parseIntOrNull(String s, Integer defaultValue) {
+        if (s == null || s.isBlank()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.valueOf(s.trim());
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
     @Bean
     public WorkflowOwnershipChecker workflowOwnershipChecker(CheckpointManager checkpointManager) {
         return new WorkflowOwnershipChecker(checkpointManager);
@@ -110,6 +124,25 @@ public class ApiConfig {
     @Bean
     public CallerToolAllowlist callerToolAllowlist() {
         return new CallerToolAllowlist(Map.of());
+    }
+
+    // ─── 提交守卫（安全）：DAG 节点数 / 预估成本上界，超限 422 拒绝（防无界 VT + 烧成本） ───
+
+    @Bean
+    public CostCalculator costCalculator() {
+        return new CostCalculator().loadFromClasspath("agentflow-cost-pricings.json");
+    }
+
+    /** 提交守卫 bean：max-nodes 默认启（DEFAULT_MAX_NODES），max-cost-usd 配了才启成本检查。 */
+    @Bean
+    public WorkflowSubmissionGuard workflowSubmissionGuard(
+            CostCalculator costCalculator,
+            @Value("${agentflow.guard.max-nodes:}") String maxNodesRaw,
+            @Value("${agentflow.guard.max-cost-usd:}") String maxCostUsdRaw,
+            @Value("${agentflow.mock.model:gpt-4o-mini}") String model) {
+        Integer maxNodes = parseIntOrNull(maxNodesRaw, WorkflowSubmissionGuard.DEFAULT_MAX_NODES);
+        Double maxCostUsd = parseBudget(maxCostUsdRaw);
+        return new WorkflowSubmissionGuard(costCalculator, model, maxNodes, maxCostUsd);
     }
 
     // ─── U8 版本管理：内存定义存储（mock/demo） + 版本管理器（WorkflowController 注入） ───
