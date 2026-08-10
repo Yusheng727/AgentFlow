@@ -1,6 +1,6 @@
 # AgentFlow — 接手指南（给 Claude Code）
 
-> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-10（WorkflowSubmissionGuard 提交守卫，ROADMAP 档 B 真安全缺口 #2；`mvn verify` 9 模块绿 + JaCoCo 达标）。
+> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-10（WorkflowSubmissionGuard + R10 per-workflow budget 预算字段，ROADMAP 档 B 收尾；`mvn verify` 9 模块绿 + JaCoCo 达标）。
 >
 > **状态/路线文档**：`docs/ROADMAP.md`（v1 交付盘点 · 剩余工作 · v2 路线图）+ `docs/GRAFANA.md`（可观测/Grafana 部署与验证）——接手或规划下一步先看这两份。
 
@@ -22,6 +22,16 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 > - demo-api ApiConfig 注册 guard bean：`agentflow.guard.max-nodes`（默认 500）/`max-cost-usd`（配了才启成本检查）/`mock.model`
 > - 测试：WorkflowSubmissionGuardTest 12 + WorkflowControllerTest 补 422 两例，api 61 全绿；**全仓 `mvn verify` 9 模块全绿 + JaCoCo 达标**，已合 main + push
 > - 遗留：ROADMAP 档 B 其余 R20 archetypes / per-workflow `budget_tokens`/`budget_cost` 字段 / Reducer 冲突演练；档 A Grafana/PG 部署验证等环境
+
+> **当前状态（2026-08-10）——R10 per-workflow 预算字段（feat/per-workflow-budget）**：
+> - 把 R10 `budget_exceeded` 从"全局 mock 阈值"升级为 **per-workflow YAML 预算**（ROADMAP 档 B）：
+>   - DSL `AgentflowMeta` 加 `budget_tokens`(Long)/`budget_cost`(Double)（可空）；SemanticValidator 拒绝负数/非有限
+>   - 新增 `WorkflowBudget`（observability）：per-workflow 累加器，synchronized 线程安全，**edge-triggered** 超限（首次 true 之后 false，`budget_exceeded` 不再按节点数重复自增）
+>   - `AgentFlowMetrics.recordBudgetExceeded()`（checkBudget 委托之）；`BspEngine.execute/recoverAndExecute` 从 `def.agentflow()` 建 budget 经 `AgentInput` 第 10 字段穿线 → MockAgentFunction 逐节点记账触发
+>   - 向后兼容：`AgentInput` 加 9-arg 便捷构造；mock 无 budget 时回落全局 `budgetThresholdUsd`；无预算 YAML 不查预算
+> - 测试：WorkflowBudgetTest 12（含并发 edge-triggered）+ DSL 解析/校验 4 + MockAgentFunctionTest per-workflow 2 + **MockBudgetIntegrationTest 4**（engine→mock 全链路）；全仓 `mvn verify` 9 模块绿 + JaCoCo 达标
+> - 已合 main + push（`4072b3e`）；ROADMAP 档 B 该项勾 ✅
+> - 遗留：ROADMAP 档 B 剩 R20 archetypes / Reducer 冲突演练；档 A Grafana/PG 部署验证等环境；成本估算低估面仍待 per-workflow（见提交守卫 review 注）
 
 
 **已落地（main 分支，feat/u3-agent-adapter 已合）**：

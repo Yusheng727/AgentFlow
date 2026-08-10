@@ -85,9 +85,10 @@
   POST /workflows accepts arbitrary YAML; an authenticated caller can submit a DAG with thousands of nodes, spawning unbounded Virtual Threads, exhausting HikariCP (20 conn) and running unlimited LLM cost before any barrier. R10's budget_exceeded is post-hoc, not preventive. Open: WorkflowSubmissionGuard rejecting node count > max or estimated cost > budget before execution (422).
   → **Resolved 2026-08-10**：新增 `WorkflowSubmissionGuard`（v1 收尾，逻辑见 ROADMAP 档 B）——提交链节点数/预估成本超上界 422 拒绝，`a37d9dc`。
 
-- **R10 "budget 告警" has no threshold source; budget_exceeded counter can't fire** — R10 / U7 (scope-guardian, confidence 75)
+- ✅ **2026-08-10 已解决** R10 "budget 告警" has no threshold source; budget_exceeded counter can't fire — R10 / U7 (scope-guardian, confidence 75)
 
   R10 promises "Counter + budget 告警" and U7 ships `cost.budget_exceeded{workflow}`, but no budget limit is defined in YAML node config or properties — the alert can never trigger as specified. Open: add per-workflow `budget_tokens`/`budget_cost` YAML field, wire the counter to compare against it.
+  → **Resolved 2026-08-10**：`AgentflowMeta` 加 per-workflow `budget_tokens`/`budget_cost`，BspEngine 构造 `WorkflowBudget` 经 AgentInput 穿线，记账方（mock）逐节点累加、edge-triggered 触发 `budget_exceeded`。见 ROADMAP 档 B，`4072b3e`。
 
 - **Agent 30% @Tool work overlaps InterviewCoach's Tool Calling claim** — Interview Value / Problem Frame (product-lens, confidence 75)
 
