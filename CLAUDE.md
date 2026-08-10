@@ -1,6 +1,6 @@
 # AgentFlow — 接手指南（给 Claude Code）
 
-> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-07（U1–U14 + 后续任务 #9–#12 + U8 版本管理 + UI + Grafana 全交付，补 Postgres listByCreatedBy 收尾 + UI Vitest 单测，8 模块 `mvn verify` 绿 + `npm run build` 绿 + `npm test` 20 绿）。
+> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-10（WorkflowSubmissionGuard 提交守卫，ROADMAP 档 B 真安全缺口 #2；`mvn verify` 9 模块绿 + JaCoCo 达标）。
 >
 > **状态/路线文档**：`docs/ROADMAP.md`（v1 交付盘点 · 剩余工作 · v2 路线图）+ `docs/GRAFANA.md`（可观测/Grafana 部署与验证）——接手或规划下一步先看这两份。
 
@@ -15,6 +15,14 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 ## 当前进度
 
 **计划文档**：`docs/plans/agentflow/`（8 个分片，`00-overview.md` 是索引+导航）。两轮 ce-doc-review 闭环 + 5 条动工前卡点拍板，**0 动工阻塞**。
+
+> **当前状态（2026-08-10）——WorkflowSubmissionGuard 提交守卫（ROADMAP 档 B 真安全缺口 #2，feat/submission-guard）**：
+> - 新增 `WorkflowSubmissionGuard`（api/security）：提交时预防性校验（06 OQ `POST /workflows 无 DAG/token 预算上界`）——节点数 > maxNodes 或预估成本 > maxCostUsd → **422 SUBMISSION_LIMIT**（跑完才报的 post-hoc `budget_exceeded` 之外加了提交前拦截，防恶意/失控提交起无界 VT + 烧成本）。reprised：model/maxNodes/maxCostUsd 任一 null 即禁用对应检查；成本估算复用 CostCalculator 单价表，prompt 长度估 token（4 字符/token）+ 每节点基准 500 in/out。
+> - WorkflowController.submit 在工具授权后调 guard.check（拒绝后不 initWorkflow，不产生执行记录）；新增 8-arg 构造 + @Autowired（多构造需显式），7-arg 保留委托默认守卫（仅启节点数上界 500）
+> - demo-api ApiConfig 注册 guard bean：`agentflow.guard.max-nodes`（默认 500）/`max-cost-usd`（配了才启成本检查）/`mock.model`
+> - 测试：WorkflowSubmissionGuardTest 12 + WorkflowControllerTest 补 422 两例，api 61 全绿；**全仓 `mvn verify` 9 模块全绿 + JaCoCo 达标**，已合 main + push
+> - 遗留：ROADMAP 档 B 其余 R20 archetypes / per-workflow `budget_tokens`/`budget_cost` 字段 / Reducer 冲突演练；档 A Grafana/PG 部署验证等环境
+
 
 **已落地（main 分支，feat/u3-agent-adapter 已合）**：
 | Unit | 内容 | 验证 |
