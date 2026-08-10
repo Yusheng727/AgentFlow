@@ -59,6 +59,7 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 | **完整 Human-in-the-Loop 审批中间件** | 中断→外部审批→恢复执行 |
 | **Web 可视化工作流编辑器** | |
 | **多租户 SaaS 平台** | v2+ |
+| **RAG 演示加分项**（2026-08-10 拍板） | 自定义 `RagAgentFunction`（AgentFunction 内调向量检索），引擎层零改动——验证 KTD-6 扩展点设计成立。与 InterviewCoach（RAG 项目）分工不重复：AgentFlow 只做编排侧接入 |
 
 > 注意：v1 明确只做**静态 DAG**（KTD-9）；条件分支、动态路由、ErrorHandler 跳转路径均属 v2。
 
