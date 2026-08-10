@@ -9,6 +9,7 @@ import com.agentflow.engine.WorkflowContext;
 import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.NodeTrace;
+import com.agentflow.observability.WorkflowBudget;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -45,7 +46,9 @@ public final class MockAgentFunction implements AgentFunction {
     private final AgentFlowMetrics metrics;
     /** mock 模拟的模型名（成本查表 key；可空 → CostCalculator 走 unknown/默认单价）。 */
     private final String model;
-    /** mock 预算阈值（USD）：非空时每次记账后调 {@link AgentFlowMetrics#checkBudget} 触发 {@code budget_exceeded}。 */
+    /** mock 预算阈值（USD）：非空时每次记账后调 {@link AgentFlowMetrics#checkBudget} 触发 {@code budget_exceeded}。
+     *   <b>R10 起为 fallback</b>——AgentInput 携带 per-workflow {@code budget} 时优先用 YAML 预算，
+     *   else 回落本全局阈值（向后兼容）。 */
     private final Double budgetThresholdUsd;
 
     public MockAgentFunction() {
@@ -114,7 +117,12 @@ public final class MockAgentFunction implements AgentFunction {
     /**
      * U7 mock token/cost 记账：mock 无真实 LLM token，按 prompt/响应长度模拟<b>确定性</b> token 数
      * （~4 字符 ≈ 1 token），经 {@link AgentFlowMetrics#recordTokens} 记 {@code tokens.consumed}{agent,model}
-     * 与 {@code cost.estimated}{model}，并可选调 {@code checkBudget} 触发预算超限。metrics 为空则 no-op。
+     * 与 {@code cost.estimated}{model}，并触发预算检查。metrics 为空则 no-op。
+     *
+     * <p>R10 per-workflow 预算：优先用 {@link AgentInput#budget()}（BspEngine 按 YAML
+     * {@code agentflow.budget_*} 构造）——{@link WorkflowBudget#record} 首次超限返回 true 时记一次
+     * {@code budget_exceeded}（edge-triggered，不重复自增）。未携带 budget 时回落构造器注入的全局
+     * {@code budgetThresholdUsd}（向后兼容旧全局阈值语义）。
      */
     private void recordMockTokens(AgentInput input, String resolved) {
         if (metrics == null) {
@@ -123,8 +131,13 @@ public final class MockAgentFunction implements AgentFunction {
         long promptChars = input.promptTemplate() == null ? 0 : input.promptTemplate().length();
         long promptTokens = Math.max(8, Math.round(promptChars / 4.0) + 8); // 基础 prompt 兜底
         long completionTokens = Math.max(1, Math.round(resolved.length() / 4.0));
-        metrics.recordTokens(input.agentName(), model, promptTokens, completionTokens);
-        if (budgetThresholdUsd != null) {
+        double cost = metrics.recordTokens(input.agentName(), model, promptTokens, completionTokens);
+        WorkflowBudget budget = input.budget();
+        if (budget != null) {
+            if (budget.record(promptTokens, completionTokens, cost)) {
+                metrics.recordBudgetExceeded();
+            }
+        } else if (budgetThresholdUsd != null) {
             metrics.checkBudget(budgetThresholdUsd);
         }
     }

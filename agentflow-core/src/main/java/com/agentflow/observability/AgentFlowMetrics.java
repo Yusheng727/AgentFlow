@@ -141,9 +141,23 @@ public final class AgentFlowMetrics {
     // ──────────────────────────── 预算超限 ────────────────────────────
 
     /**
+     * 记一次预算超限事件（{@code budget_exceeded} Counter +1）。
+     *
+     * <p>R10 per-workflow 预算：调用方（mock 记账）在 {@link WorkflowBudget#record} 返回
+     * edge-triggered 首次超限时调本方法，事件数 = "跨过预算"次数（而非每次节点记账）。
+     */
+    public void recordBudgetExceeded() {
+        if (meterRegistry != null) {
+            meterRegistry.counter(WORKFLOW_COST_BUDGET_EXCEEDED).increment();
+        }
+    }
+
+    /**
      * 检查累计成本是否超预算。超过则自增 {@code budget_exceeded} Counter 并返回 true。
      *
      * <p>累计成本从 cost Counter（按 model tag 聚合）实时读取，无需调用方维护状态。
+     * <b>注意：这是全局语义</b>（所有工作流共享 cost Counter）；per-workflow 预算请用
+     * {@link WorkflowBudget} + {@link #recordBudgetExceeded}（R10）。
      *
      * @param thresholdUsd 预算阈值（USD）
      * @return true=已超限（并已记 Counter），false=未超限
@@ -152,9 +166,8 @@ public final class AgentFlowMetrics {
         if (meterRegistry == null) {
             return false;
         }
-        double total = totalCost();
-        if (total > thresholdUsd) {
-            meterRegistry.counter(WORKFLOW_COST_BUDGET_EXCEEDED).increment();
+        if (totalCost() > thresholdUsd) {
+            recordBudgetExceeded();
             return true;
         }
         return false;

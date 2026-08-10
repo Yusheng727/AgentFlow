@@ -2,6 +2,7 @@ package com.agentflow.agent;
 
 import com.agentflow.engine.WorkflowContext;
 import com.agentflow.observability.ExecutionTrace;
+import com.agentflow.observability.WorkflowBudget;
 
 import java.util.List;
 import java.util.Map;
@@ -26,6 +27,10 @@ import java.util.Map;
  * 也可选用 {@code input.trace()} 作为 per-workflow trace 来源（适配器构造器注入的 trace 字段为 fallback）。
  * 可空——不启用 trace 的调用方传 null。
  *
+ * <p>R10 富化（per-workflow 预算）：透传 {@code budget}（当前 workflow 的
+ * {@link WorkflowBudget}，由 BspEngine 按 {@code def.agentflow()} 构造），供记账方（mock 模式）
+ * 逐节点累加 token/cost 并触发 {@code budget_exceeded}。可空——未声明预算的调用方传 null。
+ *
  * @param nodeId         节点 id
  * @param agentName      节点声明的 agent 名（用于 NodeRegistry 查找）
  * @param promptTemplate 节点的 prompt 模板（含 ${...} 占位符，SpEL 解析在 U3）
@@ -35,6 +40,7 @@ import java.util.Map;
  * @param outputSchema   节点声明的 LLM 输出 JSON Schema（透传自 NodeDefinition.outputSchema，可空）
  * @param mockResponse   节点声明的 mock 响应（透传自 NodeDefinition.mockResponse，可空——mock 模式下缺失抛 MissingMockResponseException）
  * @param trace          当前 workflow 的 ExecutionTrace（U7 引入，可空——非空时 MockAgentFunction/Adapter 写 NodeTrace）
+ * @param budget         当前 workflow 的 WorkflowBudget（R10 引入，可空——非空时 mock 记账触发 budget_exceeded）
  */
 public record AgentInput(
         String nodeId,
@@ -45,13 +51,22 @@ public record AgentInput(
         List<String> tools,
         Map<String, Object> outputSchema,
         String mockResponse,
-        ExecutionTrace trace
+        ExecutionTrace trace,
+        WorkflowBudget budget
 ) {
 
-    /** 测试/便捷工厂：不带 tools/outputSchema/mockResponse/trace（默认空）。 */
+    /** 测试/便捷工厂：不带 tools/outputSchema/mockResponse/trace/budget（默认空）。 */
     public static AgentInput of(String nodeId, String agentName, String promptTemplate,
                                 WorkflowContext context, Map<String, Object> inputs) {
-        return new AgentInput(nodeId, agentName, promptTemplate, context, inputs, List.of(), Map.of(), null, null);
+        return new AgentInput(nodeId, agentName, promptTemplate, context, inputs, List.of(), Map.of(), null, null, null);
+    }
+
+    /** 便捷构造：不带 budget（预算默认 null，向后兼容既有 9-arg 调用点）。 */
+    public AgentInput(String nodeId, String agentName, String promptTemplate,
+                      WorkflowContext context, Map<String, Object> inputs,
+                      List<String> tools, Map<String, Object> outputSchema,
+                      String mockResponse, ExecutionTrace trace) {
+        this(nodeId, agentName, promptTemplate, context, inputs, tools, outputSchema, mockResponse, trace, null);
     }
 
     /** 紧凑构造器：null 防御到不可变空集合，避免适配器侧 NPE。 */

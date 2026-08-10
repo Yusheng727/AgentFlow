@@ -81,6 +81,18 @@ public class SemanticValidator {
                 }
             }
         }
+
+        // per-workflow 预算（R10）：budget_tokens/budget_cost 可为空，但不能为负/非有限
+        AgentflowMeta meta = def.agentflow();
+        if (meta != null) {
+            if (meta.budgetTokens() != null && meta.budgetTokens() < 0) {
+                throw new WorkflowValidationException("budget_tokens 不能为负: " + meta.budgetTokens());
+            }
+            if (meta.budgetCost() != null
+                    && (meta.budgetCost() < 0 || !Double.isFinite(meta.budgetCost()))) {
+                throw new WorkflowValidationException("budget_cost 必须是非负有限数: " + meta.budgetCost());
+            }
+        }
     }
 
     private void checkAcyclic(int totalNodes, Set<String> ids, List<EdgeDefinition> edges) {

@@ -258,4 +258,62 @@ class WorkflowDSLParserTest {
         assertThat(node.mockResponse()).isEqualTo("风险低");
         assertThat(node.outputSchema()).containsEntry("type", "object");
     }
+
+    // ========== R10 per-workflow 预算字段 ==========
+
+    @Test
+    @DisplayName("解析 budget_tokens/budget_cost → AgentflowMeta 携带预算")
+    void parseBudgetFields() {
+        WorkflowDefinition def = parseAndValidate("""
+                agentflow:
+                  version: "1.0"
+                  budget_tokens: 100000
+                  budget_cost: 0.5
+                nodes:
+                  - { id: A, agent: mock, mock_response: "a" }
+                """);
+        assertThat(def.agentflow()).isNotNull();
+        assertThat(def.agentflow().budgetTokens()).isEqualTo(100000L);
+        assertThat(def.agentflow().budgetCost()).isEqualTo(0.5);
+    }
+
+    @Test
+    @DisplayName("budget 字段缺失 → 预算为 null（不设上界）")
+    void budgetFieldsDefaultNull() {
+        WorkflowDefinition def = parseAndValidate("""
+                agentflow: { version: "1.0" }
+                nodes:
+                  - { id: A, agent: mock, mock_response: "a" }
+                """);
+        assertThat(def.agentflow().budgetTokens()).isNull();
+        assertThat(def.agentflow().budgetCost()).isNull();
+    }
+
+    @Test
+    @DisplayName("budget_tokens 为负 → 校验拒绝")
+    void negativeBudgetTokensRejected() {
+        assertThatThrownBy(() -> parseAndValidate("""
+                agentflow:
+                  version: "1.0"
+                  budget_tokens: -10
+                nodes:
+                  - { id: A, agent: mock, mock_response: "a" }
+                """))
+                .isInstanceOf(WorkflowValidationException.class)
+                .hasMessageContaining("budget_tokens");
+    }
+
+    @Test
+    @DisplayName("budget_cost 为负 → 校验拒绝")
+    void negativeBudgetCostRejected() {
+        assertThatThrownBy(() -> parseAndValidate("""
+                agentflow:
+                  version: "1.0"
+                  budget_cost: -0.1
+                nodes:
+                  - { id: A, agent: mock, mock_response: "a" }
+                """))
+                .isInstanceOf(WorkflowValidationException.class)
+                .hasMessageContaining("budget_cost");
+    }
 }

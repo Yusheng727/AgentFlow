@@ -8,6 +8,7 @@ import com.agentflow.dsl.ChannelDefinition;
 import com.agentflow.dsl.DAGLayerer;
 import com.agentflow.dsl.NodeDefinition;
 import com.agentflow.dsl.Reducer;
+import com.agentflow.dsl.AgentflowMeta;
 import com.agentflow.dsl.WorkflowDefinition;
 import com.agentflow.engine.checkpoint.CheckpointManager;
 import com.agentflow.engine.checkpoint.ExecutionState;
@@ -20,6 +21,7 @@ import com.agentflow.engine.fault.TimeoutPolicy;
 import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.ExecutionTraceRegistry;
+import com.agentflow.observability.WorkflowBudget;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -191,6 +193,10 @@ public final class BspEngine {
         // U7：为本次执行注册 trace（traceRegistry 为 null 或 workflowId 为空时 trace=null，不影响执行）
         ExecutionTrace trace = traceRegistry == null ? null : traceRegistry.register(workflowId);
 
+        // R10：按 def.agentflow() 声明的 budget_tokens/budget_cost 构造 per-workflow 预算
+        // （未声明任一维度 → null，记账方不查预算，向后兼容）
+        WorkflowBudget budget = budgetFrom(def);
+
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         NodeExecutor nodeExecutor = new NodeExecutor(agentResolver, executor);
         Instant workflowStart = Instant.now();
@@ -204,7 +210,7 @@ public final class BspEngine {
                 }
                 WorkflowContext snapshot = context.readOnlySnapshot();
                 List<NodeResult> results = runSuperStep(step, dag, snapshot, nodeExecutor, cp, workflowId,
-                        executor, effInputs, workflowStart, trace);
+                        executor, effInputs, workflowStart, trace, budget);
                 // U10 后续 #10：记录本 super-step 各节点所属层号（供 UI 按真实 BSP 拓扑分组）
                 recordSuperStepTrace(trace, step);
                 applyBarrier(step, results, context, dag, def, reducer, cp, workflowId);
@@ -251,6 +257,16 @@ public final class BspEngine {
         }
     }
 
+    /** R10：从 def.agentflow() 声明的 budget_tokens/budget_cost 构造 per-workflow 预算；
+     *  未声明任一维度 → null（记账方不查预算，向后兼容）。 */
+    private static WorkflowBudget budgetFrom(WorkflowDefinition def) {
+        AgentflowMeta meta = def.agentflow();
+        if (meta == null || (meta.budgetTokens() == null && meta.budgetCost() == null)) {
+            return null;
+        }
+        return new WorkflowBudget(meta.budgetTokens(), meta.budgetCost());
+    }
+
     /**
      * 崩溃恢复 + 续跑入口（U5 KTD-3 Recovery，P0 修复 ADV-1/ADV-2 的消费端）。
      *
@@ -288,6 +304,9 @@ public final class BspEngine {
         // U7：恢复路径同样注册 trace（与 execute() 对齐），否则 TraceController 查恢复续跑的工作流
         // 会返回旧 FAILED trace 或空，与 checkpoint 的 SUCCESS 状态分裂（adversarial/correctness/reliability/agent-native 4 票确认）。
         ExecutionTrace trace = traceRegistry == null ? null : traceRegistry.register(workflowId);
+
+        // R10：恢复路径同样按定义构造 per-workflow 预算（与 execute() 对齐）
+        WorkflowBudget budget = budgetFrom(def);
 
         ExecutionState state = recovery.recover(workflowId);
         log.info("recoverAndExecute wf={}: nextSuperStep={}, 跳过节点={}, 重放输出={}",
@@ -332,7 +351,7 @@ public final class BspEngine {
                                 .toList())
                         : step;
                 List<NodeResult> results = runSuperStep(stepToRun, dag, snapshot, nodeExecutor, cp, workflowId,
-                        executor, Map.of(), workflowStart, trace);
+                        executor, Map.of(), workflowStart, trace, budget);
                 // U10 后续 #10：记录本 super-step 各节点所属层号（用完整 step.nodeIds，含崩溃层跳过节点）
                 recordSuperStepTrace(trace, step);
                 applyBarrier(step, results, context, dag, def, reducer, cp, workflowId);
@@ -391,12 +410,12 @@ public final class BspEngine {
     private List<NodeResult> runSuperStep(SuperStep step, DAGraph dag, WorkflowContext snapshot,
                                           NodeExecutor nodeExecutor, CheckpointManager cp, String workflowId,
                                           ExecutorService executor, Map<String, Object> inputs,
-                                          Instant workflowStart, ExecutionTrace trace) {
+                                          Instant workflowStart, ExecutionTrace trace, WorkflowBudget budget) {
         List<CompletableFuture<NodeResult>> futures = new ArrayList<>(step.nodeIds().size());
         for (String id : step.nodeIds()) {
             NodeDefinition node = dag.node(id);
             AgentInput input = new AgentInput(id, node.agent(), node.promptTemplate(), snapshot, inputs,
-                    node.tools(), node.outputSchema(), node.mockResponse(), trace);
+                    node.tools(), node.outputSchema(), node.mockResponse(), trace, budget);
             // 并行执行 + 节点级 checkpoint（完成当下即持久化，R3）
             futures.add(CompletableFuture.supplyAsync(() -> {
                 long startNs = System.nanoTime(); // U7 指标：节点从提交到终结的耗时（含重试）

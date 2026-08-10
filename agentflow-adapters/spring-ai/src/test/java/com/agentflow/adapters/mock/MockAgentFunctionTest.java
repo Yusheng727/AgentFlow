@@ -5,6 +5,7 @@ import com.agentflow.agent.AgentOutput;
 import com.agentflow.agent.MissingMockResponseException;
 import com.agentflow.engine.WorkflowContext;
 import com.agentflow.observability.AgentFlowMetrics;
+import com.agentflow.observability.WorkflowBudget;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
@@ -244,5 +245,40 @@ class MockAgentFunctionTest {
         assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_ESTIMATED,
                 "model", "gpt-4o-mini").count()).isZero();
         assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_BUDGET_EXCEEDED).count()).isZero();
+    }
+
+    // ─────────────────── R10 per-workflow 预算 ───────────────────
+
+    @Test
+    @DisplayName("per-workflow budget_cost 超限：budget_exceeded 记 1 次（edge-triggered）")
+    void perWorkflowBudgetCostExceededOnce() throws com.agentflow.agent.AgentExecutionException {
+        var registry = new SimpleMeterRegistry();
+        var mock = new MockAgentFunction(new AgentFlowMetrics(registry), "gpt-4o-mini"); // 无全局阈值
+        // 极小成本预算：每次执行 cost > 预算界限，应首次超限记 1 次
+        WorkflowBudget budget = new WorkflowBudget(null, 0.0000001);
+        // 构造带 budget 的 AgentInput（10-arg：trace=null, budget=budget）
+        AgentInput input = new AgentInput("N", "mock-agent", "你好", new WorkflowContext(),
+                Map.of(), List.of(), Map.of(), "较长的 mock 响应内容", null, budget);
+
+        mock.execute(input);
+        mock.execute(input); // 第二次：已超限，不再记
+
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_BUDGET_EXCEEDED).count()).isEqualTo(1.0);
+        assertThat(budget.isExceeded()).isTrue();
+    }
+
+    @Test
+    @DisplayName("per-workflow budget 未超限：budget_exceeded 不记")
+    void perWorkflowBudgetWithinLimit() throws com.agentflow.agent.AgentExecutionException {
+        var registry = new SimpleMeterRegistry();
+        var mock = new MockAgentFunction(new AgentFlowMetrics(registry), "gpt-4o-mini");
+        WorkflowBudget budget = new WorkflowBudget(1_000_000L, 100.0); // 极大的预算
+        AgentInput input = new AgentInput("O", "mock-agent", "hi", new WorkflowContext(),
+                Map.of(), List.of(), Map.of(), "小响应", null, budget);
+
+        mock.execute(input);
+
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_BUDGET_EXCEEDED).count()).isZero();
+        assertThat(budget.isExceeded()).isFalse();
     }
 }
