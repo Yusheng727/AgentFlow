@@ -32,9 +32,9 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 | 项 | 引用 | 现状 |
 |:---|:---|:---|
 | **WorkflowSubmissionGuard**（DAG 节点数 / token 成本上界，超限 422 拒绝） | 06 OQ `POST /workflows 无 DAG/token 预算上界`（security-lens, conf 75） | ✅ **已交付**（2026-08-10，`a37d9dc`）——`WorkflowSubmissionGuard`（api/security）+ 提交链 422`SUBMISSION_LIMIT`，节点数/预估成本超上界拒绝；demo-api 接 `agentflow.guard.*`；CLAUDE.md 已记 |
-| **R20 agentflow-archetypes** | R20 | ❌ 声明但无实现单元交付（Maven archetype 生成 Agent 骨架） |
+| **R20 agentflow-archetypes** | R20 | ⛔ **明确不做**（2026-08-10 决策）——声明但无实现单元交付；投入产出比低，v1 砍单 |
 | **per-workflow 预算字段** `budget_tokens`/`budget_cost` | R10 | ✅ **已交付**（2026-08-10，`4072b3e`）——`AgentflowMeta` 加预算字段 + `WorkflowBudget`（observability，edge-triggered 累加器）+ BspEngine 穿线 AgentInput → mock 逐节点记账触发 `budget_exceeded`；无预算时回落全局阈值向后兼容 |
-| **Reducer 冲突路径刻意演练**（overwrite/concat/max/custom 触发测试） | 06 OQ `Reducer 冲突无 demo` | ❌ 抽象有了但验收未覆盖冲突路径 |
+| **Reducer 冲突路径刻意演练**（overwrite/concat/max/custom 触发测试） | 06 OQ `Reducer 冲突无 demo` | ⛔ **明确不做**（2026-08-10 决策）——抽象已有单测覆盖各策略语义，冲突演示性价比低，v1 砍单 |
 
 ### 档 C — 叙事 / 面试口径（演示前定即可，非代码）
 - 06 OQ `From 2026-06-28 review` 13 条叙事/范围项，如：从0 vs 扩 LangGraph4j 的 buy-vs-build 论证、七三开(后端70%+Agent30%)折算、KTD-1 BSP vs Actor/CSP、@Tool 与 InterviewCoach 边界、Spring AI 差异化口径。
@@ -68,5 +68,5 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 
 1. **WorkflowSubmissionGuard**（档 B，真安全缺口）—— ✅ 已交付（2026-08-10，`a37d9dc`，见档 B 表）。
 2. Grafana / 真 PG 部署验证（档 A，等环境/CI）。
-3. R20 archetypes、Reducer 冲突演练（档 B 剩余，按需）。
+3. ~~R20 archetypes、Reducer 冲突演练~~（档 B，2026-08-10 决策明确不做）→ **档 B 已全部闭环**。
 4. 档 C 面试口径 → 定稿一份 30s/5min 自述稿附到 `07-sources-revision-interview.md` 或本仓库面试文档（待定）。
