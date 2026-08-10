@@ -44,8 +44,8 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 
 ## 3. v1.1 路线图（介于 v1 / v2）
 
+- ~~**`LangChain4jAgentAdapter`**（R5）~~ → ✅ **已交付**（2026-08-10，`f4651b2`，本地未推送）——新模块 `agentflow-adapters/langchain4j`（1.0.0 GA），依赖面仅 core + langchain4j 无 Spring AI，窄表面对齐（SpEL/ChatModel/@Tool 循环/TokenUsage/ErrorClassifier/trace/cancel）；KTD-7 可移植性约束实证
 - **分布式模式**：Redis + Kafka（R18③ / R19，v1 用内存 @Async + DB 任务表轻量替代）
-- **`LangChain4jAgentAdapter`**（R5，v1 只有 Spring AI 适配器）
 - **工具级授权 DB 表 + 管理 API**（R21，v1 为 config/env 硬编码 `CallerToolAllowlist`）
 - **checkpoint 敏感数据列级加密**（R22 注明的升级点，v1 文档标注"明文存储 + R21 鉴权保护"）
 

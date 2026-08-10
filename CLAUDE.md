@@ -1,6 +1,6 @@
 # AgentFlow — 接手指南（给 Claude Code）
 
-> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-10（WorkflowSubmissionGuard + R10 per-workflow budget 预算字段，ROADMAP 档 B 收尾；`mvn verify` 9 模块绿 + JaCoCo 达标）。
+> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-10（WorkflowSubmissionGuard + R10 per-workflow budget + **v1.1 LangChain4jAgentAdapter**（KTD-7 可移植性实证，本地未推送）；`mvn verify` 10 模块绿 + JaCoCo 达标）。
 >
 > **状态/路线文档**：`docs/ROADMAP.md`（v1 交付盘点 · 剩余工作 · v2 路线图）+ `docs/GRAFANA.md`（可观测/Grafana 部署与验证）——接手或规划下一步先看这两份。
 
@@ -32,6 +32,13 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 > - 测试：WorkflowBudgetTest 12（含并发 edge-triggered）+ DSL 解析/校验 4 + MockAgentFunctionTest per-workflow 2 + **MockBudgetIntegrationTest 4**（engine→mock 全链路）；全仓 `mvn verify` 9 模块绿 + JaCoCo 达标
 > - 已合 main + push（`4072b3e`）；ROADMAP 档 B 该项勾 ✅
 > - 遗留：ROADMAP 档 B 剩 R20 archetypes / Reducer 冲突演练；档 A Grafana/PG 部署验证等环境；成本估算低估面仍待 per-workflow（见提交守卫 review 注）
+
+> **当前状态（2026-08-10）——v1.1 LangChain4jAgentAdapter（R5/KTD-7 可移植性验证，feat/langchain4j-adapter，本地合 main 未推送）**：
+> - 第二个框架适配器实证 KTD-7"所有框架调用收敛在适配器窄表面"：新模块 `agentflow-adapters/langchain4j`（dev.langchain4j 1.0.0 GA），**依赖面仅 core + langchain4j、无 Spring AI**（构建级可替换证明）
+> - `LangChain4jAgentAdapter` 对齐 Spring 适配器窄表面契约：SpEL（core 复用件）→ ChatModel.chat(ChatRequest) → content + TokenUsage → AgentOutput；@Tool bean 反射→ToolSpecification+DefaultToolExecutor + **裸 ChatModel 工具执行循环**（≤5 轮防死循环，usage 跨轮累加；未知工具/工具异常转 error JSON 回填）；异常走 core ErrorClassifier；trace 同 OQ-3 优先级；cancel best-effort（同 KTD-6 v4.3）
+> - **顺带重构**：SpelPromptResolver 下沉 core（`com.agentflow.prompt`，public）+ 新增 WorkflowContext 重载（channel 扁平化收敛），Spring 适配器删私有 flatten——框架无关件单一真相源
+> - 测试：LangChain4jApiSmokeTest 2（KTD-7 gate：stub ChatModel 验 ChatModel+@Tool+TokenUsage API 面）+ LangChain4jAgentAdapterTest 11 + core SpelPromptResolverTest 7；**全仓 verify 10 模块绿 + JaCoCo 达标**
+> - ⚠️ **本地合 main，未 push**（用户明确）；push 后远程才有该 feature
 
 
 **已落地（main 分支，feat/u3-agent-adapter 已合）**：
