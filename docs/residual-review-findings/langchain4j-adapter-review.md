@@ -44,9 +44,10 @@
 - **现状**：R10 的 `WorkflowBudget` 经 `AgentInput.budget()` 穿线，但只有 **`MockAgentFunction`** 消费它；`SpringAiAgentAdapter` 与 `LangChain4jAgentAdapter` 都不读 `input.budget()`——YAML `budget_tokens/budget_cost` 在真实 LLM 路径不生效（防御告警只在 mock）。
 - **修复方向**：给两个真实适配器加 budget 记账（在 `recordTokens`/`recordsMetrics` 处一并 `budget.record()`）。
 
-### C2. [P2] LC4j 适配器无 `OutputSchemaValidator`（结构化输出恒空）
-- **现状**：`structuredOutput` 恒 `Map.of()`，已加 warn 明示；Spring 适配器支持 schema 校验 + 带反馈重试。
-- **修复方向**：把 `OutputSchemaValidator`（networknt，框架无关）下沉 core（同 `SpelPromptResolver` 方式），LC4j 适配器接上，实现完整 KTD-7"相同 DSL 相同结果"对价。
+### C2. [P2] ✅ **已解决（2026-08-11，`9ba7271`）** LC4j 适配器无 `OutputSchemaValidator`（结构化输出恒空）
+- **现状（已解决）**：`OutputSchemaValidator` **已下沉 core**（`com.agentflow.prompt`，框架无关：networknt json-schema + Jackson 3），`LangChain4jAgentAdapter` 接入 `validateWithRetry`（带反馈重试），`structuredOutput` 不再恒空——补上 KTD-7 "相同 DSL 相同结果"对价。Spring 适配器切 import 到 core，删本地类，schema 行为零回归。
+- 实现细节点：core pom + root dependencyManagement 加 `com.networknt:json-schema-validator:3.0.1`（对齐 Spring AI 传递版本）；检查型 `FatalException` 穿过 `Function` 回调用 `callForSchema` 包装 + `catch(RuntimeException)` 解包原样抛。
+- 测试：`LangChain4jAgentAdapterTest` +3（成功填充/反馈重试/耗尽 Fatal）+ core `OutputSchemaValidatorTest` 8 移入。
 
 ### C3. [P3] `redactor` 默认 `Function.identity()`（未脱敏）
 - 两适配器默认不脱敏；生产接入时应注入 `PromptRedactionFilter` 的脱敏函数，与 Spring 路径一致。
@@ -57,7 +58,7 @@
 ---
 
 ## 建议优先序（若要继续 v1.1）
-1. **C2**（OutputSchemaValidator 下沉 core + LC4j 接上）——补上可移植性对价，工作量可控、叙事价值高。
+1. ~~**C2**（OutputSchemaValidator 下沉 core + LC4j 接上）~~ → ✅ 已办（2026-08-11，`9ba7271`）。
 2. **B2**（LC4j 异常分类）——避免真实 LC4j 网络抖动被误判 Fatal。
 3. **C1**（真实路径预算挂钩）——补 R10 在真实 LLM 的闭环。
 4. B1 / B3 —— 看是否自定义 ToolExecutor / 层级遍历 @Tool。

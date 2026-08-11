@@ -40,6 +40,7 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 > - 测试：LangChain4jApiSmokeTest 2（KTD-7 gate：stub ChatModel 验 ChatModel+@Tool+TokenUsage API 面）+ LangChain4jAgentAdapterTest 11 + core SpelPromptResolverTest 7；**全仓 verify 10 模块绿 + JaCoCo 达标**
 > - ⚠️ **本地合 main，未 push**（用户明确）；push 后远程才有该 feature
 > - **ce-code-review（2026-08-11，10 评审）**：4 项已应用（工具截断→FatalException / 中断检查 / metrics 记账 / schema warn，见 `e86059e`）；延后/需人工决策项与共享限制见 `docs/residual-review-findings/langchain4j-adapter-review.md`
+> - **C2（2026-08-11，`9ba7271`）**：`OutputSchemaValidator` 下沉 core（`com.agentflow.prompt`，networknt 3.0.1 加进 core/root pom）+ LangChain4j 接入 `validateWithRetry`——structuredOutput 不再恒空，补上 KTD-7 "相同 DSL 相同结果"对价；Spring 适配器切 import 零回归。residual 文档 C2 标 ✅
 
 
 **已落地（main 分支，feat/u3-agent-adapter 已合）**：

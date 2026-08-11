@@ -363,3 +363,13 @@ v1.1 R5：用 LangChain4j 1.0.0 写第二个 `AgentFunction` 实现，**依赖�
 ### 实证发现：DefaultToolExecutor 内部吞异常（SEC-1 根因）
 
 原想给工具执行加"异常→通用 error 串"防护，但测试证明 LangChain4j 的 `DefaultToolExecutor.execute` **内部捕获 @Tool 抛的异常并回传原始消息**（"Error: <msg>"），根本不走适配器的 catch——所以适配器 catch 包不住框架吞掉的异常。这个实证决定了 SEC-1（工具异常详情可能经模型外泄）只能靠自定义 ToolExecutor 或接受框架默认，列为需人工决策项（见 `03-review-findings.md` / residual 文档），而非可机械修的本地 bug。
+
+### 设计决策：C2 OutputSchemaValidator 下沉 core + LC4j 接入 schema 校验（v1.1）
+
+KTD-7 "相同 DSL 相同结果"的对价补齐：`OutputSchemaValidator`（原 spring-ai 模块）**框架无关**（只依赖 networknt json-schema + Jackson 3 tools.jackson + core FatalException），下沉 core `com.agentflow.prompt`，LangChain4j 适配器接上 `validateWithRetry`——structuredOutput 不再恒空。
+关键点：
+- **core 依赖**：`com.networknt:json-schema-validator:3.0.1`（对齐 Spring AI 传递版本，Jackson 3 原生；tools.jackson 由 networknt 传递引入，core 不必显式引 Jackson 3）。core 是两适配器公共依赖，networknt 放这里 = 单一真相源。
+- **检查型 FatalException 穿过 Function 的坑**：`validateWithRetry` 的 `llmCaller` 是 `Function<String,String>`（不能抛检查型）；而 LC4j 的 `chatWithTools` 因 ADV-1 修复抛**检查型** FatalException（工具链截断）。解法：`callForSchema` 把 FatalException 包成 RuntimeException，`execute()` 的 `catch(RuntimeException)` 里先 `if (cause instanceof FatalException) throw fatal` 解包原样抛——否则会被 `mapException` 再包成误导性的 "LLM 调用失败"。
+- **重试 budget 不变**：schema 反馈重试 ≤2（共 3 次尝试）嵌在每次 LLM 调用内，与 U3 同款；usage 取最后一次调用（AtomicReference last，与 Spring 一致）。
+
+**教训**：框架无关的"LLM I/O 工具"（SpEL 解析 / schema 校验）应该放 core，而不是寄生在某个框架适配器里——否则第二个适配器要么复制、要么反向依赖把框架拉进来。

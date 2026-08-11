@@ -145,7 +145,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 
 - **REL-1（P2, reliability）**：工具循环顶缺 `Thread.interrupted()` 检查 → NodeExecutor 取消后仍可能多开最多 3 轮付费 LLM 调用。修复：每轮循环顶检查中断、提前停手（取消场景下结果已被 future.cancel 丢弃，仅防追加计费）。
 - **api-contract + agent-native（P2）**：适配器算了 usage 但不记账 → LangChain4j 工作流在 Grafana token/成本面板空白。修复：注入可空 `AgentFlowMetrics`，成功路径 `recordTokens` 记 token/成本（Grafana 数据源）。
-- **api-contract-01（P2）**：无 `OutputSchemaValidator` → `structuredOutput` 恒空，与 Spring 适配器行为**静默分歧**。修复：节点声明 `output_schema` 时 `log.warn` 明示不支持（防静默；完整 schema 校验下沉 core 后补，见 residual）。
+- **api-contract-01（P2）**：无 `OutputSchemaValidator` → `structuredOutput` 恒空，与 Spring 适配器行为**静默分歧**。修复：节点声明 `output_schema` 时 `log.warn` 明示不支持（防静默）。**后续（C2，`9ba7271`）**：`OutputSchemaValidator` 下沉 core + LC4j 接入 `validateWithRetry`，`structuredOutput` 不再恒空——补上 KTD-7 "相同 DSL 相同结果"对价，warn 已移除。
 - **executeTool 硬化**：未知工具名 `jsonEscape`；异常返回通用 error（防御纵深）；`@Tool` 返回 null → 哨兵。
 
 ### 延后 / 需人工决策项（已入 residual 文档，未自动改）
