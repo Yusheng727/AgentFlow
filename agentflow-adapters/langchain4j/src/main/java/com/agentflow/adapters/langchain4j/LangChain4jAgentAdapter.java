@@ -7,6 +7,7 @@ import com.agentflow.agent.AgentOutput;
 import com.agentflow.agent.FatalException;
 import com.agentflow.agent.TransientException;
 import com.agentflow.engine.fault.ErrorClassifier;
+import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.NodeTrace;
 import com.agentflow.prompt.SpelPromptResolver;
@@ -75,11 +76,15 @@ public class LangChain4jAgentAdapter implements AgentFunction {
     private final List<Object> toolBeans;
     private final ExecutionTrace trace;
     private final Function<String, String> redactor;
+    /** v1.1 记账钩子（可空）：非空时按累计 usage 记 token/成本（Grafana 面板数据源，与 mock/Spring 记账对齐）。 */
+    private final AgentFlowMetrics metrics;
+    /** 成本查表模型名（可空 → CostCalculator 走 unknown/默认单价）。 */
+    private final String model;
     private final SpelPromptResolver promptResolver = new SpelPromptResolver();
 
-    /** 便捷构造：无工具、无 trace、不脱敏（测试/最小用法）。 */
+    /** 便捷构造：无工具、无 trace、不脱敏、不记账（测试/最小用法）。 */
     public LangChain4jAgentAdapter(ChatModel chatModel) {
-        this(chatModel, List.of(), null, null);
+        this(chatModel, List.of(), null, null, null, null);
     }
 
     /**
@@ -92,10 +97,27 @@ public class LangChain4jAgentAdapter implements AgentFunction {
                                    List<Object> toolBeans,
                                    ExecutionTrace trace,
                                    Function<String, String> redactor) {
+        this(chatModel, toolBeans, trace, redactor, null, null);
+    }
+
+    /**
+     * 完整构造：额外支持记账。
+     *
+     * @param metrics AgentFlowMetrics（可空；非空则按累计 usage 记 token/成本）
+     * @param model   成本查表模型名（可空）
+     */
+    public LangChain4jAgentAdapter(ChatModel chatModel,
+                                   List<Object> toolBeans,
+                                   ExecutionTrace trace,
+                                   Function<String, String> redactor,
+                                   AgentFlowMetrics metrics,
+                                   String model) {
         this.chatModel = Objects.requireNonNull(chatModel, "chatModel");
         this.toolBeans = toolBeans == null ? List.of() : List.copyOf(toolBeans);
         this.trace = trace;
         this.redactor = redactor == null ? Function.identity() : redactor;
+        this.metrics = metrics;
+        this.model = model;
     }
 
     @Override
@@ -116,14 +138,31 @@ public class LangChain4jAgentAdapter implements AgentFunction {
             throw new FatalException("Prompt SpEL 解析失败 [" + input.nodeId() + "]: " + e.getMessage(), e);
         }
 
+        // 1.5 v1.1 对齐提示：本适配器不做结构化输出 schema 校验（structuredOutput 恒空），
+        // 节点声明了 output_schema 时 warn 明示，避免与 Spring 适配器行为静默分歧
+        if (!input.outputSchema().isEmpty()) {
+            log.warn("LangChain4j 适配器 v1.1 不支持 output_schema 结构化输出校验（structuredOutput 将为空），节点={}",
+                    input.nodeId());
+        }
+
         // 2. LLM 调用（+ 工具执行循环）
         LlmResult result;
         try {
             result = chatWithTools(resolvedPrompt);
+        } catch (FatalException e) {
+            // 工具轮数耗尽等确定失败：NodeTrace 终态化后原样抛，避免被外层 RuntimeException 分支
+            // 再包装成误导性的 "LLM 调用失败"（与 Spring 适配器 schema 路径处理对齐）
+            nodeTrace.fail(e.getMessage());
+            throw e;
         } catch (RuntimeException e) {
             Throwable cause = (e.getCause() instanceof Exception) ? e.getCause() : e;
             nodeTrace.fail(cause.getMessage());
             throw mapException(cause);
+        }
+
+        // 2.5 v1.1 记账（Grafana token/成本可见性；metrics 为 null 则 no-op）。放在成功路径：截断失败已抛
+        if (metrics != null) {
+            metrics.recordTokens(input.agentName(), model, result.promptTokens(), result.completionTokens());
         }
 
         // 3. 构造 AgentOutput（content + metadata{tokens}，与 Spring 适配器同 schema）
@@ -150,7 +189,7 @@ public class LangChain4jAgentAdapter implements AgentFunction {
      * 驱动（AiServices 是另一套接口抽象，为保持与 Spring 适配器同构的 ChatModel 窄表面而未采用）。
      * usage 跨轮累加（每轮都真实计费）。
      */
-    private LlmResult chatWithTools(String prompt) {
+    private LlmResult chatWithTools(String prompt) throws FatalException {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new UserMessage(prompt));
         List<ToolSpecification> specs = new ArrayList<>();
@@ -160,6 +199,13 @@ public class LangChain4jAgentAdapter implements AgentFunction {
         long promptTokens = 0;
         long completionTokens = 0;
         for (int round = 0; ; round++) {
+            // v1.1 review REL-1：NodeExecutor 取消节点（future.cancel(true) 中断 VT）后不再新开付费 LLM
+            // 轮次——中断要传播进当前阻塞 chat() 才会停，晚开一轮就多一轮计费。取消场景下本结果已被丢弃，
+            // 此处仅尽早停手防追加计费。
+            if (Thread.currentThread().isInterrupted()) {
+                log.warn("工具循环检测到线程中断，提前停止（已累计 tokens={}/{}）", promptTokens, completionTokens);
+                return new LlmResult(null, promptTokens, completionTokens);
+            }
             ChatRequest.Builder builder = ChatRequest.builder().messages(messages);
             if (!specs.isEmpty()) {
                 builder.toolSpecifications(specs);
@@ -175,10 +221,11 @@ public class LangChain4jAgentAdapter implements AgentFunction {
                 return new LlmResult(aiMessage == null ? null : aiMessage.text(), promptTokens, completionTokens);
             }
             if (round >= MAX_TOOL_ROUNDS - 1) {
-                // 轮数耗尽仍要工具：截断返回当前 text（可能为 null），防死循环；模型多次发起工具的
-                // 场景在真实业务中罕见，超限记 warn 便于诊断
-                log.warn("工具执行轮数达上限 {}，截断剩余 toolExecutionRequests（防死循环）", MAX_TOOL_ROUNDS);
-                return new LlmResult(aiMessage.text(), promptTokens, completionTokens);
+                // v1.1 review ADV-1/correctness-1：轮数耗尽仍要工具 = 工具链未完成。绝不能当"成功"返回
+                // （截断会静默丢弃已排期工具 + content=null 让下游 SpEL 崩溃）——以 FAILED 明示失败。
+                log.error("工具执行轮数达上限 {} 仍有 {} 个 toolExecutionRequest 未执行，判定节点失败",
+                        MAX_TOOL_ROUNDS, aiMessage.toolExecutionRequests().size());
+                throw new FatalException("工具执行轮数达上限 " + MAX_TOOL_ROUNDS + "，工具链未完成");
             }
             messages.add(aiMessage);
             for (ToolExecutionRequest req : aiMessage.toolExecutionRequests()) {
@@ -187,17 +234,31 @@ public class LangChain4jAgentAdapter implements AgentFunction {
         }
     }
 
-    /** 执行单个工具请求；未知工具/执行异常都转成 error JSON 反馈给模型（不中断循环，LangChain4j AiServices 同款语义）。 */
+    /** 执行单个工具请求。未知工具/异常都反馈给模型（不中断循环，LangChain4j AiServices 同款语义），
+     *  但安全上：真实异常细节只进服务端日志，不给模型（防敏感内部信息经模型 content 外泄，SEC-1）。 */
     private static String executeTool(Map<String, ToolExecutor> executors, ToolExecutionRequest req) {
         ToolExecutor executor = executors.get(req.name());
         if (executor == null) {
-            return "{\"error\": \"unknown tool: " + req.name() + "\"}";
+            // 工具名是开发者配置（非模型自由输入高风险位），转义后再反馈保持可调试性
+            return "{\"error\":\"tool not registered: " + jsonEscape(req.name()) + "\"}";
         }
         try {
-            return executor.execute(req, null);
+            String result = executor.execute(req, null);
+            // @Tool 返回 null（P3/correctness-2）：coerce 非 null 哨兵，避免 null-text 回放给 provider
+            return result == null ? "null" : result;
         } catch (RuntimeException e) {
-            return "{\"error\": \"" + (e.getMessage() == null ? e.toString() : e.getMessage()) + "\"}";
+            log.warn("工具执行失败 tool={}: {}", req.name(), e.toString());
+            return "{\"error\":\"tool execution failed\"}";
         }
+    }
+
+    /** 简单 JSON 字符串转义（工具名/异常消息含引号、换行时防止破坏反馈给模型的 JSON）。 */
+    private static String jsonEscape(String s) {
+        if (s == null) {
+            return "";
+        }
+        return s.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 
     /** 反射扫描 @Tool bean：方法 → ToolSpecification（注册给模型）+ DefaultToolExecutor（本地执行）。 */

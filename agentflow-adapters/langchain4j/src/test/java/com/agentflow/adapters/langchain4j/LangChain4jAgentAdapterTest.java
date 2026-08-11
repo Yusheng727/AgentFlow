@@ -5,6 +5,7 @@ import com.agentflow.agent.AgentOutput;
 import com.agentflow.agent.FatalException;
 import com.agentflow.agent.TransientException;
 import com.agentflow.engine.WorkflowContext;
+import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.ExecutionTraceRegistry;
 
@@ -18,6 +19,8 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.TokenUsage;
 
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -28,6 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * LangChain4jAgentAdapter 单元测试（v1.1 R5/KTD-7）。
@@ -211,7 +215,7 @@ class LangChain4jAgentAdapterTest {
                 }
                 boolean sawError = request.messages().stream()
                         .anyMatch(m -> m instanceof dev.langchain4j.data.message.ToolExecutionResultMessage tr
-                                && tr.text().contains("unknown tool"));
+                                && tr.text().contains("tool not registered"));
                 return ChatResponse.builder()
                         .aiMessage(AiMessage.from(sawError ? "handled" : "lost"))
                         .tokenUsage(new TokenUsage(1, 1))
@@ -224,8 +228,8 @@ class LangChain4jAgentAdapterTest {
     }
 
     @Test
-    @DisplayName("工具死循环防护：模型每轮都发起工具请求 → 达 MAX_TOOL_ROUNDS 截断返回")
-    void toolLoopBounded() throws Exception {
+    @DisplayName("工具死循环防护：达 MAX_TOOL_ROUNDS 仍未完成 → 判 FatalException（不静默 SUCCESS-with-null）")
+    void toolLoopBoundedFailsNode() {
         ChatModel infiniteTools = new ChatModel() {
             @Override
             public ChatResponse chat(ChatRequest request) {
@@ -237,9 +241,24 @@ class LangChain4jAgentAdapterTest {
             }
         };
         LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(infiniteTools);
-        AgentOutput out = adapter.execute(input("I", "t", new WorkflowContext()));
-        // 不抛异常，正常返回（content 可能为 null——模型未给文本）
-        assertThat(out.metadata()).containsEntry("totalTokens", (long) LangChain4jAgentAdapter.MAX_TOOL_ROUNDS * 2);
+        assertThatThrownBy(() -> adapter.execute(input("I", "t", new WorkflowContext())))
+                .isInstanceOf(FatalException.class)
+                .hasMessageContaining("轮数达上限");
+    }
+
+    @Test
+    @DisplayName("注入 metrics → 记账令 tokens.consumed/cost.estimated 可观测（Grafana 数据源）")
+    void metricsRecordedWhenProvided() throws Exception {
+        var registry = new SimpleMeterRegistry();
+        var metrics = new AgentFlowMetrics(registry);
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(
+                new StubChatModel(), List.of(), null, null, metrics, "gpt-4o-mini");
+        adapter.execute(input("M", "t", new WorkflowContext())); // stub tokens 10/20
+
+        assertThat(registry.counter(AgentFlowMetrics.TOKENS_CONSUMED, "agent", "lc4j-agent", "model", "gpt-4o-mini")
+                .count()).isEqualTo(30.0);
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_ESTIMATED, "model", "gpt-4o-mini")
+                .count()).isEqualTo(0.0000135, within(1e-9)); // 10 in@$0.15 + 20 out@$0.60 per 1M
     }
 
     // ─────────────────── trace / cancel ───────────────────
