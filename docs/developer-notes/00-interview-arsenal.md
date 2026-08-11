@@ -308,3 +308,17 @@
 **深挖点**：
 - 「这种 bug 在 agent 编排里为什么危险？」（坏状态伪装成功，下游 SpEL 才炸，根因藏在 warn 日志）
 - 「为什么不用截断标志而是直接失败？」（截断的 token/副作用已不可回滚，安静成功比显式失败代价更高）
+
+---
+
+## 08-07 Grafana 可观测全闭环 + PG 收尾（详见 06）
+
+**可讲故事**：
+- 「面板定义好了但全是空」→ 拆三层缺口：**指标只在测试里记（引擎从不 hook）**、**mock 不出 token/成本**、**没有 Prometheus 出口**——逐个闭环后 `/actuator/prometheus` 端到端起服验证 6 面板全有数据
+- `publishPercentileHistogram` 暴露 `_bucket` 序列 → histogram_quantile 算 P50/P95/P99
+- 真 PG 集成测试用 Failsafe `*IT`（CI 有 PG 全跑 / 本地无 PG 跳过）+ H2 建兼容表跑真实 SQL
+- 兑现了 05 里"待补"的 Postgres `listByCreatedBy`——**并主动承认那处文档没同步勾掉的疏漏**（诚实 + 工程 rigor）
+
+**深挖点**：
+- 「怎么知道面板会空、空在哪段？」（指标管线：定义→引擎钩子→exporter→Prometheus 抓→Grafana，任一段断就空；要端到端起服看，不是看测试）
+- 「为什么接口有了数据还是空的？」（define 不等于 hook——`recordWorkflowExecuted` 之前只有测试调，引擎不调就没样本）

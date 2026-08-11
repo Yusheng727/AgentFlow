@@ -76,7 +76,7 @@
 
 ## 6. 遗留（诚实交代）
 
-- Postgres 版 `listByCreatedBy` SQL 待补（U8，现 default 返回空）。
+- **Postgres 版 `listByCreatedBy` SQL** → ✅ 已补（2026-08-07，`821f251`），见 [06-grafana-closure-pg-finish](./06-grafana-closure-pg-finish.md#5-postgres-listbycreatedby-821f251--兑现-05-的待补)。（本行原为"待补"，兑现时未同步勾掉，06 记录。）
 - Postgres 版诊断 round-trip 未覆盖（仅 InMemory/mock 路径有测试）。
 - `VITE_API_KEY` 生产加固（服务端注入 key）是部署/ops 决策，未动构建语义。
-- UI 仍无 Vitest 单测（plan 明确 Deferred），靠手动验证 + build 门禁。
+- UI 无 Vitest 单测 → ✅ **已补**（2026-08-07，`fe72420`/`a10fabe`：api.ts 12 + Dashboard 4，`npm test` 16 绿），加 `resolveApiKey` 生产加固（`0611c9d`）+ UI 入 CI（`9a6634a`）。

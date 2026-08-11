@@ -14,6 +14,7 @@
 | [03-review-findings.md](./03-review-findings.md) | ce-code-review 多 agent 审查发现的高价值问题 + 修复思路 | 「代码质量」「工程 rigor」展示 |
 | [04-glossary.md](./04-glossary.md) | 项目术语表（BSP/super-step/channel/Reducer/checkpoint 等）+ 一句话解释 | 自我介绍/讲项目时不卡壳 |
 | [05-observability-ui-followup.md](./05-observability-ui-followup.md) | 后续 #9–#12：可运行 API Server wiring + 3 个 Boot 4.1 坑、trace 超级步分层、NodeTrace 反序列化、看板列表端点/状态归一/指标防漂移 | 「真实路径为什么跑不通」「遇到最难的问题」 |
+| [06-grafana-closure-pg-finish.md](./06-grafana-closure-pg-finish.md) | 2026-08-07：Grafana 可观测全闭环（指标挂钩 engine/mock 记账/Prometheus exporter）+ PG 收尾（Postgres IT + listByCreatedBy 兑现）——「面板为什么全空」到「6 面板全有数据」 | 「可观测性怎么做」「怎么验证面板有数据」 |
 
 ## 维护约定
 

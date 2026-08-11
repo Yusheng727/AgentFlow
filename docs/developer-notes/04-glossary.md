@@ -188,3 +188,9 @@ contenteditable + 语法高亮 + 行号 + 实时校验（缺 nodes/agentflow 段
 
 ### SpelPromptResolver（core 复用件）
 prompt 模板 `${...}` 占位符的 SpEL 解析器，KTD-2 安全约束（SimpleEvaluationContext 禁 T()/反射）。v1.1 从 spring-ai 适配器**下沉 core**（`com.agentflow.prompt`）供两适配器共用——框架无关件单一真相源。
+
+### Prometheus exporter / actuator
+demo-api 接 `micrometer-registry-prometheus` + actuator，暴露 `/actuator/prometheus` scrape 端点（U7），Prometheus 从这里抓 `agentflow_*` 指标。移除手写 SimpleMeterRegistry，统一交给 Boot 自动装配的 PrometheusMeterRegistry。
+
+### publishPercentileHistogram
+`recordNodeDuration` 的 Timer 开此开关，暴露 `_bucket` 序列 → Grafana `histogram_quantile` 算节点耗时 P50/P95/P99（count/sum/max 语义不变）。
