@@ -66,4 +66,51 @@ class ErrorClassifierTest {
     void nullCauseIsFatal() {
         assertThat(classifier.isTransient(null)).isFalse();
     }
+
+    // ─────────────────── B2：composed 组合分类器（适配器注册框架规则，core 保持框架无关） ───────────────────
+
+    /** 模拟框架 transient：某框架的 Retriable 类型（用自定义标记接口代替真实框架类，core 测试不引框架）。 */
+    private static final class RetriableFrameworkException extends RuntimeException {
+        RetriableFrameworkException() {
+            super("framework retriable");
+        }
+    }
+
+    private static final class FatalFrameworkException extends RuntimeException {
+        FatalFrameworkException() {
+            super("framework fatal");
+        }
+    }
+
+    private final ErrorClassifier frameworkClassifier = cause ->
+            cause instanceof RetriableFrameworkException;
+
+    @Test
+    @DisplayName("composed(fw)：框架分类器判 transient → transient")
+    void composedFrameworkTransient() {
+        ErrorClassifier c = ErrorClassifier.composed(frameworkClassifier);
+        assertThat(c.isTransient(new RetriableFrameworkException())).isTrue();
+    }
+
+    @Test
+    @DisplayName("composed(fw)：框架分类器判 fatal → fatal（且未被基础规则误判）")
+    void composedFrameworkFatal() {
+        ErrorClassifier c = ErrorClassifier.composed(frameworkClassifier);
+        assertThat(c.isTransient(new FatalFrameworkException())).isFalse();
+    }
+
+    @Test
+    @DisplayName("composed(fw)：框架判 false 但基础规则（IOException）判 transient → transient")
+    void composedBaseRulesStillApply() {
+        ErrorClassifier c = ErrorClassifier.composed(frameworkClassifier);
+        assertThat(c.isTransient(new IOException("connection reset"))).isTrue();
+    }
+
+    @Test
+    @DisplayName("composed() 无框架分类器 = 纯基础规则（不引任何框架知识）")
+    void composedNoFrameworkIsBaseRules() {
+        ErrorClassifier c = ErrorClassifier.composed();
+        assertThat(c.isTransient(new IOException())).isTrue();
+        assertThat(c.isTransient(new IllegalStateException())).isFalse();
+    }
 }

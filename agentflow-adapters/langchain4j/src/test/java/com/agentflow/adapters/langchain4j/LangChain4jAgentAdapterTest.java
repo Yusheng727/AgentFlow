@@ -149,6 +149,36 @@ class LangChain4jAgentAdapterTest {
                 .isInstanceOf(FatalException.class);
     }
 
+    // ─────────────────── B2：LC4j 框架异常分类（composed 注入 Retriable 规则） ───────────────────
+
+    @Test
+    @DisplayName("LC4j RateLimitException（Retriable 子类）→ TransientException（可重试）")
+    void lc4jRateLimitMapsToTransient() {
+        ChatModel rateLimited = new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                throw new dev.langchain4j.exception.RateLimitException("429 rate limit");
+            }
+        };
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(rateLimited);
+        assertThatThrownBy(() -> adapter.execute(input("F1", "t", new WorkflowContext())))
+                .isInstanceOf(TransientException.class);
+    }
+
+    @Test
+    @DisplayName("LC4j AuthenticationException（NonRetriable 子类）→ FatalException（不重试）")
+    void lc4jAuthenticationMapsToFatal() {
+        ChatModel unauthorized = new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                throw new dev.langchain4j.exception.AuthenticationException("401 unauthorized");
+            }
+        };
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(unauthorized);
+        assertThatThrownBy(() -> adapter.execute(input("F2", "t", new WorkflowContext())))
+                .isInstanceOf(FatalException.class);
+    }
+
     // ─────────────────── 工具执行循环 ───────────────────
 
     @Test

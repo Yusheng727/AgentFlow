@@ -343,9 +343,16 @@ public class LangChain4jAgentAdapter implements AgentFunction {
                 input.nodeId(), input.agentName());
     }
 
-    /** 异常映射：委托 core ErrorClassifier（U4 canonical，与 Spring 适配器共用单一真相源）。 */
+    /** LangChain4j 框架特有 transient 分类器（v1.1 B2：LC4j 自带的 {@code RetriableException} 标记覆盖
+     *  {@code RateLimitException}/{@code InternalServerException}/{@code TimeoutException} 等可重试子类；
+     *  {@code NonRetriableException} 子类（Authentication/InvalidRequest/ModelNotFound）不匹配 → 正确判 fatal）。
+     *  知识放适配器、不放 core（core 保持框架无关）。 */
+    private static final ErrorClassifier LC4J_CLASSIFIER = ErrorClassifier.composed(
+            cause -> cause instanceof dev.langchain4j.exception.RetriableException);
+
+    /** 异常映射：委托 core ErrorClassifier（U4 canonical 单一真相源）+ composed 注入 LC4j 规则（B2）。 */
     private AgentExecutionException mapException(Throwable cause) {
-        if (ErrorClassifier.defaultClassifier().isTransient(cause)) {
+        if (LC4J_CLASSIFIER.isTransient(cause)) {
             return new TransientException("Transient LLM 调用失败: " + cause.getMessage(), cause);
         }
         return new FatalException("LLM 调用失败: " + cause.getMessage(), cause);
