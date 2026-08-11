@@ -8,6 +8,7 @@ import com.agentflow.engine.WorkflowContext;
 import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.ExecutionTraceRegistry;
+import com.agentflow.prompt.OutputSchemaValidator;
 
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
@@ -259,6 +260,81 @@ class LangChain4jAgentAdapterTest {
                 .count()).isEqualTo(30.0);
         assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_ESTIMATED, "model", "gpt-4o-mini")
                 .count()).isEqualTo(0.0000135, within(1e-9)); // 10 in@$0.15 + 20 out@$0.60 per 1M
+    }
+
+    // ─────────────────── C2：结构化输出 schema 校验（core OutputSchemaValidator 复用） ───────────────────
+
+    private static final OutputSchemaValidator VALIDATOR = new OutputSchemaValidator();
+
+    /** schema: {type:object, properties:{x:{type:integer}}, required:[x]} */
+    private static Map<String, Object> intSchema() {
+        return Map.of("type", "object",
+                "properties", Map.of("x", Map.of("type", "integer")),
+                "required", List.of("x"));
+    }
+
+    private static AgentInput inputWithSchema(String nodeId, String template, Map<String, Object> schema) {
+        return new AgentInput(nodeId, "lc4j-agent", template, new WorkflowContext(),
+                Map.of(), List.of(), schema, null, null, null);
+    }
+
+    @Test
+    @DisplayName("schema 校验成功：structuredOutput 正确填充（补上 KTD-7 对价，不再恒空）")
+    void schemaValidationFillsStructuredOutput() throws Exception {
+        ChatModel jsonChat = new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                return ChatResponse.builder()
+                        .aiMessage(AiMessage.from("{\"x\": 42}"))
+                        .tokenUsage(new TokenUsage(3, 5))
+                        .build();
+            }
+        };
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(
+                jsonChat, List.of(), null, null, null, null, VALIDATOR);
+        AgentOutput out = adapter.execute(inputWithSchema("S1", "返回 x", intSchema()));
+
+        assertThat(out.content()).contains("\"x\"");
+        assertThat(out.structuredOutput()).containsEntry("x", 42);
+        assertThat(out.metadata()).containsEntry("promptTokens", 3L);
+    }
+
+    @Test
+    @DisplayName("schema 反馈重试：首次无效 JSON，带反馈重调第二次合法 → 通过（回调调用 2 次）")
+    void schemaFeedbackRetry() throws Exception {
+        AtomicInteger calls = new AtomicInteger();
+        ChatModel chat = new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                int n = calls.incrementAndGet();
+                return ChatResponse.builder()
+                        .aiMessage(AiMessage.from(n == 1 ? "无法生成 JSON" : "{\"x\": 7}"))
+                        .tokenUsage(new TokenUsage(1, 1))
+                        .build();
+            }
+        };
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(
+                chat, List.of(), null, null, null, null, VALIDATOR);
+        AgentOutput out = adapter.execute(inputWithSchema("S2", "返回 x", intSchema()));
+
+        assertThat(out.structuredOutput()).containsEntry("x", 7);
+        assertThat(calls.get()).isEqualTo(2); // 首次 + 1 次反馈重试
+    }
+
+    @Test
+    @DisplayName("schema 校验耗尽：3 次全失败 → FatalException（不静默成功）")
+    void schemaExhaustedThrowsFatal() {
+        ChatModel chat = new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                return ChatResponse.builder().aiMessage(AiMessage.from("永远不是 JSON")).build();
+            }
+        };
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(
+                chat, List.of(), null, null, null, null, VALIDATOR);
+        assertThatThrownBy(() -> adapter.execute(inputWithSchema("S3", "返回 x", intSchema())))
+                .isInstanceOf(FatalException.class)
+                .hasMessageContaining("校验失败");
     }
 
     // ─────────────────── trace / cancel ───────────────────

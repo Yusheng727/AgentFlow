@@ -9,6 +9,7 @@ import com.agentflow.agent.TransientException;
 import com.agentflow.engine.WorkflowContext;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.NodeTrace;
+import com.agentflow.prompt.OutputSchemaValidator;
 import com.agentflow.prompt.SpelPromptResolver;
 
 import org.slf4j.Logger;

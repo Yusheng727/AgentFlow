@@ -1,4 +1,4 @@
-package com.agentflow.adapters.springai;
+package com.agentflow.prompt;
 
 import com.agentflow.agent.FatalException;
 

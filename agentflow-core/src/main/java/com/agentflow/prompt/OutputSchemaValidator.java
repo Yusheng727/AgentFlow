@@ -1,4 +1,4 @@
-package com.agentflow.adapters.springai;
+package com.agentflow.prompt;
 
 import com.agentflow.agent.FatalException;
 
@@ -19,7 +19,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * LLM 输出 JSON Schema 校验器（U3-5，plan I1）。
+ * LLM 输出 JSON Schema 校验器（U3-5，plan I1；v1.1 下沉 core）。
  *
  * <p>工作流（plan U3）：
  * <ol>
@@ -34,8 +34,14 @@ import java.util.regex.Pattern;
  *
  * <p>networknt 3.x API（KTD-7 冒烟后定）：{@code SchemaRegistry.withDefaultDialect(V2020_12)}
  * → {@code getSchema(schemaJson)} → {@code schema.validate(json, InputFormat.JSON)} → {@code List<Error>}。
+ *
+ * <p><b>v1.1 下沉 core（C2）</b>：本类**框架无关**（只依赖 networknt json-schema + Jackson 3 tools.jackson
+ * + core {@link FatalException}），原位于 spring-ai 适配器。下沉到 {@code com.agentflow.prompt}（与
+ * {@link SpelPromptResolver} 同归置——框架无关的 LLM I/O 工具）供 Spring AI 与 LangChain4j 两适配器
+ * 复用，补上 KTD-7 "相同 DSL 相同结果"的对价（LC4j 的 structuredOutput 不再恒空）。networknt 3.x
+ * 自带 Jackson 3（tools.jackson），core 不必显式引 Jackson 3。
  */
-public class OutputSchemaValidator {
+public final class OutputSchemaValidator {
 
     /** schema-retry 上限（plan v4.2：不含首次共 2 次重试） */
     static final int MAX_SCHEMA_RETRIES = 2;

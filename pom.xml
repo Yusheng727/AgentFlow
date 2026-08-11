@@ -24,6 +24,8 @@
         <agentflow.version>1.0.0-SNAPSHOT</agentflow.version>
         <!-- LangChain4j 1.0.0 GA（v1.1 KTD-7 第二个框架适配器；alimaven 可拉） -->
         <langchain4j.version>1.0.0</langchain4j.version>
+        <!-- networknt json-schema-validator 3.0.1（对齐 Spring AI 2.0 传递版本，Jackson 3 原生；C2 下沉 core 用） -->
+        <networknt.version>3.0.1</networknt.version>
     </properties>
 
     <modules>
@@ -79,6 +81,12 @@
                 <groupId>dev.langchain4j</groupId>
                 <artifactId>langchain4j</artifactId>
                 <version>${langchain4j.version}</version>
+            </dependency>
+            <!-- networknt json-schema-validator（C2 下沉 core 的 OutputSchemaValidator 依赖；Jackson 3 原生，Spring AI 2.0 同版本） -->
+            <dependency>
+                <groupId>com.networknt</groupId>
+                <artifactId>json-schema-validator</artifactId>
+                <version>${networknt.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.agentflow</groupId>

@@ -34,6 +34,12 @@
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
         </dependency>
+        <!-- OutputSchemaValidator（C2 v1.1 下沉 core）：networknt json-schema 校验 LLM 输出（Jackson 3 tools.jackson 由其传递引入）。
+             框架无关（非 Spring AI），故放 core 供 Spring AI + LangChain4j 两适配器复用（KTD-7 单一真相源）。 -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+        </dependency>
         <!-- JSR-310 时间类型（Instant/LocalDateTime 等）序列化支持：
              BarrierCheckpoint/NodeOutputStore 含 Instant completedAt 字段，
              PostgresCheckpointManager.defaultJsonMapper 注册 JavaTimeModule 依赖此包 -->

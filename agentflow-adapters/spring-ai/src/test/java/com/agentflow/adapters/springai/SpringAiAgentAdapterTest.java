@@ -7,6 +7,7 @@ import com.agentflow.agent.TransientException;
 import com.agentflow.engine.WorkflowContext;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.NodeTrace;
+import com.agentflow.prompt.OutputSchemaValidator;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

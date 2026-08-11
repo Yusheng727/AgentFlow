@@ -10,6 +10,7 @@ import com.agentflow.engine.fault.ErrorClassifier;
 import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.NodeTrace;
+import com.agentflow.prompt.OutputSchemaValidator;
 import com.agentflow.prompt.SpelPromptResolver;
 
 import dev.langchain4j.agent.tool.Tool;
@@ -80,11 +81,14 @@ public class LangChain4jAgentAdapter implements AgentFunction {
     private final AgentFlowMetrics metrics;
     /** 成本查表模型名（可空 → CostCalculator 走 unknown/默认单价）。 */
     private final String model;
+    /** v1.1 C2 结构化输出 schema 校验器（可空；非空且节点声明 output_schema 时带反馈重试校验）。
+     *  core 复用件（与 Spring 适配器共用），补上 KTD-7 "相同 DSL 相同结果"对价。 */
+    private final OutputSchemaValidator schemaValidator;
     private final SpelPromptResolver promptResolver = new SpelPromptResolver();
 
-    /** 便捷构造：无工具、无 trace、不脱敏、不记账（测试/最小用法）。 */
+    /** 便捷构造：无工具、无 trace、不脱敏、不记账、不校验（测试/最小用法）。 */
     public LangChain4jAgentAdapter(ChatModel chatModel) {
-        this(chatModel, List.of(), null, null, null, null);
+        this(chatModel, List.of(), null, null, null, null, null);
     }
 
     /**
@@ -97,11 +101,11 @@ public class LangChain4jAgentAdapter implements AgentFunction {
                                    List<Object> toolBeans,
                                    ExecutionTrace trace,
                                    Function<String, String> redactor) {
-        this(chatModel, toolBeans, trace, redactor, null, null);
+        this(chatModel, toolBeans, trace, redactor, null, null, null);
     }
 
     /**
-     * 完整构造：额外支持记账。
+     * 完整构造：支持记账。
      *
      * @param metrics AgentFlowMetrics（可空；非空则按累计 usage 记 token/成本）
      * @param model   成本查表模型名（可空）
@@ -112,12 +116,28 @@ public class LangChain4jAgentAdapter implements AgentFunction {
                                    Function<String, String> redactor,
                                    AgentFlowMetrics metrics,
                                    String model) {
+        this(chatModel, toolBeans, trace, redactor, metrics, model, null);
+    }
+
+    /**
+     * 最全构造：记账 + 结构化输出 schema 校验。
+     *
+     * @param schemaValidator OutputSchemaValidator（可空；非空且节点有 output_schema 时启用校验 + 反馈重试）
+     */
+    public LangChain4jAgentAdapter(ChatModel chatModel,
+                                   List<Object> toolBeans,
+                                   ExecutionTrace trace,
+                                   Function<String, String> redactor,
+                                   AgentFlowMetrics metrics,
+                                   String model,
+                                   OutputSchemaValidator schemaValidator) {
         this.chatModel = Objects.requireNonNull(chatModel, "chatModel");
         this.toolBeans = toolBeans == null ? List.of() : List.copyOf(toolBeans);
         this.trace = trace;
         this.redactor = redactor == null ? Function.identity() : redactor;
         this.metrics = metrics;
         this.model = model;
+        this.schemaValidator = schemaValidator;
     }
 
     @Override
@@ -138,43 +158,76 @@ public class LangChain4jAgentAdapter implements AgentFunction {
             throw new FatalException("Prompt SpEL 解析失败 [" + input.nodeId() + "]: " + e.getMessage(), e);
         }
 
-        // 1.5 v1.1 对齐提示：本适配器不做结构化输出 schema 校验（structuredOutput 恒空），
-        // 节点声明了 output_schema 时 warn 明示，避免与 Spring 适配器行为静默分歧
-        if (!input.outputSchema().isEmpty()) {
-            log.warn("LangChain4j 适配器 v1.1 不支持 output_schema 结构化输出校验（structuredOutput 将为空），节点={}",
-                    input.nodeId());
-        }
-
-        // 2. LLM 调用（+ 工具执行循环）
-        LlmResult result;
+        // 2. LLM 调用（工具循环；节点声明 output_schema 且配置了 schemaValidator → 带反馈重试校验，C2）
+        String content;
+        Map<String, Object> structuredOutput = Map.of();
+        long promptTokens;
+        long completionTokens;
         try {
-            result = chatWithTools(resolvedPrompt);
+            if (schemaValidator != null && !input.outputSchema().isEmpty()) {
+                // schema 校验 + 重试：validator 内部多次调 chatWithTools，用 AtomicReference 捕获最后一次 usage
+                // （与 Spring 适配器 U3-5 同款，补上 LC4j 对 structuredOutput 的支持）
+                java.util.concurrent.atomic.AtomicReference<LlmResult> last = new java.util.concurrent.atomic.AtomicReference<>();
+                OutputSchemaValidator.ValidatedOutput vo = schemaValidator.validateWithRetry(
+                        resolvedPrompt, input.outputSchema(), p -> callForSchema(p, last));
+                content = vo.content();
+                structuredOutput = vo.structuredOutput();
+                LlmResult lastResult = last.get();
+                promptTokens = lastResult == null ? 0 : lastResult.promptTokens();
+                completionTokens = lastResult == null ? 0 : lastResult.completionTokens();
+            } else {
+                LlmResult r = chatWithTools(resolvedPrompt);
+                content = r.content();
+                promptTokens = r.promptTokens();
+                completionTokens = r.completionTokens();
+            }
         } catch (FatalException e) {
-            // 工具轮数耗尽等确定失败：NodeTrace 终态化后原样抛，避免被外层 RuntimeException 分支
-            // 再包装成误导性的 "LLM 调用失败"（与 Spring 适配器 schema 路径处理对齐）
+            // 确定失败（schema 校验耗尽 / 工具链截断）：NodeTrace 终态化后原样抛
+            // （避免被 RuntimeException 分支再包装成误导性的 "LLM 调用失败"）
             nodeTrace.fail(e.getMessage());
             throw e;
         } catch (RuntimeException e) {
             Throwable cause = (e.getCause() instanceof Exception) ? e.getCause() : e;
+            // schema 回调里 chatWithTools 的检查型 FatalException 被包装成 RuntimeException——解包后原样抛，
+            // 不落入 mapException（否则再包一层 "LLM 调用失败"）
+            if (cause instanceof FatalException fatal) {
+                nodeTrace.fail(fatal.getMessage());
+                throw fatal;
+            }
             nodeTrace.fail(cause.getMessage());
             throw mapException(cause);
         }
 
-        // 2.5 v1.1 记账（Grafana token/成本可见性；metrics 为 null 则 no-op）。放在成功路径：截断失败已抛
+        // 2.5 v1.1 记账（Grafana token/成本可见性；metrics 为 null 则 no-op）。放在成功路径：失败已抛
         if (metrics != null) {
-            metrics.recordTokens(input.agentName(), model, result.promptTokens(), result.completionTokens());
+            metrics.recordTokens(input.agentName(), model, promptTokens, completionTokens);
         }
 
-        // 3. 构造 AgentOutput（content + metadata{tokens}，与 Spring 适配器同 schema）
+        // 3. 构造 AgentOutput（content + structuredOutput + metadata{tokens}，与 Spring 适配器同 schema）
         Map<String, Object> metadata = new HashMap<>();
-        metadata.put("promptTokens", result.promptTokens());
-        metadata.put("completionTokens", result.completionTokens());
-        metadata.put("totalTokens", result.promptTokens() + result.completionTokens());
+        metadata.put("promptTokens", promptTokens);
+        metadata.put("completionTokens", completionTokens);
+        metadata.put("totalTokens", promptTokens + completionTokens);
 
-        nodeTrace.succeed(redact(result.content()), result.promptTokens(), result.completionTokens());
+        nodeTrace.succeed(redact(content), promptTokens, completionTokens);
         log.debug("agent executed: node={} agent={} tokens={}", input.nodeId(), input.agentName(),
-                result.promptTokens() + result.completionTokens());
-        return new AgentOutput(result.content(), Map.of(), Map.of(), Map.copyOf(metadata));
+                promptTokens + completionTokens);
+        return new AgentOutput(content, Map.of(), structuredOutput, Map.copyOf(metadata));
+    }
+
+    /**
+     * schema 校验回调：一次 LLM 调用（含工具循环）。{@link Function} 不能抛检查型异常，
+     * 故把 {@code chatWithTools} 的检查型 {@link FatalException}（工具链截断）包成 RuntimeException，
+     * 由 execute() 的 catch 解包原样抛。同时把本次调用 usage 存入 last（跨 schema 重试取末次，与 Spring 一致）。
+     */
+    private String callForSchema(String prompt, java.util.concurrent.atomic.AtomicReference<LlmResult> last) {
+        try {
+            LlmResult r = chatWithTools(prompt);
+            last.set(r);
+            return r.content();
+        } catch (FatalException fe) {
+            throw new RuntimeException(fe);
+        }
     }
 
     /** 单次节点调用结果（content + 跨轮累加 usage，避免共享可变字段，VT 安全）。 */
