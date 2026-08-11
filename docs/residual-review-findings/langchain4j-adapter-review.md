@@ -21,11 +21,11 @@
 - **修复方向**：自定义 `ToolExecutor`（继承/包装），统一返回通用错误串，真实原因只进服务端日志；或接受现状 + 文档标注。
 - **决策人**：你（是否接受框架默认、还是上自定义 executor）。
 
-### B2. [P2/manual] ErrorClassifier 不识别 `dev.langchain4j.*` 异常（M2 + REL-2）
-- **现状**：core `ErrorClassifier.defaultClassifier()` 只判 `java.net.*` / `org.springframework.web.client.*`；LC4j 网络瞬时异常（429/5xx 包裹成 LC4j 类型）会被误判 **Fatal → 不重试**。
-- **另注**：core 含 `org.springframework.web.client.` 前缀 = 框架独有知识泄漏进 core 层（对 LC4j 路径为死代码）。
-- **修复方向**：在 core 加 LC4j 例外类型到 transient 清单（注意：宽前缀可能把致命错误误判临时 → 需圈定具体异常类型，如 `HttpException`/超时子类，非整个包）。
-- **风险点**：动 core 分类逻辑影响两个适配器，需针对型测试。
+### B2. [P2/manual] ✅ **已解决（2026-08-11，`18978e8`）** ErrorClassifier 不识别 `dev.langchain4j.*` 异常（M2 + REL-2）
+- **现状（已解决）**：core `ErrorClassifier` 新增 `composed(ErrorClassifier...)` 组合分类器；`LangChain4jAgentAdapter` 用它注入 `cause instanceof dev.langchain4j.exception.RetriableException`——LC4j 自带的可重试标记覆盖 RateLimit/InternalServer/Timeout 子类，NonRetriable 子类（Authentication/InvalidRequest/ModelNotFound）正确判 fatal。LC4j 网络/限流/超时不再被误判 Fatal 不重试。
+- **M2 一并解**：core `defaultClassifier` 移除 `org.springframework.web.client.` 前缀，`SpringAiAgentAdapter` 注册 `composed(springPrefix)`——框架知识全部移出 core，core 保持框架无关。
+- 实现细节点：`RetryPolicy` 默认分类器只对已映射的 TransientException/FatalException 生效（适配器先 map 再抛），故 spring 前缀移除不影响引擎重试路径。
+- 测试：`ErrorClassifierTest` +4（composed 组合/基础规则/无框架）+ `LangChain4jAgentAdapterTest` +2（RateLimit→Transient、Authentication→Fatal）。
 
 ### B3. [P2/manual] 继承/接口上的 `@Tool` 方法不注册（ADV-2）
 - **现状**：`collectTools` 只扫 `bean.getClass().getDeclaredMethods()`（不含继承/接口）。
@@ -59,6 +59,6 @@
 
 ## 建议优先序（若要继续 v1.1）
 1. ~~**C2**（OutputSchemaValidator 下沉 core + LC4j 接上）~~ → ✅ 已办（2026-08-11，`9ba7271`）。
-2. **B2**（LC4j 异常分类）——避免真实 LC4j 网络抖动被误判 Fatal。
+2. ~~**B2 + M2**（LC4j 异常分类 + 框架知识移出 core）~~ → ✅ 已办（2026-08-11，`18978e8`）。
 3. **C1**（真实路径预算挂钩）——补 R10 在真实 LLM 的闭环。
 4. B1 / B3 —— 看是否自定义 ToolExecutor / 层级遍历 @Tool。

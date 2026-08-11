@@ -373,3 +373,16 @@ KTD-7 "相同 DSL 相同结果"的对价补齐：`OutputSchemaValidator`（原 s
 - **重试 budget 不变**：schema 反馈重试 ≤2（共 3 次尝试）嵌在每次 LLM 调用内，与 U3 同款；usage 取最后一次调用（AtomicReference last，与 Spring 一致）。
 
 **教训**：框架无关的"LLM I/O 工具"（SpEL 解析 / schema 校验）应该放 core，而不是寄生在某个框架适配器里——否则第二个适配器要么复制、要么反向依赖把框架拉进来。
+
+### 设计决策：B2 ErrorClassifier 组合分类器——框架异常知识放适配器、不放 core
+
+LangChain4j 网络/限流/超时异常被 core `ErrorClassifier` 误判 Fatal 不重试，根因是 core 只认 `java.net.*`/`org.springframework.web.client.*`。直接加 LC4j 类型到 core 会**把 langchain4j 依赖拉进 core**，重犯 M2 的"框架知识泄漏进 core"。
+两个关键事实定方案：
+- **LC4j 自带干净的异常分类**：`RetriableException`（RateLimit/InternalServer/Timeout 都继承它）/ `NonRetriableException`（Authentication/InvalidRequest/ModelNotFound）。一个 `instanceof RetriableException` 就覆盖全部可重试子类，且跟随框架标记演进，比手列子类稳。
+- **RetryPolicy 默认分类器只对已映射的异常生效**：适配器先 map 成 TransientException/FatalException 再抛，所以 core 移除 spring 前缀不影响引擎重试路径（spring 前缀在 core 原本就是死代码）。
+
+**方案**：`ErrorClassifier.composed(frameworkClassifiers...)` 组合工厂——任一框架判 transient 或基础规则判 transient → transient。两适配器各注册自己的框架分类器：
+- LC4j：`composed(cause instanceof RetriableException)`
+- Spring：`composed(cn.startsWith("org.springframework.web.client."))`
+
+core 保持框架无关（KTD-7 精神），框架可重试语义由适配器持有。**教训**：框架特有的 retry 语义应该由框架适配器注入，而不是写死在框架无关的分类器里。

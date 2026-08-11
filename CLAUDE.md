@@ -41,6 +41,7 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 > - ⚠️ **本地合 main，未 push**（用户明确）；push 后远程才有该 feature
 > - **ce-code-review（2026-08-11，10 评审）**：4 项已应用（工具截断→FatalException / 中断检查 / metrics 记账 / schema warn，见 `e86059e`）；延后/需人工决策项与共享限制见 `docs/residual-review-findings/langchain4j-adapter-review.md`
 > - **C2（2026-08-11，`9ba7271`）**：`OutputSchemaValidator` 下沉 core（`com.agentflow.prompt`，networknt 3.0.1 加进 core/root pom）+ LangChain4j 接入 `validateWithRetry`——structuredOutput 不再恒空，补上 KTD-7 "相同 DSL 相同结果"对价；Spring 适配器切 import 零回归。residual 文档 C2 标 ✅
+> - **B2+M2（2026-08-11，`18978e8`）**：core `ErrorClassifier` 加 `composed()` 组合分类器 + 移除 spring 前缀；LC4j 适配器注入 `RetriableException`（LC4j 网络/限流/超时可重试不再误判 Fatal）、Spring 适配器注入 spring 前缀——框架异常知识全部移出 core（M2 一并解），core 保持框架无关
 
 
 **已落地（main 分支，feat/u3-agent-adapter 已合）**：

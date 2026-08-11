@@ -153,7 +153,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 > 完整明细见 `docs/residual-review-findings/langchain4j-adapter-review.md`（评审后新建的持久化位置）。
 
 - **SEC-1（P2/manual）工具异常详情泄漏给模型**：LangChain4j `DefaultToolExecutor` **内部吞异常并回传原始消息**，不走适配器 catch——框架行为、等价 Spring 工具错误处理，但异常若含 SQL/路径/连接串会被模型在 content 复述外泄。真修需自定义 `ToolExecutor`（策略决策）。
-- **ErrorClassifier 不识别 `dev.langchain4j.*` 异常（M2+REL-2，P2/manual）**：core 只判 `java.net.*`/`org.springframework.web.client.*`，LC4j 网络瞬时异常误判 Fatal 不重试；且 springframework 前缀属框架知识泄漏进 core。需圈定 LC4j 具体异常类型（防宽前缀把致命误判临时）。
+- **ErrorClassifier 不识别 `dev.langchain4j.*` 异常（M2+REL-2，P2/manual）** → **已解决（`18978e8`）**：core 加 `composed()` 组合分类器，两适配器各自注册框架 transient 规则（LC4j `RetriableException`、Spring `org.springframework.web.client.*`）；core 移除 spring 前缀，框架知识全部移出 core——B2（LC4j 网络误判 Fatal 不重试）与 M2（框架知识泄漏进 core）同解。
 - **继承/接口 `@Tool` 不注册（ADV-2，P2/manual）**：`collectTools` 只扫 `getDeclaredMethods()`。修法（`getMethods()`/层级遍历）可能丢非 public @Tool，需处理。
 - **`mapException` 两适配器逐字重复（M1, P2/advisory）**：仅 2 消费者，暂不收敛（避免过早共享抽象）。
 
