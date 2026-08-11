@@ -153,7 +153,7 @@ public class SpringAiAgentAdapter implements AgentFunction {
         } catch (RuntimeException e) {
             Throwable cause = (e.getCause() instanceof Exception) ? e.getCause() : e;
             nodeTrace.fail(cause.getMessage());
-            throw mapException(cause);
+            throw mapException(e); // 传原始 e（保留 Spring 异常，toExecutionException 沿 cause 兜底）
         }
 
         // 3. 构造 AgentOutput（content + metadata{tokens} + structuredOutput）
@@ -221,8 +221,6 @@ public class SpringAiAgentAdapter implements AgentFunction {
     }
 
 
-    /** 把 WorkflowContext 的 ChannelValue 扁平成 channel 名 → 值：已下沉 {@link SpelPromptResolver}（core），本类不再持有。 */
-
     /** Spring 框架特有 transient 分类器（v1.1 B2/M2：框架知识放适配器、不放 core）。
      *  Spring AI 2.0 走 RestClient（org.springframework.web.client.*），网络/HTTP 瞬时错误在此识别；
      *  core 的 defaultClassifier 已不再含该前缀。 */
@@ -230,14 +228,10 @@ public class SpringAiAgentAdapter implements AgentFunction {
             com.agentflow.engine.fault.ErrorClassifier.composed(cause ->
                     cause != null && cause.getClass().getName().startsWith("org.springframework.web.client."));
 
-    private AgentExecutionException mapException(Throwable cause) {
-        // SpEL 解析失败在上面的独立 try 中已映射为 FatalException，不会到此。
-        // 此处分类 LLM 调用异常：委托 core ErrorClassifier（U4 canonical 单一真相源）+ composed 注入
-        // Spring 特有规则（B2/M2——core 不再持框架知识）。
-        if (SPRING_CLASSIFIER.isTransient(cause)) {
-            return new TransientException("Transient LLM 调用失败: " + cause.getMessage(), cause);
-        }
-        return new FatalException("LLM 调用失败: " + cause.getMessage(), cause);
+    /** 异常映射：委托 core ErrorClassifier（U4 canonical）+ composed/Spring 规则 + 沿 cause 兜底（B2 review P1）。
+     *  传<b>原始</b>异常（RestClient 异常可能被套一层），不先 unwrap。 */
+    private AgentExecutionException mapException(Throwable thrown) {
+        return com.agentflow.engine.fault.ErrorClassifier.toExecutionException(SPRING_CLASSIFIER, thrown);
     }
 
     private String redact(String text) {

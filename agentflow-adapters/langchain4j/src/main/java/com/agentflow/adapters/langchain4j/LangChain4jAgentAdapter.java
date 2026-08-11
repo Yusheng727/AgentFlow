@@ -195,7 +195,7 @@ public class LangChain4jAgentAdapter implements AgentFunction {
                 throw fatal;
             }
             nodeTrace.fail(cause.getMessage());
-            throw mapException(cause);
+            throw mapException(e); // 传原始 e（保留 LC4j 框架标记，toExecutionException 沿 cause 兜底）
         }
 
         // 2.5 v1.1 记账（Grafana token/成本可见性；metrics 为 null 则 no-op）。放在成功路径：失败已抛
@@ -350,12 +350,10 @@ public class LangChain4jAgentAdapter implements AgentFunction {
     private static final ErrorClassifier LC4J_CLASSIFIER = ErrorClassifier.composed(
             cause -> cause instanceof dev.langchain4j.exception.RetriableException);
 
-    /** 异常映射：委托 core ErrorClassifier（U4 canonical 单一真相源）+ composed 注入 LC4j 规则（B2）。 */
-    private AgentExecutionException mapException(Throwable cause) {
-        if (LC4J_CLASSIFIER.isTransient(cause)) {
-            return new TransientException("Transient LLM 调用失败: " + cause.getMessage(), cause);
-        }
-        return new FatalException("LLM 调用失败: " + cause.getMessage(), cause);
+    /** 异常映射：委托 core ErrorClassifier（U4 canonical）+ composed/LC4j 规则 + 沿 cause 兜底（B2 review P1）。
+     *  传<b>原始</b>异常（frame 标记在外层，如 RateLimitException(httpException)），不先 unwrap。 */
+    private AgentExecutionException mapException(Throwable thrown) {
+        return ErrorClassifier.toExecutionException(LC4J_CLASSIFIER, thrown);
     }
 
     private String redact(String text) {

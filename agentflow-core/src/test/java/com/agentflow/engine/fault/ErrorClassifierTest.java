@@ -113,4 +113,43 @@ class ErrorClassifierTest {
         assertThat(c.isTransient(new IOException())).isTrue();
         assertThat(c.isTransient(new IllegalStateException())).isFalse();
     }
+
+    @Test
+    @DisplayName("composed 对 null cause → false（不 NPE，B2 review P3 兜底）")
+    void composedNullCauseFalse() {
+        ErrorClassifier c = ErrorClassifier.composed(frameworkClassifier);
+        assertThat(c.isTransient(null)).isFalse();
+    }
+
+    // ─────────────────── toExecutionException（review B2 P1：沿 cause 兜底，保留框架标记在外层） ───────────────────
+
+    @Test
+    @DisplayName("toExecutionException：标记在外层（包装底层异常）→ 沿 cause 判 transient")
+    void toExecutionClassifiesOuterMarker() {
+        // 模拟 LC4j 真实形状：Retriable 标记在外层、内层是无标记异常（真实是 RateLimitException(httpException)）
+        ErrorClassifier fw = ErrorClassifier.composed(cause -> cause instanceof RetriableFrameworkException);
+        RetriableFrameworkException outer = new RetriableFrameworkException();
+        outer.initCause(new IllegalStateException("inner"));
+        var ex = ErrorClassifier.toExecutionException(fw, outer);
+        assertThat(ex).isInstanceOf(TransientException.class);
+    }
+
+    @Test
+    @DisplayName("toExecutionException：包装器 outer + 框架异常在 cause → 沿 cause 兜底判 transient")
+    void toExecutionClassifiesInnerCause() {
+        ErrorClassifier fw = ErrorClassifier.composed(cause -> cause instanceof RetriableFrameworkException);
+        var ex = ErrorClassifier.toExecutionException(fw,
+                new RuntimeException(new RetriableFrameworkException()));
+        assertThat(ex).isInstanceOf(TransientException.class);
+    }
+
+    @Test
+    @DisplayName("toExecutionException：非 transient → FatalException，消息取最深层非空")
+    void toExecutionFatal() {
+        ErrorClassifier fw = ErrorClassifier.composed(cause -> cause instanceof RetriableFrameworkException);
+        var ex = ErrorClassifier.toExecutionException(fw,
+                new RuntimeException(new IllegalStateException("deep reason")));
+        assertThat(ex).isInstanceOf(FatalException.class);
+        assertThat(ex.getMessage()).contains("deep reason"); // 最深层非空消息
+    }
 }

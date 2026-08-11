@@ -63,23 +63,63 @@ public interface ErrorClassifier {
      *
      * <p>适配器用它注入框架特有规则（如 LangChain4j 的 {@code RetriableException}、Spring 的
      * {@code org.springframework.web.client.*}），同时保留 core 的框架无关根基规则。
+     * 仅 add 不能 veto：框架分类器只能把"基础规则认为 fatal"的抬成 transient，不能否决基础 transient。
      *
      * @param frameworks 框架特有分类器（各 LLM 适配器注册；可为空 = 纯基础规则）
      */
     static ErrorClassifier composed(ErrorClassifier... frameworks) {
         ErrorClassifier base = defaultClassifier();
+        // 防御性拷贝：varargs 数组被调用方持有，防止外部突变改变本组合的行为（review api-contract）
+        ErrorClassifier[] fws = frameworks == null ? new ErrorClassifier[0] : frameworks.clone();
         return cause -> {
+            if (cause == null) {
+                return false;
+            }
             if (base.isTransient(cause)) {
                 return true;
             }
-            if (frameworks != null) {
-                for (ErrorClassifier fw : frameworks) {
-                    if (fw != null && fw.isTransient(cause)) {
-                        return true;
-                    }
+            for (ErrorClassifier fw : fws) {
+                if (fw != null && fw.isTransient(cause)) {
+                    return true;
                 }
             }
             return false;
         };
+    }
+
+    /**
+     * 把 LLM 调用抛出的异常映射为 {@link TransientException}/{@link FatalException}（review B2 P1 修复）。
+     *
+     * <p><b>沿 cause 兜底是关键</b>：LLM 框架的 transient 标记常包裹底层异常——LangChain4j 的真实
+     * {@code RateLimitException} 是 {@code new RateLimitException(httpException)}（marker 在<b>外层</b>，
+     * 内层是 {@code HttpException}）。若适配器先 unwrap 再分类会剥掉标记 → 误判 fatal 不重试。故对
+     * {@code thrown} 及其 {@code getCause()} 各判一次（框架标记在外层的场景由此兜住）。
+     * 消息取 cause 链最深非空，避免 null message。
+     *
+     * <p>两适配器共用（消除重复的 mapException，M1）。
+     *
+     * @param classifier 组合分类器（框架规则 + 基础规则）
+     * @param thrown     ChatModel 调用直接抛出的原始异常（未 unwrap，保留框架标记）
+     */
+    static AgentExecutionException toExecutionException(ErrorClassifier classifier, Throwable thrown) {
+        ErrorClassifier c = classifier == null ? defaultClassifier() : classifier;
+        boolean transientFlag = c.isTransient(thrown)
+                || (thrown != null && thrown.getCause() != null && c.isTransient(thrown.getCause()));
+        String msg = deepestMessage(thrown);
+        String text = msg == null || msg.isBlank() ? "无详情" : msg;
+        return transientFlag
+                ? new TransientException("Transient LLM 调用失败: " + text, thrown)
+                : new FatalException("LLM 调用失败: " + text, thrown);
+    }
+
+    /** 取 cause 链上最深层非空消息（越深越具体，如 LC4j 包在 HttpException 上的具体错误）。 */
+    private static String deepestMessage(Throwable t) {
+        String msg = null;
+        for (Throwable cur = t; cur != null; cur = cur.getCause()) {
+            if (cur.getMessage() != null && !cur.getMessage().isBlank()) {
+                msg = cur.getMessage();
+            }
+        }
+        return msg;
     }
 }

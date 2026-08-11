@@ -152,12 +152,15 @@ class LangChain4jAgentAdapterTest {
     // ─────────────────── B2：LC4j 框架异常分类（composed 注入 Retriable 规则） ───────────────────
 
     @Test
-    @DisplayName("LC4j RateLimitException（Retriable 子类）→ TransientException（可重试）")
+    @DisplayName("LC4j RateLimitException（真实 cause 形状：marker 外层包裹 HttpException）→ TransientException（可重试）")
     void lc4jRateLimitMapsToTransient() {
         ChatModel rateLimited = new ChatModel() {
             @Override
             public ChatResponse chat(ChatRequest request) {
-                throw new dev.langchain4j.exception.RateLimitException("429 rate limit");
+                // 生产真实形状：ExceptionMapper 用 new RateLimitException(httpException)（marker 在外层、内层 HttpException）。
+                // 若适配器 unwrap 后再分类会剥掉 marker → 误判 fatal（review B2 P1）。此测试锁定该交互。
+                throw new dev.langchain4j.exception.RateLimitException(
+                        new dev.langchain4j.exception.HttpException(429, "rate limit exceeded"));
             }
         };
         LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(rateLimited);

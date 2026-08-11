@@ -207,6 +207,20 @@ class SpringAiAgentAdapterTest {
     }
 
     @Test
+    @DisplayName("B2 回归：Spring 框架异常 org.springframework.web.client.ResourceAccessException → Transient（composed 注入的 spring 规则）")
+    void springWebClientExceptionMapsToTransient() throws Exception {
+        StubChatModel model = new StubChatModel();
+        // 原始异常直接是 org.springframework.web.client.*（RestClient 网络瞬时）——锁定 B2 把该前缀规则
+        // 移到 SPRING_CLASSIFIER 后仍生效（否则删掉它 CI 也绿 = 零回归伪证）
+        model.throwOnCall = new org.springframework.web.client.ResourceAccessException(
+                "connect refused", new java.net.SocketTimeoutException("timeout"));
+        SpringAiAgentAdapter adapter = adapter(model);
+
+        assertThatThrownBy(() -> adapter.execute(input("F0", "hi", Map.of(), Map.of())))
+                .isInstanceOf(TransientException.class);
+    }
+
+    @Test
     @DisplayName("异常映射：普通 RuntimeException → FatalException（保守不重试）")
     void mapsGenericErrorToFatal() throws Exception {
         StubChatModel model = new StubChatModel();
