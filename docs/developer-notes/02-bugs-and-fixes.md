@@ -334,3 +334,32 @@ MockAgentFunction 是无状态单例、BspEngine 不持有 trace。trace 怎么�
 ### 设计决策：ExecutionTraceRegistry 保留现状（v1.1 加 TTL）
 
 5 个 reviewer 指出 registry 无清理会 OOM。但简单 remove 会破坏 TraceController 核心用例（工作流跑完查 trace）。正确解法是 TTL eviction 或 Caffeine LRU，属 v1.1 范围。plan 已声明"v1 不主动清理"。保留现状记为 residual——体现 review 修复要懂设计权衡，不机械执行。
+
+---
+
+## 档 B 收尾 + v1.1（2026-08-10/11）
+
+### 设计决策：WorkflowSubmissionGuard 预防性提交守卫（档 B 真安全缺口）
+
+`POST /api/workflows` 接受任意 YAML，未校验即可起无界 VT + 烧 LLM 成本；既有 `budget_exceeded` 是 **post-hoc**（跑完才报警）。守卫做**提交时**预防性拦截：节点数 > maxNodes 或预估成本 > maxCostUsd → **422 SUBMISSION_LIMIT**（在 initWorkflow 前拒绝，不产生执行记录）。成本估算复用 CostCalculator 单价表（prompt 长度估 token + 每节点基准 500 in/out），`model/maxNodes/maxCostUsd` 任一 null 即禁用对应检查。demo-api 接 `agentflow.guard.*` 配置。测试 12 + controller 422 两例，api 61 全绿。
+
+### 设计决策：R10 per-workflow 预算（WorkflowBudget edge-triggered）
+
+把 `budget_exceeded` 从"全局 mock 阈值"升级为每个工作流自己的 `budget_tokens/budget_cost`（YAML `agentflow:` 段）。关键点：
+- **edge-triggered 语义**：`WorkflowBudget.record` 只在**首次跨过上界**返回 true，之后 false——否则每个节点超限都 +1（事件数=节点数），per-workflow 应记"跨过预算"一次。全局 `checkBudget` 是每次调用自增，语义不同。
+- **穿线**：`AgentInput` 第 10 字段 budget（仿 U7 trace 的第 9 字段），BspEngine.execute/recoverAndExecute 从 `def.agentflow()` 构造。
+- **备份兼容**：AgentInput 加 9-arg 便捷构造护住全部既有构造点；mock 无 per-workflow budget 时回落全局 `budgetThresholdUsd`。
+- 测试 12（含并发 edge-triggered：8 线程 × 10 token 超小预算，断言只有 1 个线程拿到 true）。
+
+### 设计决策：LangChain4jAgentAdapter（第二个框架适配器，KTD-7 实证）
+
+v1.1 R5：用 LangChain4j 1.0.0 写第二个 `AgentFunction` 实现，**依赖面仅 core + langchain4j、零 Spring AI**——从构建层证明"框架调用收敛在适配器窄表面、换框架只动适配器"。为复用 SpEL 解析，`SpelPromptResolver` 从 spring-ai 模块**下沉 core**（`com.agentflow.prompt`，public）+ 新增 `WorkflowContext` 重载（channel 扁平化收敛，Spring 适配器删私有 flatten）——框架无关件单一真相源。
+**LangChain4j 与 Spring AI 的关键差异**：裸 `ChatModel` 不像 Spring `ChatClient` 内置工具回调循环——适配器需**手写工具执行循环**（注册 `@Tool` → 模型发 toolExecutionRequests → `DefaultToolExecutor` 本地执行 → 回填 → 再 chat，≤5 轮防死循环，usage 跨轮累加计费）。这是"换框架表面更干净、但适配器代码唤起的取舍"，已记入 javadoc。
+
+### 坑：FatalException 是 checked 异常（LangChain4j）
+
+`FatalException extends AgentExecutionException`（checked）。在私有方法 `chatWithTools` 里 `throw new FatalException(...)` 必须显式声明 `throws FatalException`，否则编译错"cannot throw; must be caught or declared"；`execute()` 也需单独 `catch (FatalException e)` 分支原样抛（否则被 RuntimeException 分支再包装成误导性的 "LLM 调用失败"）。Spring 适配器同样用了 FatalException catch，但这是切 fresh 方法时踩到的、容易漏的编译点。
+
+### 实证发现：DefaultToolExecutor 内部吞异常（SEC-1 根因）
+
+原想给工具执行加"异常→通用 error 串"防护，但测试证明 LangChain4j 的 `DefaultToolExecutor.execute` **内部捕获 @Tool 抛的异常并回传原始消息**（"Error: <msg>"），根本不走适配器的 catch——所以适配器 catch 包不住框架吞掉的异常。这个实证决定了 SEC-1（工具异常详情可能经模型外泄）只能靠自定义 ToolExecutor 或接受框架默认，列为需人工决策项（见 `03-review-findings.md` / residual 文档），而非可机械修的本地 bug。

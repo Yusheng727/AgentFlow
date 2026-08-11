@@ -169,3 +169,22 @@ BSP Pipeline 可视化组件。按 super-step 分组渲染节点卡片，barrier
 
 ### YamlEditor
 contenteditable + 语法高亮 + 行号 + 实时校验（缺 nodes/agentflow 段警告）。提交工作流前校验 YAML 结构。
+
+---
+
+## 档 B 收尾 + v1.1（2026-08）
+
+### WorkflowSubmissionGuard（提交守卫）
+`POST /api/workflows` 提交时的预防性校验（档 B 安全缺口 #2）：DAG 节点数 > maxNodes 或预估成本 > maxCostUsd → **422 SUBMISSION_LIMIT**。在 initWorkflow 前拒绝（不产生执行记录）。`model/maxNodes/maxCostUsd` 任一 null 即禁用对应检查。
+
+### WorkflowBudget（per-workflow 预算累加器，R10）
+`budget_tokens`/`budget_cost` 声明在 YAML `agentflow:` 段，BspEngine 构造 `WorkflowBudget` 经 `AgentInput.budget()` 穿线。`record()` **edge-triggered**：只在首次跨过上界返回 true（不按节点数重复记 `budget_exceeded`）。synchronized 线程安全（超步内多节点并行记账）。
+
+### budget_exceeded（per-workflow 语义）
+`agentflow.workflow.cost.budget_exceeded` Counter。R10 后含义是"该工作流跨过自己声明的预算"，而非旧的"全局累计成本超全局阈值"。
+
+### LangChain4jAgentAdapter（v1.1 第二适配器）
+核心 AgentFunction 的第二个 LLM 框架实现，用 LangChain4j 1.0.0、**零 Spring AI**。窄表面对齐 `SpringAiAgentAdapter`：SpEL → `ChatModel.chat(ChatRequest)` → TokenUsage → AgentOutput。裸 ChatModel 无内置工具闭环 → 适配器手写工具执行循环（≤5 轮防死循环，usage 跨轮累加）。
+
+### SpelPromptResolver（core 复用件）
+prompt 模板 `${...}` 占位符的 SpEL 解析器，KTD-2 安全约束（SimpleEvaluationContext 禁 T()/反射）。v1.1 从 spring-ai 适配器**下沉 core**（`com.agentflow.prompt`）供两适配器共用——框架无关件单一真相源。

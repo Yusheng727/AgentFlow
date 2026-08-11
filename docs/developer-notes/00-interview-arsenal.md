@@ -258,3 +258,53 @@
 
 **反问准备**：
 - 面试官问「你怎么衡量代码质量」——答：三层——`mvn verify` 绿（编译+测试+覆盖率）+ 多 agent code review（逻辑/安全/混沌/数据迁移多视角）+ JaCoCo 80% 门禁。不只是「测试通过」，是「多视角审查 + 覆盖率门禁 + review 闭环」。
+
+---
+
+## 档 B 收尾 + v1.1（2026-08，最鲜活弹药）
+
+### WorkflowSubmissionGuard（安全缺口 #2）
+
+**可讲故事**：
+- 提交时预防性守卫：节点数 / 预估成本超上界 → 422 拒绝，在 initWorkflow 前（不产生脏记录）
+- 成本估算是预防性近似（prompt 长度估 token + 每节点基准 500），非记账——讲清楚"防超载 vs 精确计费"的边界
+- `model/maxNodes/maxCostUsd` 任一 null 即禁用——安全默认可开关
+
+**深挖点**：
+- 为什么是提交时不是 post-hoc 告警？（post-hoc 只能事后止损，起资源前拦才治本）
+- 拦截点在鉴权/授权之后、持久化之前，为什么？（守卫拒绝不该留执行记录）
+
+### R10 per-workflow 预算（WorkflowBudget）
+
+**可讲故事**：
+- `budget_tokens/budget_cost` 声明在 YAML `agentflow:` 段，`AgentInput.budget()` 穿线
+- **edge-triggered** 语义：只在首次跨过上界记一次 `budget_exceeded`，不按节点数重复——告警事件语义 vs 计数
+- 线程安全（synchronized，超步内多节点并行记账）
+
+**深挖点**：
+- 为什么不用全局阈值？（per-workflow 才是语义正确：每个工作流超自己的预算）
+- 为什么 edge-triggered？（全局 checkBudget 每次调用自增，事件数=节点数，不是"跨过预算"）
+
+### LangChain4jAgentAdapter（KTD-7 可移植性实证）★最强叙事
+
+**可讲故事**：
+- 第二个框架适配器，**依赖面仅 core + langchain4j、零 Spring AI**——从构建级证明"换框架只动适配器"
+- 窄表面对齐 Spring 适配器：SpEL → ChatModel → usage → AgentOutput，metadata schema 逐字段相同
+- 裸 ChatModel 无内置工具闭环 → 手写工具执行循环（≤5 轮防死循环，usage 跨轮累加计费）
+- `SpelPromptResolver` 下沉 core：框架无关件单一真相源，不重复造轮子
+
+**深挖点（面试官最可能问）**：
+- 「为什么不做同一个库里的第二个适配器？」——框架隔离，避免把 Spring AI 拉进 LangChain4j classpath 掺水
+- 「怎么证明可移植性是真的？」——构建级：新 module 的 pom 依赖里没有 spring-ai；运行时：两适配器独立跑通冒烟测试
+- 「裸 ChatModel 为什么手写工具循环？」——LangChain4j 内置闭环在 AiServices（不同范式），要跟 Spring 适配器同构就不该切 ApiServices
+
+### 本轮 P1 bug（有界循环的「终止态表达」）★工程 rigor 展示
+
+**可讲故事**：
+- 工具循环静默成功 bug：上限到点直接返回 null-content，一个 broken 的 agent 循环被记为绿色 SUCCESS + 丢弃已排期工具
+- **两个 reviewer 独立抓到同一处**（adversarial + correctness）→ cross-reviewer agreement 提权 confidence 100
+- 修复：超限判 FatalException，不伪装成功——讲「有界循环不只保证终止，还要保证终止态表达」
+
+**深挖点**：
+- 「这种 bug 在 agent 编排里为什么危险？」（坏状态伪装成功，下游 SpEL 才炸，根因藏在 warn 日志）
+- 「为什么不用截断标志而是直接失败？」（截断的 token/副作用已不可回滚，安静成功比显式失败代价更高）

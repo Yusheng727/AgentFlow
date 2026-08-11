@@ -192,3 +192,49 @@
 - **正确解法需设计**：TTL eviction（trace 存活 N 分钟后自动清）或 Caffeine LRU（容量上限）是 v1.1 范围，plan 已声明"v1 不主动清理"。demo 规模 <100 workflow 内存占用 <1MB，不阻断 v1 演示。
 
 **为什么不选**：盲目按 reviewer 建议 remove 会破坏用例——体现 review 修复要懂设计权衡，不是机械执行。5 票共识是"需生产前解决"，不是"现在阻断合并"。
+
+---
+
+## 为什么 WorkflowSubmissionGuard 用「提交时预防」而不是依赖 post-hoc 告警？
+
+**决策**：`POST /api/workflows` 提交时做预防性守卫——节点数 / 预估成本任一超上界 → 422 拒绝（在 initWorkflow 前）。
+
+**为什么**：
+- **post-hoc 只能事后止损**：既有的 `budget_exceeded` 是跑完之后才报警，无界 VT + 烧成本已经发生。恶意/失控提交要在**起资源前**拦截。
+- **拦截点选在鉴权/授权之后、持久化之前**：解析 YAML → 工具授权 → 守卫 → initWorkflow。守卫拒绝不产生执行记录（`listByCreatedBy` 无残留），避免脏数据。
+
+**为什么不选**：只在 mock 记账里全局设阈值——那不是 per-workflow、也不拦提交。预防性是安全缺口 #2 的本质，post-hoc 只是补充。
+
+## 为什么 R10 预算用 per-workflow 的 edge-triggered 累加器（而非全局 checkBudget）？
+
+**决策**：新增 `WorkflowBudget` 累加器（`budget_tokens`/`budget_cost` 声明在 YAML `agentflow:` 段），`record()` 只在累计用量**首次跨过上界**返回 true。
+
+**为什么**：
+- **per-workflow 是语义正确**：全局 `checkBudget(totalCost())` 对所有工作流共享一个 cost counter，无法表达"这个工作流超了自己的预算"。
+- **edge-triggered 是告警语义正确**：全局实现每次调用都自增（事件数=节点数）；per-workflow 应该记"跨过预算"这件事一次，而不是每个节点记一次。
+
+**为什么不选**：把 per-workflow 状态塞进 `AgentFlowMetrics` 单例（会泄漏/难清理）；或共用全局阈值（无法单工作流控制）。独立 `WorkflowBudget` 值对象 + 线程安全 synchronized（超步内多节点并行记账，低频可忽略锁开销）。
+
+## 为什么 v1.1 造第二个适配器 LangChain4j？（KTD-7 可移植性实证）
+
+**决策**：用 LangChain4j 1.0.0 写 `LangChain4jAgentAdapter`，依赖面**仅 core + langchain4j、零 Spring AI**。
+
+**为什么**：
+- **KTD-7 的承诺要有实证不是口号**："所有框架调用收敛在适配器窄表面、换框架只动适配器"——用一个完全不依赖 Spring AI 的第二个适配器，从**构建级**证明（引擎/DSL/上游零改动），面试官问"换框架怎么办"时有代码可指。
+- **零 Spring AI 依赖是刻意的**：若新 module 依赖 spring-ai 模块去复用 `OutputSchemaValidator`，会把 Spring AI 拉进 LangChain4j 的 classpath，可移植性证明就掺水。
+
+**为什么不选**：在 spring-ai 模块里加一个 LangChain4j 适配器重逢（框架同仓，哈希不了隔离）；或用 AiServices 那套接口抽象（与 Spring 适配器的 ChatModel 窄表面不同构）。保持两适配器**同构窄表面**（AgentFunction → SpEL → ChatClient/ChatModel → usage → AgentOutput），对比才成立。
+
+## 为什么把 SpelPromptResolver 下沉 core？
+
+**决策**：`SpelPromptResolver` 从 spring-ai 适配器（包私有）提升为 core 的 `com.agentflow.prompt` public 类，+ `WorkflowContext` 重载收敛 channel 扁平化。
+
+**为什么**：prompt 模板 SpEL 解析是 **DSL/Agent 域逻辑、与 LLM 框架无关**——两个适配器都要用。放 core = 单一真相源，不重复造轮子（否则 LangChain4j 适配器要么复制一份、要么反向依赖 spring-ai 模块把 Spring 拉进来）。KTD-2 安全约束（SimpleEvaluationContext 禁 T()/反射）随类移动原样保留，未因 public 化改变。
+
+## 为什么 LangChain4j 工具执行循环要手写？
+
+**决策**：裸 `ChatModel` 不像 Spring `ChatClient` 内置工具回调循环，适配器自建 `chat → toolExecutionRequest → DefaultToolExecutor 执行 → 回填 → 再 chat` 循环，≤5 轮。
+
+**为什么**：LangChain4j 的内置闭环在 AiServices（接口抽象）那层，不在 ChatModel；为保持与 Spring 适配器同构的 ChatModel 窄表面，需自行驱动。有界 + usage 跨轮累加计费是必要约束。
+
+**为什么不选**：切 AiServices 会引入与 Spring 适配器完全不同的调用范式，KTD-7"同形对比"就破了强度。

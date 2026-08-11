@@ -124,3 +124,42 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - **PG 零测试**: `PostgresCheckpointManager` 的 Semaphore/ON CONFLICT/JSONB/Flyway 全未测试（当前只用 InMemory 测）。需 H2 或 Testcontainers 补集成测试。这是 U5 最大的测试缺口。
 
 **面试讲法（被问「还有什么没做好」时）**：「我清楚知道哪些是 known risk：比如 PostgresCheckpointManager 还没有集成测试（只有 InMemory 覆盖），Recovery 的版本检查依赖 U8 的 workflow_definitions 表还没建。这些不是 bug，是 v1 范围外的 stretch，我记在 handoff 文档里，演示前补。」——主动暴露 known gap 比假装完美更可信。
+
+---
+
+## v1.1 回顾 · LangChain4jAgentAdapter ce-code-review（2026-08-11）
+
+- **审查方式**：ce-code-review 多 agent 流程，10 persona reviewer 并行（correctness/security/adversarial 用 Opus，其余 Sonnet）
+- **diff 规模**：10 文件，~772 行（新模块 agentflow-adapters/langchain4j + SpelPromptResolver 下沉 core）
+- **意图**：v1.1 R5/KTD-7 的第二个框架适配器——用 LangChain4j 1.0.0、零 Spring AI 依赖，实证"框架调用收敛在适配器窄表面、换框架只动适配器"
+
+### 本轮最高危发现（P1，adversarial + correctness 交叉确认 → confidence 100）
+
+**工具循环静默成功 bug**：`chatWithTools` 的循环上限 `MAX_TOOL_ROUNDS-1`（第 4 轮）在"模型仍要工具"时直接返回 `aiMessage.text()`——工具专用轮 text 为 null → `execute()` 造出 `AgentOutput(null)` + `nodeTrace.succeed(null)`，一个 **broken 的 agent 循环被记为绿色 SUCCESS**：前 3 轮副作用（外部调用 + token 计费）已发生、无回滚无信号、第 4 轮 pending 工具被丢弃；下游 `${context.<nodeId>}` SpEL 再抛 Fatal（真正的"截断"隐在 warn 日志里）。
+
+**修复**（`e86059e`，已提交验证）：轮数耗尽仍要工具 → **抛 `FatalException` 判节点失败**，而非静默 SUCCESS-with-null；`chatWithTools` 显式 `throws FatalException`，`execute()` 加 FatalException 分支原样抛（对齐 Spring 适配器 schema 路径处理）。配套测试 `toolLoopBoundedFailsNode` 改为断言 FatalException。
+
+**教训**：有界循环不能只保证"终止"，还要保证**终止态表达**——cap 触发时要么 FAILED 要么带截断标志，绝不能伪装 SUCCESS。这类"坏状态伪装成功"是 agentic 编排里最隐蔽的缺陷。
+
+### 其余已应用修复（同 commit `e86059e`）
+
+- **REL-1（P2, reliability）**：工具循环顶缺 `Thread.interrupted()` 检查 → NodeExecutor 取消后仍可能多开最多 3 轮付费 LLM 调用。修复：每轮循环顶检查中断、提前停手（取消场景下结果已被 future.cancel 丢弃，仅防追加计费）。
+- **api-contract + agent-native（P2）**：适配器算了 usage 但不记账 → LangChain4j 工作流在 Grafana token/成本面板空白。修复：注入可空 `AgentFlowMetrics`，成功路径 `recordTokens` 记 token/成本（Grafana 数据源）。
+- **api-contract-01（P2）**：无 `OutputSchemaValidator` → `structuredOutput` 恒空，与 Spring 适配器行为**静默分歧**。修复：节点声明 `output_schema` 时 `log.warn` 明示不支持（防静默；完整 schema 校验下沉 core 后补，见 residual）。
+- **executeTool 硬化**：未知工具名 `jsonEscape`；异常返回通用 error（防御纵深）；`@Tool` 返回 null → 哨兵。
+
+### 延后 / 需人工决策项（已入 residual 文档，未自动改）
+
+> 完整明细见 `docs/residual-review-findings/langchain4j-adapter-review.md`（评审后新建的持久化位置）。
+
+- **SEC-1（P2/manual）工具异常详情泄漏给模型**：LangChain4j `DefaultToolExecutor` **内部吞异常并回传原始消息**，不走适配器 catch——框架行为、等价 Spring 工具错误处理，但异常若含 SQL/路径/连接串会被模型在 content 复述外泄。真修需自定义 `ToolExecutor`（策略决策）。
+- **ErrorClassifier 不识别 `dev.langchain4j.*` 异常（M2+REL-2，P2/manual）**：core 只判 `java.net.*`/`org.springframework.web.client.*`，LC4j 网络瞬时异常误判 Fatal 不重试；且 springframework 前缀属框架知识泄漏进 core。需圈定 LC4j 具体异常类型（防宽前缀把致命误判临时）。
+- **继承/接口 `@Tool` 不注册（ADV-2，P2/manual）**：`collectTools` 只扫 `getDeclaredMethods()`。修法（`getMethods()`/层级遍历）可能丢非 public @Tool，需处理。
+- **`mapException` 两适配器逐字重复（M1, P2/advisory）**：仅 2 消费者，暂不收敛（避免过早共享抽象）。
+
+### 共享限制（非 LC4j 引入，两真实适配器共有）
+
+- **预算未在真实 LLM 路径强制执行**：R10 `WorkflowBudget` 经 `AgentInput.budget()` 穿线，但只有 `MockAgentFunction` 消费；Spring 与 LangChain4j 两真实适配器都不读——YAML `budget_*` 在真实路径不生效。
+- **`redactor` 默认 `Function.identity()`** 不脱敏；生产应注入 PromptRedactionFilter。
+
+**面试讲法**：「这个 P1 bug 是两个 reviewer 独立抓到同一处（交叉确认提到 100）——我把有界循环的『终止态表达』拎出来讲：上限不能只防死循环，还要决定超限时以什么状态结束。这正好体现 review 交叉验证的价值。」
