@@ -169,18 +169,18 @@ public class LangChain4jAgentAdapter implements AgentFunction {
         long completionTokens;
         try {
             if (schemaValidator != null && !input.outputSchema().isEmpty()) {
-                // schema 校验 + 重试：validator 内部多次调 chatWithTools，用 AtomicReference 捕获最后一次 usage
-                // （与 Spring 适配器 U3-5 同款，补上 LC4j 对 structuredOutput 的支持）
+                // schema 校验 + 重试：validator 内部多次调 chatWithTools，用 AtomicReference 捕获末次 usage
+                // 供 AgentOutput.metadata（展示用）；预算/指标已在 chatWithTools 逐轮记账，重试花费不丢失
                 java.util.concurrent.atomic.AtomicReference<LlmResult> last = new java.util.concurrent.atomic.AtomicReference<>();
                 OutputSchemaValidator.ValidatedOutput vo = schemaValidator.validateWithRetry(
-                        resolvedPrompt, input.outputSchema(), p -> callForSchema(p, last));
+                        resolvedPrompt, input.outputSchema(), p -> callForSchema(input, p, last));
                 content = vo.content();
                 structuredOutput = vo.structuredOutput();
                 LlmResult lastResult = last.get();
                 promptTokens = lastResult == null ? 0 : lastResult.promptTokens();
                 completionTokens = lastResult == null ? 0 : lastResult.completionTokens();
             } else {
-                LlmResult r = chatWithTools(resolvedPrompt);
+                LlmResult r = chatWithTools(input, resolvedPrompt);
                 content = r.content();
                 promptTokens = r.promptTokens();
                 completionTokens = r.completionTokens();
@@ -202,13 +202,6 @@ public class LangChain4jAgentAdapter implements AgentFunction {
             throw mapException(e); // 传原始 e（保留 LC4j 框架标记，toExecutionException 沿 cause 兜底）
         }
 
-        // 2.5 v1.1 记账 + C1 per-workflow 预算（Grafana token/成本 + R10 budget 触发）。
-        //    metrics 为 null 则 no-op；budget 为 null 只记 token/cost。失败路径已抛，故在成功路径。
-        if (metrics != null) {
-            metrics.recordTokens(input.agentName(), model, promptTokens, completionTokens);
-            metrics.recordBudget(input.budget(), model, promptTokens, completionTokens);
-        }
-
         // 3. 构造 AgentOutput（content + structuredOutput + metadata{tokens}，与 Spring 适配器同 schema）
         Map<String, Object> metadata = new HashMap<>();
         metadata.put("promptTokens", promptTokens);
@@ -226,9 +219,10 @@ public class LangChain4jAgentAdapter implements AgentFunction {
      * 故把 {@code chatWithTools} 的检查型 {@link FatalException}（工具链截断）包成 RuntimeException，
      * 由 execute() 的 catch 解包原样抛。同时把本次调用 usage 存入 last（跨 schema 重试取末次，与 Spring 一致）。
      */
-    private String callForSchema(String prompt, java.util.concurrent.atomic.AtomicReference<LlmResult> last) {
+    private String callForSchema(AgentInput input, String prompt,
+                                 java.util.concurrent.atomic.AtomicReference<LlmResult> last) {
         try {
-            LlmResult r = chatWithTools(prompt);
+            LlmResult r = chatWithTools(input, prompt);
             last.set(r);
             return r.content();
         } catch (FatalException fe) {
@@ -248,7 +242,7 @@ public class LangChain4jAgentAdapter implements AgentFunction {
      * 驱动（AiServices 是另一套接口抽象，为保持与 Spring 适配器同构的 ChatModel 窄表面而未采用）。
      * usage 跨轮累加（每轮都真实计费）。
      */
-    private LlmResult chatWithTools(String prompt) throws FatalException {
+    private LlmResult chatWithTools(AgentInput input, String prompt) throws FatalException {
         List<ChatMessage> messages = new ArrayList<>();
         messages.add(new UserMessage(prompt));
         List<ToolSpecification> specs = new ArrayList<>();
@@ -263,6 +257,7 @@ public class LangChain4jAgentAdapter implements AgentFunction {
             // 此处仅尽早停手防追加计费。
             if (Thread.currentThread().isInterrupted()) {
                 log.warn("工具循环检测到线程中断，提前停止（已累计 tokens={}/{}）", promptTokens, completionTokens);
+                metricAndBudget(input, promptTokens, completionTokens);
                 return new LlmResult(null, promptTokens, completionTokens);
             }
             ChatRequest.Builder builder = ChatRequest.builder().messages(messages);
@@ -271,8 +266,13 @@ public class LangChain4jAgentAdapter implements AgentFunction {
             }
             ChatResponse response = chatModel.chat(builder.build());
             TokenUsage usage = response == null ? null : response.tokenUsage();
-            promptTokens += usage == null || usage.inputTokenCount() == null ? 0 : usage.inputTokenCount();
-            completionTokens += usage == null || usage.outputTokenCount() == null ? 0 : usage.outputTokenCount();
+            long roundPrompt = usage == null || usage.inputTokenCount() == null ? 0 : usage.inputTokenCount();
+            long roundCompletion = usage == null || usage.outputTokenCount() == null ? 0 : usage.outputTokenCount();
+            promptTokens += roundPrompt;
+            completionTokens += roundCompletion;
+            // C1 review：按真实付费调用<b>逐轮</b>记账——工具多轮、schema 重试、随后失败已付费的轮次都计入
+            // token/成本与 per-workflow 预算，不再只在成功路径记末次（否则重试/失败花费被静默剔除，预算被低估）
+            metricAndBudget(input, roundPrompt, roundCompletion);
 
             AiMessage aiMessage = response == null ? null : response.aiMessage();
             boolean hasToolRequests = aiMessage != null && aiMessage.hasToolExecutionRequests();
@@ -291,6 +291,16 @@ public class LangChain4jAgentAdapter implements AgentFunction {
                 messages.add(new ToolExecutionResultMessage(req.id(), req.name(), executeTool(executors, req)));
             }
         }
+    }
+
+    /** 按一次真实 LLM 调用的用量记账（metrics 为 null 则 no-op；budget 为 null 只记 token/cost）。
+     *  从 chatWithTools 逐轮调用——保证已付费的轮次无论最终成败都计入指标与预算（C1 review 修复）。 */
+    private void metricAndBudget(AgentInput input, long promptTokensDelta, long completionTokensDelta) {
+        if (metrics == null) {
+            return;
+        }
+        metrics.recordTokens(input.agentName(), model, promptTokensDelta, completionTokensDelta);
+        metrics.recordBudget(input.budget(), model, promptTokensDelta, completionTokensDelta);
     }
 
     /** 执行单个工具请求。未知工具/异常都反馈给模型（不中断循环，LangChain4j AiServices 同款语义），
@@ -329,7 +339,12 @@ public class LangChain4jAgentAdapter implements AgentFunction {
         for (Object bean : toolBeans) {
             for (Method m : collectToolMethods(bean.getClass())) {
                 ToolSpecification spec = ToolSpecifications.toolSpecificationFrom(m);
-                specs.add(spec);
+                // C1 review（agent-native+adversarial）：executors 键是 spec.name()（last-wins）。同名 @Tool
+                // （重载，或 B3 扩大枚举后两个共享类层级的 bean）会给模型重复 ToolSpecification 名——只在
+                // 首次遇到某名字时 add 一次，执行器仍按 name 映射到具体 Method
+                if (!executors.containsKey(spec.name())) {
+                    specs.add(spec);
+                }
                 executors.put(spec.name(), new SafeToolExecutor(bean, m));
             }
         }
@@ -398,8 +413,14 @@ public class LangChain4jAgentAdapter implements AgentFunction {
                 Object result = invoke(args);
                 return render(result);
             } catch (Exception e) { // 覆盖 InvocationTargetException(checked) + 参数解析 Runtime
+                Throwable root = deepestThrowable(e);
+                // 中断恢复（C1 review reliability）：cancel 在工具阻塞于可中断操作时到达 → InterruptedException
+                // 清除 flag；不恢复则上层 REL-1 中断检查失效，已取消节点会再开付费 LLM 轮
+                if (root instanceof InterruptedException) {
+                    Thread.currentThread().interrupt();
+                }
                 // 真实 cause 只进服务端日志——@Tool 异常 msg 可能含敏感内部细节，绝不能进模型/result（SEC-1）
-                log.warn("工具执行失败 tool={}: {}", method.getName(), deepestThrowable(e).toString());
+                log.warn("工具执行失败 tool={}: {}", method.getName(), root);
                 return "{\"error\":\"tool execution failed\"}";
             }
         }
@@ -437,28 +458,19 @@ public class LangChain4jAgentAdapter implements AgentFunction {
             }
         }
 
-        /** 参数值 → 目标类型（String/基本类型/其余走 Jackson 转换，对齐 DefaultToolExecutor 语义）。 */
+        /**
+         * 参数值 → 目标类型（对齐 DefaultToolExecutor/Jackson 语义）。
+         * <p>C1 review（maintainability+testing+adversarial 三评审合流）：删掉手写 int/long/double/boolean
+         * 分支——它们对「字符串数字」（{"count":"3"}→int）会 ClassCastException、对越界静默截断、对数字 1→boolean
+         * 误判。全部交给 {@link ObjectMapper#convertValue}：字符串→数字能转、无法转换抛清晰异常而非常驻泛化错误的
+         * 静默截断，与框架 `coerceArgument` 行为对齐。
+         */
         private Object coerce(Object value, Class<?> type) {
-            if (value == null) {
-                return null;
-            }
-            if (type.isInstance(value)) {
+            if (value == null || type.isInstance(value)) {
                 return value;
             }
             if (type == String.class) {
                 return String.valueOf(value);
-            }
-            if (type == int.class || type == Integer.class) {
-                return ((Number) value).intValue();
-            }
-            if (type == long.class || type == Long.class) {
-                return ((Number) value).longValue();
-            }
-            if (type == double.class || type == Double.class) {
-                return ((Number) value).doubleValue();
-            }
-            if (type == boolean.class || type == Boolean.class) {
-                return value instanceof Boolean b ? b : Boolean.valueOf(String.valueOf(value));
             }
             return MAPPER.convertValue(value, type);
         }

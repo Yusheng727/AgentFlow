@@ -634,4 +634,161 @@ class LangChain4jAgentAdapterTest {
         assertThat(out.content()).isEqualTo("done"); // 接口工具被执行并回填
         assertThat(chatCalls.get()).isEqualTo(2);
     }
+
+    @Test
+    @DisplayName("C1 review coerce：字符串型数字参数可转（{\"count\":\"3\"}→int 3），不再 ClassCastException")
+    void coerceCoercesStringNumericArgs() throws Exception {
+        class CalcTools {
+            @Tool
+            int add(int count, int base) { return count + base; }
+        }
+        CalcTools bean = new CalcTools();
+        ToolExecutor exec = new LangChain4jAgentAdapter.SafeToolExecutor(bean,
+                bean.getClass().getDeclaredMethod("add", int.class, int.class));
+        String r = exec.execute(ToolExecutionRequest.builder().id("a").name("add")
+                .arguments("{\"count\":\"3\",\"base\":4}").build(), null);
+        assertThat(r).isEqualTo("7"); // "3"→3 经 Jackson convertValue，加 base 4
+    }
+
+    @Test
+    @DisplayName("B3 review 去重：子类重写基类同签名 @Tool → concrete 实现优先（只注册一个 spec）")
+    void overriddenToolConcreteWinsDedup() throws Exception {
+        class BaseTools {
+            @Tool("op")
+            String op() { return "base-result"; }
+        }
+        class ChildTools extends BaseTools {
+            @Override
+            @Tool("op")
+            String op() { return "child-result"; }
+        }
+        AtomicInteger chatCalls = new AtomicInteger();
+        AtomicInteger specCount = new AtomicInteger(-1);
+        ChatModel model = new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                if (chatCalls.incrementAndGet() == 1) {
+                    specCount.set(request.toolSpecifications() == null ? 0 : request.toolSpecifications().size());
+                    return ChatResponse.builder().aiMessage(AiMessage.from(
+                            ToolExecutionRequest.builder().id("r").name("op").arguments("{}").build()))
+                            .tokenUsage(new TokenUsage(1, 1)).build();
+                }
+                boolean hasChild = request.messages().stream()
+                        .anyMatch(m -> m instanceof ToolExecutionResultMessage tr && tr.text().contains("child-result"));
+                return ChatResponse.builder().aiMessage(AiMessage.from(hasChild ? "done" : "no")).build();
+            }
+        };
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(model, List.of(new ChildTools()), null, null);
+        AgentOutput out = adapter.execute(input("DEDUP", "1", new WorkflowContext()));
+
+        assertThat(specCount.get()).isEqualTo(1);       // 同签名只注册一个 spec（不重复 ToolSpecification）
+        assertThat(out.content()).isEqualTo("done");     // 具体实现（child）被调用
+    }
+
+    @Test
+    @DisplayName("B3 review：同名重载 @Tool 只向模型暴露一个 spec（不再重复 ToolSpecification 名）")
+    void duplicateToolNameOnlySingleSpec() throws Exception {
+        class OverloadTools {
+            @Tool
+            String op(int x) { return "int:" + x; }
+            @Tool
+            String op(long x) { return "long:" + x; }
+        }
+        AtomicInteger chatCalls = new AtomicInteger();
+        AtomicInteger specCount = new AtomicInteger(-1);
+        ChatModel model = new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                chatCalls.incrementAndGet();
+                specCount.set(request.toolSpecifications() == null ? 0 : request.toolSpecifications().size());
+                return ChatResponse.builder().aiMessage(AiMessage.from("done"))
+                        .tokenUsage(new TokenUsage(1, 1)).build();
+            }
+        };
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(model, List.of(new OverloadTools()), null, null);
+        adapter.execute(input("DUP", "hi", new WorkflowContext()));
+
+        assertThat(specCount.get()).isEqualTo(1); // 重载同名只注册一个 spec
+    }
+
+    @Test
+    @DisplayName("C1 review interrupt：工具抛 InterruptedException → 恢复中断标志（不吞）")
+    void interruptionRestoresFlag() throws Exception {
+        class InterruptTool {
+            @Tool
+            String blocking() throws InterruptedException { throw new InterruptedException("cancel"); }
+        }
+        InterruptTool bean = new InterruptTool();
+        ToolExecutor exec = new LangChain4jAgentAdapter.SafeToolExecutor(bean,
+                bean.getClass().getDeclaredMethod("blocking"));
+        String r = exec.execute(ToolExecutionRequest.builder().id("i").name("blocking").arguments("{}").build(), null);
+
+        assertThat(r).contains("tool execution failed");
+        assertThat(Thread.currentThread().isInterrupted()).isTrue(); // 标志被恢复
+        Thread.interrupted(); // 清标志避免污染后续测试
+    }
+
+    @Test
+    @DisplayName("C1 review 预算：schema 重试每次尝试的用量都计入预算（非仅末次）")
+    void schemaRetryBudgetAccumulatesAllAttempts() throws Exception {
+        var registry = new SimpleMeterRegistry();
+        var metrics = new AgentFlowMetrics(registry);
+        ChatModel model = new ChatModel() {
+            int call = 0;
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                call++;
+                String text = call < 3 ? "not-json-at-all" : "{\"riskLevel\":\"HIGH\"}";
+                return ChatResponse.builder().aiMessage(AiMessage.from(text)).tokenUsage(new TokenUsage(10, call)).build();
+            }
+        };
+        Map<String, Object> schema = new java.util.LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", Map.of("riskLevel", Map.of("type", "string", "enum", List.of("LOW", "MEDIUM", "HIGH"))));
+        schema.put("required", List.of("riskLevel"));
+        WorkflowBudget budget = new WorkflowBudget(null, 100.0);
+        AgentInput in = new AgentInput("S1", "lc4j-agent", "t", new WorkflowContext(),
+                Map.of(), List.of(), schema, null, null, budget);
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(model, List.of(), null, null,
+                metrics, "gpt-4o-mini", new OutputSchemaValidator());
+        AgentOutput out = adapter.execute(in);
+
+        // 三次尝试全计入预算/token：10 in×3 + (1+2+3) out；末次 metadata 语义保留
+        // gpt-4o-mini: in $0.15 / out $0.60 per 1M
+        assertThat(budget.cost()).isCloseTo((30.0 * 0.15 + 6.0 * 0.60) / 1_000_000.0, within(1e-9));
+        assertThat(registry.counter(AgentFlowMetrics.TOKENS_CONSUMED,
+                "agent", "lc4j-agent", "model", "gpt-4o-mini").count()).isEqualTo(36.0);
+        assertThat(out.metadata()).containsEntry("totalTokens", 13L); // 末次 10+3
+    }
+
+    @Test
+    @DisplayName("C1 review 预算：工具链耗尽（Fatal）后已付费轮次仍计入预算与指标")
+    void failurePathTokensChargedToBudget() throws Exception {
+        var registry = new SimpleMeterRegistry();
+        var metrics = new AgentFlowMetrics(registry);
+        AtomicInteger chatCalls = new AtomicInteger();
+        ChatModel model = new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                chatCalls.incrementAndGet();
+                // 每轮都要求未知工具 → 达到 MAX_TOOL_ROUNDS 驱动 FatalException（各轮已计费）
+                return ChatResponse.builder()
+                        .aiMessage(AiMessage.from(ToolExecutionRequest.builder().id("r").name("noSuchTool")
+                                .arguments("{}").build()))
+                        .tokenUsage(new TokenUsage(10, 5)).build();
+            }
+        };
+        WorkflowBudget budget = new WorkflowBudget(null, 100.0);
+        AgentInput in = new AgentInput("F1", "lc4j-agent", "t", new WorkflowContext(),
+                Map.of(), List.of(), Map.of(), null, null, budget);
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(model, List.of(), null, null,
+                metrics, "gpt-4o-mini");
+        assertThatThrownBy(() -> adapter.execute(in)).isInstanceOf(FatalException.class);
+
+        assertThat(chatCalls.get()).isEqualTo(5); // MAX_TOOL_ROUNDS=5 轮
+        // 5 轮 × (10 in + 5 out) 即使节点失败也计入预算与 token
+        assertThat(budget.cost()).isCloseTo((10.0 * 0.15 + 5.0 * 0.60) * 5 / 1_000_000.0, within(1e-9));
+        assertThat(registry.counter(AgentFlowMetrics.TOKENS_CONSUMED,
+                "agent", "lc4j-agent", "model", "gpt-4o-mini").count()).isEqualTo(75.0);
+    }
 }

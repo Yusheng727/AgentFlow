@@ -216,4 +216,22 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 
 **面试讲法**：「工具注册有个隐蔽坑：反射只用 getDeclaredMethods 会漏基类/接口上的 @Tool；但换 getMethods 又会丢包私有的 @Tool（工具常写包私有）。所以不能二选一，得**全层级遍历 + 签名去重**——既补上继承/接口面，又保住非 public 方法。这是个『看似一行改动、实则两个方向都会踩坑』的典型。」——「反射工具注册的完整边界」的强表达。
 
+## v1.1 回顾 · C1+B1+B3 ce-code-review 复审与应用修复（2026-08-12，10 评审）
+
+**背景**：对已合 main 的 C1+B1+B3 三个 commit（`e2a9664/2c6973f/8318d92`，BASE `4c59ac0`）做 10-persona 代码复审。多数评审确认 B1（SEC-1 泄漏已闭环）、C1 不双计、B3 层级遍历方向正确；抓到 7 条 P2 真实缺口（cross-reviewer 提升至 conf 100）。**已应用**（下述）+ 补 6 测试，全仓 verify 绿。
+
+**已应用修复（`fix(review)`）**：
+- **预算逐轮记账（correctness+reliability，conf 100）**：`chatWithTools` 每轮真实付费调用即 `metricAndBudget(...)`，schema 重试/工具多轮/**随后失败**的轮次都计入预算与 token——修复「schema last-wins 只记末次 → 重试花费被剔除（undercount ≤3x）」与「节点失败路径不记预算」两条（LC4j）。
+- **coerce 归一 Jackson（maintainability+adversarial+testing，conf 100）**：删手写 int/long/double/boolean 分支，统一 `MAPPER.convertValue`——修复「字符串数字 `{"count":"3"}`→CCE、越界静默截断、数字 1→boolean 误判」。
+- **重名 @Tool 去重（agent-native+adversarial，conf 100）**：`collectTools` 仅首次遇某 `spec.name()` 才 `specs.add`——B3 扩大枚举后同名重载/共享基类不再给模型重复 ToolSpecification 名。
+- **中断标志恢复（reliability，conf 75）**：`SafeToolExecutor` root cause 为 `InterruptedException` 时 `Thread.currentThread().interrupt()`——避免 defeat REL-1 中断、已取消节点再开付费轮。
+- 补测试：coerce 字符串数字 / 重写 dedup concrete-wins / 同名重载单 spec / 中断标志恢复 / schema 重试预算累加 / 失败路径预算计入。
+
+**待人工决策（未自动改）**：
+- **预算记账非阻断**（agent-native，P2 manual）：`src/main` 无任何代码读 `WorkflowBudget.isExceeded()` 去 halt/skip——C1 文档写的「强制执行」与代码（记账/告警）不符。二选一：改文档为「记账/告警（非阻断）」或加 pre-call guard（isExceeded → FatalException）。
+- **Spring 适配器预算路径**（正确性上同样存在 schema last-wins / 失败路径缺口，且 8-arg 构造无生产接线）：本批只修了 LC4j（工具循环所在地），Spring 因 advisors + 无生产消费者未动——若后续接真实 Spring 路径需补。
+- **metrics==null 静默停用预算**（adversarial，conf 50 → residual）：两真实适配器把 recordBudget 挂 metrics 非空之后，手配/极简部署无 Micrometer bean 时预算被静默禁用；且仓库内 demo-api/starter **均不构造真实适配器**（无生产接线）——端到端预算强制在仓库内不可验证（同 B2「retryPolicy wired null」模式）。
+
+**面试讲法**：「审自己前一轮的代码，10 个 persona 抓到一个共性：C1 预算只在成功路径记**末次** token——schema 重试（3 次真实付费）只算最后一次，重试花的 2/3 成本被静默剔除，正是『测试绿 ≠ 生产生效』的又一形态。修复是把记账从『成功路径收尾』改成『每轮真实调用即记』，重试和失败轮自然都进预算。另外自写 coerce 想对齐 DefaultToolExecutor 却漏了字符串数字→CCE——教训是**尽量复用框架/Jackson 语义，别手写易碎的强转**。」——这是「跨评审互证抓分数账 bug + 复用而非重造」的强表达。
+
 **面试讲法**：「我写过 update 打的 P1 是『测试全绿但功能没生效』——根因是框架异常是 marker-外层-包裹结构，适配器 unwrap 剥掉了可重试标记，而测试用了无 cause 的构造器给了假确认。两位评审各自对 jar 做 javap 独立证实同一处，交叉提到 conf 100。教训：测试必须用框架真实产出的形状。」——这是「怎么防止假绿测试」的强表达。
