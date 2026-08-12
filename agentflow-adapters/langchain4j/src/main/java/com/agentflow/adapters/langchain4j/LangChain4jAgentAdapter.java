@@ -38,6 +38,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -319,18 +320,55 @@ public class LangChain4jAgentAdapter implements AgentFunction {
                 .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 
-    /** 反射扫描 @Tool bean：方法 → ToolSpecification（注册给模型）+ SafeToolExecutor（本地安全执行）。 */
+    /**
+     * 反射扫描 @Tool bean：方法 → ToolSpecification（注册给模型）+ SafeToolExecutor（本地安全执行）。
+     * <p>B3/ADV-2：改用 {@link #collectToolMethods} 全层级遍历（含基类/接口），不再用
+     * {@code getDeclaredMethods()}（只扫本类，漏继承 @Tool）。
+     */
     private void collectTools(List<ToolSpecification> specs, Map<String, ToolExecutor> executors) {
         for (Object bean : toolBeans) {
-            for (Method m : bean.getClass().getDeclaredMethods()) {
-                if (!m.isAnnotationPresent(Tool.class)) {
-                    continue;
-                }
+            for (Method m : collectToolMethods(bean.getClass())) {
                 ToolSpecification spec = ToolSpecifications.toolSpecificationFrom(m);
                 specs.add(spec);
                 executors.put(spec.name(), new SafeToolExecutor(bean, m));
             }
         }
+    }
+
+    /**
+     * B3 收集类层级上所有 @Tool 方法：本类 + 基类 + 接口（含其父接口）。不用 {@code getMethods()}——
+     * 那会丢非 public @Tool（本项目/工具多有包私有方法，如 SafeToolExecutor 的测试）；也不能只看
+     * {@code getDeclaredMethods()}——那漏基类/接口。故逐层用 {@code getDeclaredMethods()} 扫 + 签名去重
+     * （类先于接口/基类），保证具体实现优先、同一逻辑方法不重复注册。
+     */
+    private static List<Method> collectToolMethods(Class<?> type) {
+        Map<String, Method> bySignature = new LinkedHashMap<>();
+        walkHierarchy(type, bySignature);
+        return new ArrayList<>(bySignature.values());
+    }
+
+    private static void walkHierarchy(Class<?> type, Map<String, Method> acc) {
+        if (type == null || type == Object.class) {
+            return;
+        }
+        for (Method m : type.getDeclaredMethods()) {
+            if (m.isAnnotationPresent(Tool.class)) {
+                acc.putIfAbsent(signature(m), m);
+            }
+        }
+        for (Class<?> itf : type.getInterfaces()) {
+            walkHierarchy(itf, acc);
+        }
+        walkHierarchy(type.getSuperclass(), acc);
+    }
+
+    /** 方法签名（名 + 参数类型）作去重键：类实现/接口抽象/基类同逻辑方法只留最先那个（类优先）。 */
+    private static String signature(Method m) {
+        StringBuilder sb = new StringBuilder(m.getName()).append('(');
+        for (Class<?> p : m.getParameterTypes()) {
+            sb.append(p.getName()).append(',');
+        }
+        return sb.append(')').toString();
     }
 
     /**

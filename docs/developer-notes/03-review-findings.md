@@ -208,4 +208,12 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 
 **面试讲法**：「安全 review 抓到一个真漏洞：LangChain4j 的默认工具执行器把 @Tool 抛的**原始异常消息直接当结果回给模型**，异常里的 DB 连接串/内网地址会被模型在回复里复述出来。我反编译确认它是『吞异常返回字符串』而非抛出，所以**包一层 catch 没用**，只能自己反射 invoke 在异常边界截——真实原因进服务端日志，给模型泛化错误。这展示『先反编译确认框架真实行为再动手，而不是靠猜』的严谨性。」——这是「防 prompt-injection 侧信道泄漏 + 反编译定边界」的强表达。
 
+## v1.1 回顾 · B3 继承/接口 @Tool 不注册（2026-08-12）
+
+**背景（ADV-2）**：`collectTools` 用 `getDeclaredMethods()` 只扫本类——工具方法放基类/接口时不会被注册，模型一调就是 unknown tool → 进截断/失败路径。
+
+**陷阱（为什么不能简单换 getMethods()）**：`getMethods()` 只返回 **public** 方法，会**丢掉非 public @Tool**（本项目工具多为包私有，`SafeToolExecutor` 测试的工具也是）→ 改成 getMethods() 会更糟。故**必须全层级遍历**：`collectToolMethods(Class)` 逐层用 `getDeclaredMethods()` 扫（本类 + 基类 + 接口含父接口），保留非 public + 覆盖继承面；`signature()`（名+参数类型）作去重键，`LinkedHashMap` + `putIfAbsent` 让**类实现优先于接口抽象**、同一逻辑方法不重复注册。
+
+**面试讲法**：「工具注册有个隐蔽坑：反射只用 getDeclaredMethods 会漏基类/接口上的 @Tool；但换 getMethods 又会丢包私有的 @Tool（工具常写包私有）。所以不能二选一，得**全层级遍历 + 签名去重**——既补上继承/接口面，又保住非 public 方法。这是个『看似一行改动、实则两个方向都会踩坑』的典型。」——「反射工具注册的完整边界」的强表达。
+
 **面试讲法**：「我写过 update 打的 P1 是『测试全绿但功能没生效』——根因是框架异常是 marker-外层-包裹结构，适配器 unwrap 剥掉了可重试标记，而测试用了无 cause 的构造器给了假确认。两位评审各自对 jar 做 javap 独立证实同一处，交叉提到 conf 100。教训：测试必须用框架真实产出的形状。」——这是「怎么防止假绿测试」的强表达。

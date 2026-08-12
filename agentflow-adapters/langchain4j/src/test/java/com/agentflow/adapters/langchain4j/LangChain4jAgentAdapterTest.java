@@ -567,4 +567,71 @@ class LangChain4jAgentAdapterTest {
                 .arguments("{\"name\":\"n\"}").build(), 42L);
         assertThat(r).isEqualTo("42:n");
     }
+
+    @Test
+    @DisplayName("B3 基类上的 @Tool 被注册并可执行（不再遗漏继承方法，ADV-2）")
+    void inheritedBaseClassToolRegisteredAndExecuted() throws Exception {
+        class BaseTools {
+            @Tool("基类工具")
+            String inheritedOp() { return "base-ok"; }
+        }
+        class ChildTools extends BaseTools { }
+        AtomicInteger chatCalls = new AtomicInteger();
+        ChatModel model = new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                if (chatCalls.incrementAndGet() == 1) {
+                    return ChatResponse.builder()
+                            .aiMessage(AiMessage.from(ToolExecutionRequest.builder()
+                                    .id("req-1").name("inheritedOp").arguments("{}").build()))
+                            .tokenUsage(new TokenUsage(1, 1)).build();
+                }
+                boolean hasResult = request.messages().stream()
+                        .anyMatch(m -> m instanceof ToolExecutionResultMessage tr && tr.text().contains("base-ok"));
+                return ChatResponse.builder()
+                        .aiMessage(AiMessage.from(hasResult ? "done" : "no-tool-result"))
+                        .tokenUsage(new TokenUsage(1, 1)).build();
+            }
+        };
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(model, List.of(new ChildTools()), null, null);
+        AgentOutput out = adapter.execute(input("B3-base", "调用", new WorkflowContext()));
+
+        assertThat(out.content()).isEqualTo("done"); // 模型第 2 轮看到基类工具真的被执行
+        assertThat(chatCalls.get()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("B3 接口上的 @Tool 被注册并可执行（不再遗漏接口方法，ADV-2）")
+    void interfaceToolRegisteredAndExecuted() throws Exception {
+        interface Tools {
+            @Tool("接口工具")
+            String ifaceOp();
+        }
+        class ImplTools implements Tools {
+            @Override
+            public String ifaceOp() { return "iface-ok"; }
+        }
+        AtomicInteger chatCalls = new AtomicInteger();
+        ChatModel model = new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                if (chatCalls.incrementAndGet() == 1) {
+                    return ChatResponse.builder()
+                            .aiMessage(AiMessage.from(ToolExecutionRequest.builder()
+                                    .id("req-2").name("ifaceOp").arguments("{}").build()))
+                            .tokenUsage(new TokenUsage(1, 1)).build();
+                }
+                boolean hasResult = request.messages().stream()
+                        .anyMatch(m -> m instanceof ToolExecutionResultMessage tr && tr.text().contains("iface-ok"));
+                return ChatResponse.builder()
+                        .aiMessage(AiMessage.from(hasResult ? "done" : "no-tool-result"))
+                        .tokenUsage(new TokenUsage(1, 1)).build();
+            }
+        };
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(model, List.of(new ImplTools()), null, null);
+        AgentOutput out = adapter.execute(input("B3-iface", "调用", new WorkflowContext()));
+
+        assertThat(out.content()).isEqualTo("done"); // 接口工具被执行并回填
+        assertThat(chatCalls.get()).isEqualTo(2);
+    }
 }

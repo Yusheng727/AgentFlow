@@ -27,10 +27,11 @@
 - 测试：`ErrorClassifierTest` +4（composed 组合/基础规则/无框架）+ `LangChain4jAgentAdapterTest` +2（RateLimit→Transient、Authentication→Fatal）。
 - **后续 review 补丁（`bf09771`）**：对 B2 的 ce-code-review 抓到 P1——真实 LC4j `RateLimitException` 是 marker-外层包裹 `HttpException`，适配器 unwrap 剥掉 marker 后 `instanceof RetriableException` 落空 → 真实 429 仍 Fatal 不重试（测试用 cause-less 构造器给了假绿）。修复：`ErrorClassifier.toExecutionException()` 沿 cause 兜底 + 适配器传原始异常。另补 Spring 前缀回归测试（7 评审收敛的零覆盖缺口）。详见 `developer-notes/03-review-findings.md` B2 review 节。
 
-### B3. [P2/manual] 继承/接口上的 `@Tool` 方法不注册（ADV-2）
-- **现状**：`collectTools` 只扫 `bean.getClass().getDeclaredMethods()`（不含继承/接口）。
-- **风险**：工具放基类/接口时模型调用 → unknown tool error → 可能进截断/失败路径。
-- **修复方向**：改用 `getMethods()`（含继承 public）或层级遍历；**注意** `getMethods()` 会丢非 public @Tool（现测试用的包私有 @Tool 会被漏掉），需处理。
+### B3. [P2/manual] ✅ **已解决（2026-08-12）** 继承/接口上的 `@Tool` 方法不注册（ADV-2）
+- **现状（已解决）**：`collectTools` 只扫 `bean.getClass().getDeclaredMethods()`（不含继承/接口）——工具放基类/接口时模型调用 → unknown tool error → 可能进截断/失败路径。
+- **修复**：新增 `collectToolMethods(Class)` 全层级遍历（本类 + 基类 + 接口含父接口），配合 `walkHierarchy` + 签名去重（`LinkedHashMap`，类先于接口/基类 → 具体实现优先、同一逻辑方法不重复注册）。**关键取舍**：不用 `getMethods()`（会丢非 public @Tool——本项目工具多包私有，如 `SafeToolExecutor` 测试的工具），故逐层用 `getDeclaredMethods()` 保留非 public + 覆盖继承面。
+- **测试**：`LangChain4jAgentAdapterTest` +2（基类 `@Tool` 注册执行 / 接口 `@Tool` 注册执行，驱动工具循环断言结果回填）；原有包私有工具测试全保持绿。
+- **全仓 `mvn verify` 10 模块绿 + JaCoCo 达标**。
 
 ### B4. [P2/advisory] 两适配器 `mapException` 逐字重复（M1）
 - **现状**：`SpringAiAgentAdapter` 与 `LangChain4jAgentAdapter` 各一份 5 行 `mapException`。
@@ -68,5 +69,5 @@
 2. ~~**B2 + M2**（LC4j 异常分类 + 框架知识移出 core）~~ → ✅ 已办（2026-08-11，`18978e8`）。
 3. ~~**C1**（真实路径预算挂钩）~~ → ✅ 已办（2026-08-12，补 R10 在真实 LLM 的闭环）。
 4. ~~**B1**（工具异常泄漏模型）~~ → ✅ 已办（2026-08-12，`SafeToolExecutor` 自持 invoke + 泛化错误）。
-5. **B3**（继承/接口 `@Tool` 不注册，ADV-2）——工具功能的真实可用性缺口；**改时有回归陷阱**（`getMethods()` 会丢非 public @Tool）。
-6. **C3 / C4**——均非代码阻断：C3（默认脱敏 identity）偏部署决策；C4（`input.tools()` 运行时过滤）牵动引擎层，doc 已标 Deferred。
+5. ~~**B3**（继承/接口 `@Tool` 不注册，ADV-2）~~ → ✅ 已办（2026-08-12，`collectToolMethods` 全层级遍历 + 签名去重，保留非 public）。
+6. **C3 / C4**——均非代码阻断：C3（默认脱敏 identity）偏部署决策；C4（`input.tools()` 运行时过滤）牵动引擎层，doc 已标 Deferred。**至此 v1.1 的 P2 代码项（B1/B2/B3/C1/C2/M2）已全部闭环，剩余仅非代码即阻断项。**
