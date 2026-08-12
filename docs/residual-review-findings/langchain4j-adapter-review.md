@@ -26,6 +26,7 @@
 - **M2 一并解**：core `defaultClassifier` 移除 `org.springframework.web.client.` 前缀，`SpringAiAgentAdapter` 注册 `composed(springPrefix)`——框架知识全部移出 core，core 保持框架无关。
 - 实现细节点：`RetryPolicy` 默认分类器只对已映射的 TransientException/FatalException 生效（适配器先 map 再抛），故 spring 前缀移除不影响引擎重试路径。
 - 测试：`ErrorClassifierTest` +4（composed 组合/基础规则/无框架）+ `LangChain4jAgentAdapterTest` +2（RateLimit→Transient、Authentication→Fatal）。
+- **后续 review 补丁（`bf09771`）**：对 B2 的 ce-code-review 抓到 P1——真实 LC4j `RateLimitException` 是 marker-外层包裹 `HttpException`，适配器 unwrap 剥掉 marker 后 `instanceof RetriableException` 落空 → 真实 429 仍 Fatal 不重试（测试用 cause-less 构造器给了假绿）。修复：`ErrorClassifier.toExecutionException()` 沿 cause 兜底 + 适配器传原始异常。另补 Spring 前缀回归测试（7 评审收敛的零覆盖缺口）。详见 `developer-notes/03-review-findings.md` B2 review 节。
 
 ### B3. [P2/manual] 继承/接口上的 `@Tool` 方法不注册（ADV-2）
 - **现状**：`collectTools` 只扫 `bean.getClass().getDeclaredMethods()`（不含继承/接口）。

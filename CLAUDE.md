@@ -231,6 +231,7 @@ SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/agentflow mvn -s settings
 - **覆盖率**：≥ 80%（JaCoCo INSTRUCTION，BUNDLE 维度）。
 - **commit**：conventional `feat(scope): desc` / `fix(scope): desc` / `docs:` / `test:` / `refactor:`。中文描述 OK。
 - **分支**：feature 分支 `feat/<unit-or-feature>`，绿了合 main（fast-forward 或 PR）。
+- **文档随开发同步（强制）**：每个 feature / bug fix / ce-code-review 结果落地后，**同步更新** `docs/developer-notes/`（01 选型 / 02 坑 / 03 review 发现 / 04 术语 / 05-06 批次）+ `docs/residual-review-findings/`（review 残留项标 ✅）。尤其 review 抓到的 bug（哪怕小）都要进 03——「测试绿 ≠ 生产生效」这类教训是简历/面试核心弹药。不得留到以后补。
 - **plan 是决策件，不要改 plan 正文当进度**——进度靠 git commit + 本 CLAUDE.md 的"当前进度"段。计划要改走 `/ce-doc-review`。
 
 ## 怎么继续工作（接手后第一件事）

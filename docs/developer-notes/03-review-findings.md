@@ -155,7 +155,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - **SEC-1（P2/manual）工具异常详情泄漏给模型**：LangChain4j `DefaultToolExecutor` **内部吞异常并回传原始消息**，不走适配器 catch——框架行为、等价 Spring 工具错误处理，但异常若含 SQL/路径/连接串会被模型在 content 复述外泄。真修需自定义 `ToolExecutor`（策略决策）。
 - **ErrorClassifier 不识别 `dev.langchain4j.*` 异常（M2+REL-2，P2/manual）** → **已解决（`18978e8`）**：core 加 `composed()` 组合分类器，两适配器各自注册框架 transient 规则（LC4j `RetriableException`、Spring `org.springframework.web.client.*`）；core 移除 spring 前缀，框架知识全部移出 core——B2（LC4j 网络误判 Fatal 不重试）与 M2（框架知识泄漏进 core）同解。
 - **继承/接口 `@Tool` 不注册（ADV-2，P2/manual）**：`collectTools` 只扫 `getDeclaredMethods()`。修法（`getMethods()`/层级遍历）可能丢非 public @Tool，需处理。
-- **`mapException` 两适配器逐字重复（M1, P2/advisory）**：仅 2 消费者，暂不收敛（避免过早共享抽象）。
+- **`mapException` 两适配器逐字重复（M1, P2/advisory）**：仅 2 消费者，原本暂不收敛（避免过早共享抽象）。→ **B2 review 已收敛**（`bf09771`）：P1 修复本就同时改两处 mapException 逻辑，顺势抽共享 `ErrorClassifier.toExecutionException()`（见下方 B2 review 章节）。
 
 ### 共享限制（非 LC4j 引入，两真实适配器共有）
 
@@ -163,3 +163,30 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - **`redactor` 默认 `Function.identity()`** 不脱敏；生产应注入 PromptRedactionFilter。
 
 **面试讲法**：「这个 P1 bug 是两个 reviewer 独立抓到同一处（交叉确认提到 100）——我把有界循环的『终止态表达』拎出来讲：上限不能只防死循环，还要决定超限时以什么状态结束。这正好体现 review 交叉验证的价值。」
+
+---
+
+## v1.1 回顾 · B2 ErrorClassifier ce-code-review（2026-08-11）
+
+审查 B2（`ErrorClassifier.composed` 组合分类器，LC4j 可重试识别 + 框架知识移出 core）。
+
+### ★ P1 / conf 100：测试给假绿，真实路径 429 仍不重试（本批最重要）
+
+**Situation**：B2 让 LC4j 的 transient 异常（429/5xx/超时）识别为可重试，测试也绿了。
+**Bug**：LangChain4j 的 `ExceptionMapper` 构造 status marker 时**携带 cause**——真实形状是 `RateLimitException(cause=HttpException)`（marker 在**外层**，内层是 `HttpException`）。而适配器 `mapException` 先 unwrap 一层（`cause = e.getCause()`）再对 cause 判 `instanceof RetriableException` → 剥掉外层 marker，对内层 `HttpException` 判 → **HttpException 直接继承 LangChain4jException（非 Retriable，javap 证实）→ FatalException → 真实 429/5xx/超时仍不重试**。
+**为何测试漏了**：新增测试用 **message-only 构造器**（`getCause()==null`），所以绿——是 **false-confidence 测试**（testing + reliability 两位评审各自 javap 字节码独立证实，交叉确认提到 conf 100）。
+**修复**（`bf09771`）：`ErrorClassifier.toExecutionException(classifier, e)` **沿 cause 兜底分类**（判 e 与其 getCause()），两适配器把**原始异常 `e`**（未 unwrap）传给分类器；LC4j RateLimit 测试改用真实 cause 形状（TDD——修前会红）。
+**教训（面试核心）**：「断言测试绿 ≠ 生产行为生效」是最隐蔽的缺陷形态，尤其当**异常是 marker-外层-包裹结构**时——unwrap 剥掉标记、测试又用无 cause 构造器，双重重叠出假绿。正确姿势：测试用**框架真实产出的形状**（含 cause 装载）。
+
+### 其余应用（同 `bf09771`）
+
+- **Spring 前缀 7 评审收敛**：`org.springframework.web.client.*` 规则移出 core 后**零测试**（7/9 评审独立指向同一缺口，删掉 `SPRING_CLASSIFIER` CI 仍绿 = 零回归伪证）→ 补 `ResourceAccessException`→Transient 回归测试钉住。
+- **`composed()` 加固（P3）**：null-cause 兜底 + varargs 防御拷贝。
+- **删 tombstone javadoc（P3）**（SpringAiAgentAdapter 残留的"已下沉 SpelPromptResolver"注释）。
+
+### Deferred / Residual
+
+- **NonRetriable 包装 IOException → 误判 transient**：理论上会过度重试，但 reliability 用字节码证实真实 LC4j status marker 只包 cause-less `HttpException`、不产生该形状 → 记残余（如需加固，给框架分类器加 veto 能力）。
+- **agent-native**：`retryPolicy` 在 demo-api/starter 接线为 `null` —— B2 使 LC4j retry 有能力但当前无部署会触发（属独立 wiring 项）；retry 失败调用成本不计 metrics + 真实路径 budget 不读 = C1 范畴。
+
+**面试讲法**：「我写过 update 打的 P1 是『测试全绿但功能没生效』——根因是框架异常是 marker-外层-包裹结构，适配器 unwrap 剥掉了可重试标记，而测试用了无 cause 的构造器给了假确认。两位评审各自对 jar 做 javap 独立证实同一处，交叉提到 conf 100。教训：测试必须用框架真实产出的形状。」——这是「怎么防止假绿测试」的强表达。
