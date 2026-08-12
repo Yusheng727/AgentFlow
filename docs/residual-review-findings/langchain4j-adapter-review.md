@@ -14,12 +14,11 @@
 
 ## B. 需人工决策 / 延后项（评审未自动改，留作 v1.1 后续）
 
-### B1. [P2/manual] 工具异常详情泄漏给模型（SEC-1）
-- **现状**：LangChain4j 的 `DefaultToolExecutor` **内部吞异常并回传原始消息**（"Error: <原始异常 msg>"）给模型；源码看它不走适配器 `executeTool` 的 catch。
-- **风险**：@Tool 抛的异常若含敏感内部细节（SQL/文件路径/DB 连接串），会被模型在 `content` 里复述 → 流到 workflow channel/UI。`redactor` 只作用于 NodeTrace，此路径不改写。
-- **判定**：这是**框架标准行为**（等价 Spring 工具错误处理），且暴露在 U14 ApiKeyAuth 之后——v1.1 基准不阻断，但值得定策略。
-- **修复方向**：自定义 `ToolExecutor`（继承/包装），统一返回通用错误串，真实原因只进服务端日志；或接受现状 + 文档标注。
-- **决策人**：你（是否接受框架默认、还是上自定义 executor）。
+### B1. [P2/manual] ✅ **已解决（2026-08-12）** 工具异常详情泄漏给模型（SEC-1）
+- **现状（已解决）**：LangChain4j 的 `DefaultToolExecutor.execute()` 在 @Tool 抛异常时捕获 `InvocationTargetException` 并直接 **`areturn cause.getMessage()`**（把原始异常消息当字符串返回给模型、**不抛出**）——所以外部包装它根本拦不到异常。
+- **修复**：弃用 `DefaultToolExecutor`，新增 `LangChain4jAgentAdapter.SafeToolExecutor implements ToolExecutor`：自持 bean+method **自行反射 invoke**，在异常边界把真实 cause（可能含 DB 连接串/文件路径/内网地址）只写服务端日志、返回泛化 `{"error":"tool execution failed"}` 给模型——断开「敏感内部细节 → 模型 content → workflow channel/UI」外泄链。参数处理对齐 DefaultToolExecutor 语义（@ToolMemoryId 透传、String/primitive 强转、record 走 Jackson convertValue；void→"Success"、null→"null"、非 String→JSON）。
+- **覆盖**：`LangChain4jAgentAdapterTest` +5（抛异常不泄漏单测/端到端工具循环不泄漏 + typed 参数渲染 + ToolMemoryId + 畸形 JSON）——`SafeToolExecutor` 覆盖率 37%→93.3%。
+- **全仓 `mvn verify` 10 模块绿 + JaCoCo 达标**。
 
 ### B2. [P2/manual] ✅ **已解决（2026-08-11，`18978e8`）** ErrorClassifier 不识别 `dev.langchain4j.*` 异常（M2 + REL-2）
 - **现状（已解决）**：core `ErrorClassifier` 新增 `composed(ErrorClassifier...)` 组合分类器；`LangChain4jAgentAdapter` 用它注入 `cause instanceof dev.langchain4j.exception.RetriableException`——LC4j 自带的可重试标记覆盖 RateLimit/InternalServer/Timeout 子类，NonRetriable 子类（Authentication/InvalidRequest/ModelNotFound）正确判 fatal。LC4j 网络/限流/超时不再被误判 Fatal 不重试。
@@ -67,5 +66,7 @@
 ## 建议优先序（若要继续 v1.1）
 1. ~~**C2**（OutputSchemaValidator 下沉 core + LC4j 接上）~~ → ✅ 已办（2026-08-11，`9ba7271`）。
 2. ~~**B2 + M2**（LC4j 异常分类 + 框架知识移出 core）~~ → ✅ 已办（2026-08-11，`18978e8`）。
-3. ~~**C1**（真实路径预算挂钩）~~ → ✅ 已办（2026-08-12，补 R10 在真实 LLM 的闭环）——`AgentFlowMetrics.recordBudget` + 两真实适配器接入，现为**唯一剩余**的开放代码项：**B1 / B3 / C3 / C4**。
-4. B1 / B3 —— 看是否自定义 ToolExecutor / 层级遍历 @Tool。
+3. ~~**C1**（真实路径预算挂钩）~~ → ✅ 已办（2026-08-12，补 R10 在真实 LLM 的闭环）。
+4. ~~**B1**（工具异常泄漏模型）~~ → ✅ 已办（2026-08-12，`SafeToolExecutor` 自持 invoke + 泛化错误）。
+5. **B3**（继承/接口 `@Tool` 不注册，ADV-2）——工具功能的真实可用性缺口；**改时有回归陷阱**（`getMethods()` 会丢非 public @Tool）。
+6. **C3 / C4**——均非代码阻断：C3（默认脱敏 identity）偏部署决策；C4（`input.tools()` 运行时过滤）牵动引擎层，doc 已标 Deferred。

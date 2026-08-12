@@ -15,6 +15,7 @@ import com.agentflow.prompt.SpelPromptResolver;
 
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.agent.tool.ToolMemoryId;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.data.message.AiMessage;
@@ -25,14 +26,16 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.TokenUsage;
-import dev.langchain4j.service.tool.DefaultToolExecutor;
 import dev.langchain4j.service.tool.ToolExecutor;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.expression.spel.SpelEvaluationException;
 
 import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -316,7 +319,7 @@ public class LangChain4jAgentAdapter implements AgentFunction {
                 .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 
-    /** 反射扫描 @Tool bean：方法 → ToolSpecification（注册给模型）+ DefaultToolExecutor（本地执行）。 */
+    /** 反射扫描 @Tool bean：方法 → ToolSpecification（注册给模型）+ SafeToolExecutor（本地安全执行）。 */
     private void collectTools(List<ToolSpecification> specs, Map<String, ToolExecutor> executors) {
         for (Object bean : toolBeans) {
             for (Method m : bean.getClass().getDeclaredMethods()) {
@@ -325,8 +328,134 @@ public class LangChain4jAgentAdapter implements AgentFunction {
                 }
                 ToolSpecification spec = ToolSpecifications.toolSpecificationFrom(m);
                 specs.add(spec);
-                executors.put(spec.name(), new DefaultToolExecutor(bean, m));
+                executors.put(spec.name(), new SafeToolExecutor(bean, m));
             }
+        }
+    }
+
+    /**
+     * 安全工具执行器（B1/SEC-1）：直接反射调用 @Tool 方法，异常真实细节只进服务端日志，
+     * 返回泛化错误给模型。
+     *
+     * <p><b>为何不包装 {@code DefaultToolExecutor}</b>：其 {@code execute()} 在 @Tool 抛异常时
+     * 捕获 {@code InvocationTargetException} 并直接 <b>返回原始异常消息字符串</b>（不抛出）——
+     * 从外部包装根本拦不到异常。故自持 bean+method 自行 invoke，在异常边界把敏感内部细节
+     * （DB 连接串/文件路径/内网地址）挡在递给模型之前，只留服务端日志。
+     */
+    static final class SafeToolExecutor implements ToolExecutor {
+        private static final ObjectMapper MAPPER = new ObjectMapper();
+
+        private final Object bean;
+        private final Method method;
+
+        SafeToolExecutor(Object bean, Method method) {
+            this.bean = bean;
+            this.method = method;
+        }
+
+        @Override
+        public String execute(ToolExecutionRequest request, Object memoryId) {
+            try {
+                Object[] args = prepareArguments(request.arguments(), memoryId);
+                Object result = invoke(args);
+                return render(result);
+            } catch (Exception e) { // 覆盖 InvocationTargetException(checked) + 参数解析 Runtime
+                // 真实 cause 只进服务端日志——@Tool 异常 msg 可能含敏感内部细节，绝不能进模型/result（SEC-1）
+                log.warn("工具执行失败 tool={}: {}", method.getName(), deepestThrowable(e).toString());
+                return "{\"error\":\"tool execution failed\"}";
+            }
+        }
+
+        private Object[] prepareArguments(String jsonArgs, Object memoryId) {
+            Parameter[] params = method.getParameters();
+            if (params.length == 0) {
+                return new Object[0];
+            }
+            Map<String, Object> args = parseArguments(jsonArgs);
+            Object[] out = new Object[params.length];
+            for (int i = 0; i < params.length; i++) {
+                Parameter p = params[i];
+                if (p.isAnnotationPresent(ToolMemoryId.class)) {
+                    out[i] = memoryId;
+                    continue;
+                }
+                out[i] = coerce(args.get(p.getName()), p.getType());
+            }
+            return out;
+        }
+
+        /** 解析工具参数 JSON 为 Map（容忍空串/空/畸形——失败按无参数处理，异常由本方法兜底）。 */
+        @SuppressWarnings("unchecked")
+        private Map<String, Object> parseArguments(String jsonArgs) {
+            if (jsonArgs == null || jsonArgs.isBlank()) {
+                return Map.of();
+            }
+            try {
+                Object v = MAPPER.readValue(jsonArgs, Object.class);
+                return v instanceof Map ? (Map<String, Object>) v : Map.of();
+            } catch (Exception e) {
+                log.warn("工具参数 JSON 解析失败 tool={}: {}", method.getName(), jsonArgs);
+                return Map.of();
+            }
+        }
+
+        /** 参数值 → 目标类型（String/基本类型/其余走 Jackson 转换，对齐 DefaultToolExecutor 语义）。 */
+        private Object coerce(Object value, Class<?> type) {
+            if (value == null) {
+                return null;
+            }
+            if (type.isInstance(value)) {
+                return value;
+            }
+            if (type == String.class) {
+                return String.valueOf(value);
+            }
+            if (type == int.class || type == Integer.class) {
+                return ((Number) value).intValue();
+            }
+            if (type == long.class || type == Long.class) {
+                return ((Number) value).longValue();
+            }
+            if (type == double.class || type == Double.class) {
+                return ((Number) value).doubleValue();
+            }
+            if (type == boolean.class || type == Boolean.class) {
+                return value instanceof Boolean b ? b : Boolean.valueOf(String.valueOf(value));
+            }
+            return MAPPER.convertValue(value, type);
+        }
+
+        private Object invoke(Object[] args) throws ReflectiveOperationException {
+            if (!method.canAccess(bean)) {
+                method.setAccessible(true); // 支持包私有 @Tool（本项目工具即包私有）
+            }
+            return method.invoke(bean, args);
+        }
+
+        /** void → "Success"；String → 原样；其余 → JSON（对齐 DefaultToolExecutor 结果语义）。 */
+        private String render(Object result) {
+            if (method.getReturnType() == void.class || method.getReturnType() == Void.class) {
+                return "Success";
+            }
+            if (result == null) {
+                return "null";
+            }
+            if (result instanceof String s) {
+                return s;
+            }
+            try {
+                return MAPPER.writeValueAsString(result);
+            } catch (Exception e) {
+                return String.valueOf(result);
+            }
+        }
+
+        private static Throwable deepestThrowable(Throwable t) {
+            Throwable cur = t;
+            while (cur.getCause() != null) {
+                cur = cur.getCause();
+            }
+            return cur;
         }
     }
 

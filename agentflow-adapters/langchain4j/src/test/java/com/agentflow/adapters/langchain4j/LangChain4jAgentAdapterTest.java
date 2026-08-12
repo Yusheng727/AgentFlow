@@ -13,13 +13,16 @@ import com.agentflow.prompt.OutputSchemaValidator;
 
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.agent.tool.ToolMemoryId;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.TokenUsage;
+import dev.langchain4j.service.tool.ToolExecutor;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
@@ -27,8 +30,10 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.lang.reflect.Method;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -235,6 +240,62 @@ class LangChain4jAgentAdapterTest {
     }
 
     @Test
+    @DisplayName("B1 安全执行器：@Tool 抛含敏感信息异常 → 返回泛化错误，不泄漏原始异常细节（SEC-1）")
+    void safeToolExecutorReturnsGenericErrorOnThrow() throws Exception {
+        class LeakyTools {
+            @Tool("Risky tool")
+            String risky() {
+                throw new IllegalStateException("DB conn=jdbc:postgresql://internal:5432/prod pwd=secret123");
+            }
+        }
+        LeakyTools bean = new LeakyTools();
+        Method m = bean.getClass().getDeclaredMethod("risky");
+        ToolExecutor exec = new LangChain4jAgentAdapter.SafeToolExecutor(bean, m);
+
+        String result = exec.execute(
+                ToolExecutionRequest.builder().id("r1").name("risky").arguments("{}").build(), null);
+
+        assertThat(result).doesNotContain("jdbc:", "secret123");     // 敏感细节不泄漏给模型
+        assertThat(result).contains("tool execution failed");          // 但给模型可理解的泛化错误
+    }
+
+    @Test
+    @DisplayName("B1 工具循环：@Tool 抛异常 → 回填模型的工具结果不含原始异常细节（端到端 SEC-1）")
+    void throwingToolInLoopDoesNotLeakToModel() throws Exception {
+        AtomicBoolean leaked = new AtomicBoolean(true); // 默认认为泄漏，若模型收到原始细节保持 true
+        ChatModel model = new ChatModel() {
+            int call = 0;
+
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                call++;
+                if (call == 1) {
+                    return ChatResponse.builder()
+                            .aiMessage(AiMessage.from(ToolExecutionRequest.builder()
+                                    .id("req-1").name("risky").arguments("{}").build()))
+                            .tokenUsage(new TokenUsage(10, 5)).build();
+                }
+                boolean hasDetail = request.messages().stream()
+                        .filter(m -> m instanceof ToolExecutionResultMessage)
+                        .anyMatch(m -> ((ToolExecutionResultMessage) m).text().contains("secret123"));
+                leaked.set(hasDetail);
+                return ChatResponse.builder().aiMessage(AiMessage.from("done"))
+                        .tokenUsage(new TokenUsage(20, 8)).build();
+            }
+        };
+        class LeakyTools {
+            @Tool("Risky")
+            String risky() {
+                throw new IllegalStateException("DB pwd=secret123 host=internal-db");
+            }
+        }
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(model, List.of(new LeakyTools()), null, null);
+        adapter.execute(input("H", "触发工具", new WorkflowContext()));
+
+        assertThat(leaked.get()).isFalse(); // 原始异常细节未经工具结果外泄给模型
+    }
+
+    @Test
     @DisplayName("模型发起未知工具 → error JSON 回填（不中断），模型下轮仍能给文本")
     void unknownToolFedBackAsError() throws Exception {
         AtomicInteger chatCalls = new AtomicInteger(0);
@@ -430,5 +491,80 @@ class LangChain4jAgentAdapterTest {
 
         assertThat(budget.isExceeded()).isFalse();
         assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_BUDGET_EXCEEDED).count()).isZero();
+    }
+
+    @Test
+    @DisplayName("SafeToolExecutor 参数解析/渲染：typed 参数强转 + void/primitive/null 结果（对齐 DefaultToolExecutor 语义）")
+    void safeToolExecutorTypedArgsAndRendering() throws Exception {
+        class CalcTools {
+            @Tool
+            String summarize(String prefix, int count, long qty, boolean urgent, double rate) {
+                return prefix + "|" + count + "|" + qty + "|" + urgent + "|" + rate;
+            }
+            @Tool
+            void silent() { }
+            @Tool
+            int answer() { return 7; }
+            @Tool
+            String nothing() { return null; }
+            record Item(String name, int qty) { }
+            @Tool
+            String pack(Item item) { return item.name(); }
+        }
+        CalcTools bean = new CalcTools();
+
+        // typed 参数从 JSON 强转 + String 结果渲染
+        Method summarize = bean.getClass().getDeclaredMethod(
+                "summarize", String.class, int.class, long.class, boolean.class, double.class);
+        ToolExecutor exec = new LangChain4jAgentAdapter.SafeToolExecutor(bean, summarize);
+        String r = exec.execute(ToolExecutionRequest.builder().id("a").name("summarize")
+                .arguments("{\"prefix\":\"P\",\"count\":3,\"qty\":100,\"urgent\":true,\"rate\":2.5}")
+                .build(), null);
+        assertThat(r).isEqualTo("P|3|100|true|2.5");
+
+        // void → "Success"
+        ToolExecutor se = new LangChain4jAgentAdapter.SafeToolExecutor(bean,
+                bean.getClass().getDeclaredMethod("silent"));
+        assertThat(se.execute(ToolExecutionRequest.builder().id("v").name("silent").arguments("{}").build(), null))
+                .isEqualTo("Success");
+
+        // 非 String 结果 → JSON 渲染
+        ToolExecutor ae = new LangChain4jAgentAdapter.SafeToolExecutor(bean,
+                bean.getClass().getDeclaredMethod("answer"));
+        assertThat(ae.execute(ToolExecutionRequest.builder().id("i").name("answer").arguments("{}").build(), null))
+                .isEqualTo("7");
+
+        // null 结果 → "null" 哨兵
+        ToolExecutor ne = new LangChain4jAgentAdapter.SafeToolExecutor(bean,
+                bean.getClass().getDeclaredMethod("nothing"));
+        assertThat(ne.execute(ToolExecutionRequest.builder().id("n").name("nothing").arguments("{}").build(), null))
+                .isEqualTo("null");
+
+        // record 参数 → Jackson convertValue
+        ToolExecutor pe = new LangChain4jAgentAdapter.SafeToolExecutor(bean,
+                bean.getClass().getDeclaredMethod("pack", CalcTools.Item.class));
+        assertThat(pe.execute(ToolExecutionRequest.builder().id("p").name("pack")
+                .arguments("{\"item\":{\"name\":\"gadget\",\"qty\":2}}").build(), null))
+                .isEqualTo("gadget");
+
+        // 畸形 JSON 参数 → 按空参数处理，缺 primitive 参 invoke 抛 → 泛化错误不抛穿
+        ToolExecutor mj = new LangChain4jAgentAdapter.SafeToolExecutor(bean, summarize);
+        assertThat(mj.execute(ToolExecutionRequest.builder().id("m").name("summarize")
+                .arguments("{not json").build(), null)).contains("tool execution failed");
+    }
+
+    @Test
+    @DisplayName("SafeToolExecutor @ToolMemoryId 参数：memoryId 透传")
+    void safeToolExecutorMemoryId() throws Exception {
+        class MemTools {
+            @Tool
+            String who(@ToolMemoryId Long id, String name) { return id + ":" + name; }
+        }
+        MemTools bean = new MemTools();
+        ToolExecutor exec = new LangChain4jAgentAdapter.SafeToolExecutor(bean,
+                bean.getClass().getDeclaredMethod("who", Long.class, String.class));
+        String r = exec.execute(ToolExecutionRequest.builder().id("w").name("who")
+                .arguments("{\"name\":\"n\"}").build(), 42L);
+        assertThat(r).isEqualTo("42:n");
     }
 }

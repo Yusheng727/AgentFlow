@@ -199,4 +199,13 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 
 **面试讲法**：「我给 YAML 预算补上真实路径的闭环。难点是成本记账与现有 advisor 的**双计冲突**——Spring 路径 token/cost 已被 TokenCountingAdvisor 记过，直接再 record 会重复。解法是把『预算累加 + 超限事件』抽成 `recordBudget` 助手，成本用 costCalculator **纯算不落 counter**，与指标记账正交；这样 same-DSL-same-result（KTD-7）在两个框架真实路径都成立。」——这是「改动要绕开既有记账路径避免双计」的体现。
 
+## v1.1 回顾 · B1 工具异常防泄漏到模型（2026-08-12）
+
+**背景（SEC-1）**：LangChain4j 的 `DefaultToolExecutor.execute()` 在 @Tool 抛异常时，捕获 `InvocationTargetException` **直接返回原始异常消息字符串**（`areturn getCause().getMessage()`）、**不抛出**——@Tool 若抛含 DB 连接串/文件路径/内网地址的异常，细节会经工具结果回填进模型 `content`，再一路流到 workflow channel/渲染进 UI/日志。`redactor` 只作用 NodeTrace，管不到这条链。
+
+**关键技术点（为什么不能包装 DefaultToolExecutor）**：用 `javap -c` 反编译确认——框架把异常转成**字符串返回**而非抛出，**外部包一层 catch 根本拦不到**。所以必须**自持 bean + method 自行反射 invoke**，在异常边界拦截：真实 cause 只 `log.warn` 进服务端，返回泛化 `{"error":"tool execution failed"}` 给模型。参数处理对齐框架语义（`@ToolMemoryId` 透传、String/primitive 强转、record 走 Jackson；void→"Success"、null→"null"、非 String→JSON）。`collectTools` 从 `DefaultToolExecutor(bean, m)` 换成 `SafeToolExecutor(bean, m)`。
+- 覆盖：`SafeToolExecutor` 37%→93.3%（补 typed 参数渲染 / ToolMemoryId / 畸形 JSON 等分支测试）。
+
+**面试讲法**：「安全 review 抓到一个真漏洞：LangChain4j 的默认工具执行器把 @Tool 抛的**原始异常消息直接当结果回给模型**，异常里的 DB 连接串/内网地址会被模型在回复里复述出来。我反编译确认它是『吞异常返回字符串』而非抛出，所以**包一层 catch 没用**，只能自己反射 invoke 在异常边界截——真实原因进服务端日志，给模型泛化错误。这展示『先反编译确认框架真实行为再动手，而不是靠猜』的严谨性。」——这是「防 prompt-injection 侧信道泄漏 + 反编译定边界」的强表达。
+
 **面试讲法**：「我写过 update 打的 P1 是『测试全绿但功能没生效』——根因是框架异常是 marker-外层-包裹结构，适配器 unwrap 剥掉了可重试标记，而测试用了无 cause 的构造器给了假确认。两位评审各自对 jar 做 javap 独立证实同一处，交叉提到 conf 100。教训：测试必须用框架真实产出的形状。」——这是「怎么防止假绿测试」的强表达。
