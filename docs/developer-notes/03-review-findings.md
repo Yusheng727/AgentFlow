@@ -189,4 +189,14 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - **NonRetriable 包装 IOException → 误判 transient**：理论上会过度重试，但 reliability 用字节码证实真实 LC4j status marker 只包 cause-less `HttpException`、不产生该形状 → 记残余（如需加固，给框架分类器加 veto 能力）。
 - **agent-native**：`retryPolicy` 在 demo-api/starter 接线为 `null` —— B2 使 LC4j retry 有能力但当前无部署会触发（属独立 wiring 项）；retry 失败调用成本不计 metrics + 真实路径 budget 不读 = C1 范畴。
 
+## v1.1 回顾 · C1 per-workflow 预算真实路径挂钩（2026-08-12）
+
+**背景**：R10 的 `budget_tokens/budget_cost` 只在 mock 路径生效（`MockAgentFunction` 消费 `AgentInput.budget()`），两个真实适配器（`SpringAiAgentAdapter` / `LangChain4jAgentAdapter`）都不读——真实 LLM 调用下 YAML 预算形同虚设。
+
+**关键设计取舍（防双计的坑）**：Spring 适配器 token/成本已由 `TokenCountingAdvisor` 记账，若在适配器里再调 `metrics.recordTokens` 会**双计** token/cost counter。故提炼 core `AgentFlowMetrics.recordBudget(...)` 助手：用 `costCalculator.cost` **纯算成本、不写 token/cost counter**，只做「累进 WorkflowBudget + 首次超限触发一次 `budget_exceeded`（edge-triggered）」。该助手成为三个消费方（mock + 两真实适配器）的**单一真相源**——既解 C1，又把 mock 里重复的 `budget.record→recordBudgetExceeded` 逻辑收敛。
+- `LangChain4jAgentAdapter`：在既有 `metrics.recordTokens` 处并记 `recordBudget`（它无 advisor，`recordTokens` 本就是单一来源）。
+- `SpringAiAgentAdapter`：新增 8-arg 构造注入 `AgentFlowMetrics`+`model`（6-arg 委托 null，构造点零改动），成功路径 `recordBudget`。
+
+**面试讲法**：「我给 YAML 预算补上真实路径的闭环。难点是成本记账与现有 advisor 的**双计冲突**——Spring 路径 token/cost 已被 TokenCountingAdvisor 记过，直接再 record 会重复。解法是把『预算累加 + 超限事件』抽成 `recordBudget` 助手，成本用 costCalculator **纯算不落 counter**，与指标记账正交；这样 same-DSL-same-result（KTD-7）在两个框架真实路径都成立。」——这是「改动要绕开既有记账路径避免双计」的体现。
+
 **面试讲法**：「我写过 update 打的 P1 是『测试全绿但功能没生效』——根因是框架异常是 marker-外层-包裹结构，适配器 unwrap 剥掉了可重试标记，而测试用了无 cause 的构造器给了假确认。两位评审各自对 jar 做 javap 独立证实同一处，交叉提到 conf 100。教训：测试必须用框架真实产出的形状。」——这是「怎么防止假绿测试」的强表达。

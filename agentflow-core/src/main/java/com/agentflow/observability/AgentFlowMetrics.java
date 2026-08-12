@@ -153,6 +153,31 @@ public final class AgentFlowMetrics {
     }
 
     /**
+     * C1 per-workflow 预算记账：把一次 LLM 调用的用量累进 {@link WorkflowBudget}，
+     * 首次跨过上界触发一次 {@code budget_exceeded}（edge-triggered）。
+     *
+     * <p><b>成本纯计算、不写 token/cost counter</b>：用 {@link CostCalculator#cost} 估算成本仅供
+     * budget 累加——Spring 适配器的 token/cost 已由 {@code TokenCountingAdvisor} 记账，若在此再
+     * recordTokens 会双计。本方法只做预算累加 + 超限事件，与指标记账正交。
+     *
+     * <p>budget 为 null（真实路径未声明预算）→ no-op，安全通过。
+     *
+     * @param budget           per-workflow 预算（可空 → no-op）
+     * @param model            模型名（成本查表；null → 默认单价）
+     * @param promptTokens     本次输入 token
+     * @param completionTokens 本次输出 token
+     */
+    public void recordBudget(WorkflowBudget budget, String model, long promptTokens, long completionTokens) {
+        if (budget == null) {
+            return;
+        }
+        double cost = costCalculator.cost(model, promptTokens, completionTokens);
+        if (budget.record(promptTokens, completionTokens, cost)) {
+            recordBudgetExceeded();
+        }
+    }
+
+    /**
      * 检查累计成本是否超预算。超过则自增 {@code budget_exceeded} Counter 并返回 true。
      *
      * <p>累计成本从 cost Counter（按 model tag 聚合）实时读取，无需调用方维护状态。

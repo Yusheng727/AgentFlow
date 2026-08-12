@@ -131,12 +131,11 @@ public final class MockAgentFunction implements AgentFunction {
         long promptChars = input.promptTemplate() == null ? 0 : input.promptTemplate().length();
         long promptTokens = Math.max(8, Math.round(promptChars / 4.0) + 8); // 基础 prompt 兜底
         long completionTokens = Math.max(1, Math.round(resolved.length() / 4.0));
-        double cost = metrics.recordTokens(input.agentName(), model, promptTokens, completionTokens);
+        metrics.recordTokens(input.agentName(), model, promptTokens, completionTokens);
         WorkflowBudget budget = input.budget();
         if (budget != null) {
-            if (budget.record(promptTokens, completionTokens, cost)) {
-                metrics.recordBudgetExceeded();
-            }
+            // C1 单一真相源：与两个真实适配器共用 AgentFlowMetrics.recordBudget（成本估算 + edge-triggered 超限）
+            metrics.recordBudget(budget, model, promptTokens, completionTokens);
         } else if (budgetThresholdUsd != null) {
             metrics.checkBudget(budgetThresholdUsd);
         }

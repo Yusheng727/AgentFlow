@@ -41,9 +41,15 @@
 
 ## C. 共享限制（非 LC4j 引入，两真实适配器共有；v1.1 后续可做）
 
-### C1. [P2] per-workflow `budget_*` 预算未在真实 LLM 路径强制执行
-- **现状**：R10 的 `WorkflowBudget` 经 `AgentInput.budget()` 穿线，但只有 **`MockAgentFunction`** 消费它；`SpringAiAgentAdapter` 与 `LangChain4jAgentAdapter` 都不读 `input.budget()`——YAML `budget_tokens/budget_cost` 在真实 LLM 路径不生效（防御告警只在 mock）。
-- **修复方向**：给两个真实适配器加 budget 记账（在 `recordTokens`/`recordsMetrics` 处一并 `budget.record()`）。
+### C1. [P2] ✅ **已解决（2026-08-12）** per-workflow `budget_*` 预算未在真实 LLM 路径强制执行
+- **现状（已解决）**：R10 的 `WorkflowBudget` 经 `AgentInput.budget()` 穿线，但只有 **`MockAgentFunction`** 消费它；`SpringAiAgentAdapter` 与 `LangChain4jAgentAdapter` 都不读 `input.budget()`——YAML `budget_tokens/budget_cost` 在真实 LLM 路径不生效（防御告警只在 mock）。
+- **修复（C1）**：
+  - core `AgentFlowMetrics` 新增 `recordBudget(WorkflowBudget, model, promptTokens, completionTokens)` 助手——**单一真相源**：`costCalculator.cost` **纯算成本不写 token/cost counter**（避免与 Spring `TokenCountingAdvisor` 双计），累进 budget 后首次超限触发一次 `budget_exceeded`（edge-triggered，事件数 ≠ 节点数）。
+  - `LangChain4jAgentAdapter`：在既有 `metrics.recordTokens` 记账处一并 `metrics.recordBudget(input.budget(), ...)`。
+  - `SpringAiAgentAdapter`：新增 8-arg 构造注入 `AgentFlowMetrics` + `model`（6-arg 委托 null 向后兼容，构造点零改动），成功路径 `metrics.recordBudget(input.budget(), ...)`——真实 LLM 路径预算自此强制执行。
+  - `MockAgentFunction`：per-workflow 分支改用 `recordBudget`（复用同一助手，去重复逻辑）。
+- 测试：`AgentFlowMetricsTest` +3（edge-triggered 一次 / 未超限+null budget / 不双记 token-cost）+ 两真实适配器各 +2（超限/未超限，`LangChain4jAgentAdapterTest`、`SpringAiAgentAdapterTest`）。
+- **全仓 `mvn verify` 10 模块绿 + JaCoCo 达标**。
 
 ### C2. [P2] ✅ **已解决（2026-08-11，`9ba7271`）** LC4j 适配器无 `OutputSchemaValidator`（结构化输出恒空）
 - **现状（已解决）**：`OutputSchemaValidator` **已下沉 core**（`com.agentflow.prompt`，框架无关：networknt json-schema + Jackson 3），`LangChain4jAgentAdapter` 接入 `validateWithRetry`（带反馈重试），`structuredOutput` 不再恒空——补上 KTD-7 "相同 DSL 相同结果"对价。Spring 适配器切 import 到 core，删本地类，schema 行为零回归。
@@ -61,5 +67,5 @@
 ## 建议优先序（若要继续 v1.1）
 1. ~~**C2**（OutputSchemaValidator 下沉 core + LC4j 接上）~~ → ✅ 已办（2026-08-11，`9ba7271`）。
 2. ~~**B2 + M2**（LC4j 异常分类 + 框架知识移出 core）~~ → ✅ 已办（2026-08-11，`18978e8`）。
-3. **C1**（真实路径预算挂钩）——补 R10 在真实 LLM 的闭环。
+3. ~~**C1**（真实路径预算挂钩）~~ → ✅ 已办（2026-08-12，补 R10 在真实 LLM 的闭环）——`AgentFlowMetrics.recordBudget` + 两真实适配器接入，现为**唯一剩余**的开放代码项：**B1 / B3 / C3 / C4**。
 4. B1 / B3 —— 看是否自定义 ToolExecutor / 层级遍历 @Tool。

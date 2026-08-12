@@ -5,9 +5,13 @@ import com.agentflow.agent.AgentOutput;
 import com.agentflow.agent.FatalException;
 import com.agentflow.agent.TransientException;
 import com.agentflow.engine.WorkflowContext;
+import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.NodeTrace;
+import com.agentflow.observability.WorkflowBudget;
 import com.agentflow.prompt.OutputSchemaValidator;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -403,5 +407,43 @@ class SpringAiAgentAdapterTest {
         assertThat(node.status()).isEqualTo(NodeTrace.Status.FAILED);
         assertThat(node.isTerminal()).isTrue();
         assertThat(node.error()).contains("校验失败 3 次");
+    }
+
+    @Test
+    @DisplayName("C1：注入 metrics+model + AgentInput 携带 budget → 真实路径累进预算，首次超限触发 budget_exceeded 一次")
+    void perWorkflowBudgetCostExceededFiresOnce() throws Exception {
+        StubChatModel model = new StubChatModel();
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AgentFlowMetrics metrics = new AgentFlowMetrics(registry);
+        SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
+                client(model), passThroughAdvisors(), List.of(), null, Function.identity(), null,
+                metrics, "gpt-4o-mini");
+        WorkflowBudget budget = new WorkflowBudget(null, 0.0000001); // 极小成本预算（stub 成本 ≈0.0000135）
+        AgentInput in = new AgentInput("C1", "test-agent", "t", new WorkflowContext(),
+                Map.of(), List.of(), Map.of(), null, null, budget);
+
+        adapter.execute(in); // stub tokens 10/20 → 成本超预算
+
+        assertThat(budget.isExceeded()).isTrue();
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_BUDGET_EXCEEDED).count()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("C1：注入 metrics+model + budget 未超限 → 不触发 budget_exceeded")
+    void perWorkflowBudgetWithinLimitNoEvent() throws Exception {
+        StubChatModel model = new StubChatModel();
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AgentFlowMetrics metrics = new AgentFlowMetrics(registry);
+        SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
+                client(model), passThroughAdvisors(), List.of(), null, Function.identity(), null,
+                metrics, "gpt-4o-mini");
+        WorkflowBudget budget = new WorkflowBudget(1_000_000L, 100.0);
+        AgentInput in = new AgentInput("C2", "test-agent", "t", new WorkflowContext(),
+                Map.of(), List.of(), Map.of(), null, null, budget);
+
+        adapter.execute(in);
+
+        assertThat(budget.isExceeded()).isFalse();
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_BUDGET_EXCEEDED).count()).isZero();
     }
 }

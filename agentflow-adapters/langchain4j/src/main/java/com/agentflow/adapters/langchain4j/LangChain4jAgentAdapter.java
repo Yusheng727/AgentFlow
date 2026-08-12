@@ -198,9 +198,11 @@ public class LangChain4jAgentAdapter implements AgentFunction {
             throw mapException(e); // 传原始 e（保留 LC4j 框架标记，toExecutionException 沿 cause 兜底）
         }
 
-        // 2.5 v1.1 记账（Grafana token/成本可见性；metrics 为 null 则 no-op）。放在成功路径：失败已抛
+        // 2.5 v1.1 记账 + C1 per-workflow 预算（Grafana token/成本 + R10 budget 触发）。
+        //    metrics 为 null 则 no-op；budget 为 null 只记 token/cost。失败路径已抛，故在成功路径。
         if (metrics != null) {
             metrics.recordTokens(input.agentName(), model, promptTokens, completionTokens);
+            metrics.recordBudget(input.budget(), model, promptTokens, completionTokens);
         }
 
         // 3. 构造 AgentOutput（content + structuredOutput + metadata{tokens}，与 Spring 适配器同 schema）

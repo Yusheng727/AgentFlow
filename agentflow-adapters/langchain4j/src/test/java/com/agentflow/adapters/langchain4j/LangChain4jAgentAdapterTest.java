@@ -8,6 +8,7 @@ import com.agentflow.engine.WorkflowContext;
 import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.ExecutionTraceRegistry;
+import com.agentflow.observability.WorkflowBudget;
 import com.agentflow.prompt.OutputSchemaValidator;
 
 import dev.langchain4j.agent.tool.Tool;
@@ -395,5 +396,39 @@ class LangChain4jAgentAdapterTest {
         LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(new StubChatModel());
         adapter.cancel(input("K", "t", new WorkflowContext()));
         adapter.cancel(null); // null 防御
+    }
+
+    @Test
+    @DisplayName("C1：AgentInput 携带 budget → 真实路径累进预算，首次超限触发 budget_exceeded 一次")
+    void perWorkflowBudgetCostExceededFiresOnce() throws Exception {
+        var registry = new SimpleMeterRegistry();
+        var metrics = new AgentFlowMetrics(registry);
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(
+                new StubChatModel(), List.of(), null, null, metrics, "gpt-4o-mini");
+        WorkflowBudget budget = new WorkflowBudget(null, 0.0000001); // 极小成本预算（stub 成本 ≈0.0000135）
+        AgentInput in = new AgentInput("B1", "lc4j-agent", "t", new WorkflowContext(),
+                Map.of(), List.of(), Map.of(), null, null, budget);
+
+        adapter.execute(in); // stub tokens 10/20 → 成本超预算
+
+        assertThat(budget.isExceeded()).isTrue();
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_BUDGET_EXCEEDED).count()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("C1：AgentInput 携带 budget 未超限 → 不触发 budget_exceeded")
+    void perWorkflowBudgetWithinLimitNoEvent() throws Exception {
+        var registry = new SimpleMeterRegistry();
+        var metrics = new AgentFlowMetrics(registry);
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(
+                new StubChatModel(), List.of(), null, null, metrics, "gpt-4o-mini");
+        WorkflowBudget budget = new WorkflowBudget(1_000_000L, 100.0);
+        AgentInput in = new AgentInput("B2", "lc4j-agent", "t", new WorkflowContext(),
+                Map.of(), List.of(), Map.of(), null, null, budget);
+
+        adapter.execute(in);
+
+        assertThat(budget.isExceeded()).isFalse();
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_BUDGET_EXCEEDED).count()).isZero();
     }
 }

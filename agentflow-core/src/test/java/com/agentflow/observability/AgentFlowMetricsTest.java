@@ -197,4 +197,53 @@ class AgentFlowMetricsTest {
         assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_ESTIMATED, "model", "unknown").count())
                 .isGreaterThan(0.0);
     }
+
+    @Test
+    @DisplayName("recordBudget（C1）：per-workflow 预算首次超限触发 budget_exceeded 一次（edge-triggered）")
+    void recordBudgetEdgeTriggeredFiresOnce() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AgentFlowMetrics metrics = new AgentFlowMetrics(registry);
+        WorkflowBudget budget = new WorkflowBudget(null, 0.0000001); // 极小成本预算
+
+        // 第一次 record：成本 ≈ 0.0000135 > 预算 → 超限并触发一次
+        metrics.recordBudget(budget, "gpt-4o", 10, 20);
+        assertThat(budget.isExceeded()).isTrue();
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_BUDGET_EXCEEDED).count()).isEqualTo(1.0);
+
+        // 后续 record 不再触发（edge-triggered，事件数 ≠ 节点数）
+        metrics.recordBudget(budget, "gpt-4o", 10, 20);
+        metrics.recordBudget(budget, "gpt-4o", 10, 20);
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_BUDGET_EXCEEDED).count()).isEqualTo(1.0);
+    }
+
+    @Test
+    @DisplayName("recordBudget（C1）：预算未超限 / budget 为 null → 不触发 budget_exceeded")
+    void recordBudgetWithinLimitAndNullBudget() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AgentFlowMetrics metrics = new AgentFlowMetrics(registry);
+        WorkflowBudget big = new WorkflowBudget(1_000_000L, 100.0);
+
+        metrics.recordBudget(big, "gpt-4o", 10, 20);
+        assertThat(big.isExceeded()).isFalse();
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_BUDGET_EXCEEDED).count()).isZero();
+
+        // null budget → no-op 不抛（真实路径未声明预算时安全通过）
+        metrics.recordBudget(null, "gpt-4o", 10, 20);
+    }
+
+    @Test
+    @DisplayName("recordBudget（C1）：仅预算记账，不写 token/cost counter（供 Spring advisor 路径防双计）")
+    void recordBudgetDoesNotDoubleCountTokenCost() {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AgentFlowMetrics metrics = new AgentFlowMetrics(registry);
+        WorkflowBudget budget = new WorkflowBudget(null, 100.0);
+
+        metrics.recordBudget(budget, "gpt-4o", 1_000_000L, 1_000_000L);
+
+        // 预算已累进（成本 $12.50）
+        assertThat(budget.cost()).isCloseTo(12.50, within(1e-9));
+        // 但 token/cost counter 不应被写（避免与 TokenCountingAdvisor 双计）
+        assertThat(registry.find(AgentFlowMetrics.TOKENS_CONSUMED).counter()).isNull();
+        assertThat(registry.find(AgentFlowMetrics.WORKFLOW_COST_ESTIMATED).counter()).isNull();
+    }
 }

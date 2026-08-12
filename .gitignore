@@ -58,3 +58,6 @@ settings.xml
 
 # ce-code-review 临时产物
 .review_tmp/
+
+# CodeGraph 本地索引（重建产物，不入版本控制）
+.codegraph/

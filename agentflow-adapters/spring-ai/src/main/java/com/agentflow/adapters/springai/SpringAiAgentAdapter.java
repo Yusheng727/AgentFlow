@@ -7,6 +7,7 @@ import com.agentflow.agent.AgentOutput;
 import com.agentflow.agent.FatalException;
 import com.agentflow.agent.TransientException;
 import com.agentflow.engine.WorkflowContext;
+import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.NodeTrace;
 import com.agentflow.prompt.OutputSchemaValidator;
@@ -70,6 +71,10 @@ public class SpringAiAgentAdapter implements AgentFunction {
     private final Function<String, String> redactor;
     private final ExecutionTrace trace;
     private final OutputSchemaValidator schemaValidator;
+    /** C1 per-workflow 预算：可空 AgentFlowMetrics（非空时才做 budget 记账 + 超限事件）。 */
+    private final AgentFlowMetrics metrics;
+    /** C1 成本查表模型名（可空 → CostCalculator 默认单价旁路）。 */
+    private final String model;
 
     /** 便捷构造：无 advisor、无工具、无 trace、不脱敏、无 schema 校验（测试/最小用法）。 */
     public SpringAiAgentAdapter(ChatClient chatClient) {
@@ -77,6 +82,7 @@ public class SpringAiAgentAdapter implements AgentFunction {
     }
 
     /**
+     * 6-arg 便捷构造（向后兼容）：无 metrics/model（不做 per-workflow 预算记账）。
      * @param chatClient      已配置好的 ChatClient
      * @param advisors        每次 call 注入的 Advisor（U3-4 注入 TokenCounting/Logging；
      *                        Spring AI 2.0 零 advisor 时 .call() 抛 "No CallAdvisors"，故至少需 1 个）
@@ -91,12 +97,32 @@ public class SpringAiAgentAdapter implements AgentFunction {
                                 ExecutionTrace trace,
                                 Function<String, String> redactor,
                                 OutputSchemaValidator schemaValidator) {
+        this(chatClient, advisors, toolBeans, trace, redactor, schemaValidator, null, null);
+    }
+
+    /**
+     * 最全构造（C1 起）：在 6-arg 基础上加 AgentFlowMetrics + model 支持 per-workflow 预算记账。
+     *
+     * @param metrics  可空 AgentFlowMetrics——非空且节点声明预算（{@code input.budget()!=null}）时
+     *                 把本次用量累进预算并触发超限事件（{@code budget_exceeded}）
+     * @param model    成本查表模型名（可空 → CostCalculator 默认单价）
+     */
+    public SpringAiAgentAdapter(ChatClient chatClient,
+                                List<Advisor> advisors,
+                                List<Object> toolBeans,
+                                ExecutionTrace trace,
+                                Function<String, String> redactor,
+                                OutputSchemaValidator schemaValidator,
+                                AgentFlowMetrics metrics,
+                                String model) {
         this.chatClient = Objects.requireNonNull(chatClient, "chatClient");
         this.advisors = advisors == null ? List.of() : List.copyOf(advisors);
         this.toolBeans = toolBeans == null ? List.of() : List.copyOf(toolBeans);
         this.trace = trace;
         this.redactor = redactor == null ? Function.identity() : redactor;
         this.schemaValidator = schemaValidator;
+        this.metrics = metrics;
+        this.model = model;
     }
 
     @Override
@@ -154,6 +180,13 @@ public class SpringAiAgentAdapter implements AgentFunction {
             Throwable cause = (e.getCause() instanceof Exception) ? e.getCause() : e;
             nodeTrace.fail(cause.getMessage());
             throw mapException(e); // 传原始 e（保留 Spring 异常，toExecutionException 沿 cause 兜底）
+        }
+
+        // C1 per-workflow 预算：真实路径读 input.budget() 累加并触发超限。
+        // 用 metrics.recordBudget——costCalculator 纯算成本，不写 token/cost counter（避免与
+        // TokenCountingAdvisor 已记的指标双计）；metrics 或 budget 为 null 则 no-op。
+        if (metrics != null && input.budget() != null) {
+            metrics.recordBudget(input.budget(), model, promptTokens, completionTokens);
         }
 
         // 3. 构造 AgentOutput（content + metadata{tokens} + structuredOutput）
