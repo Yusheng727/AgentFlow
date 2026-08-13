@@ -34,7 +34,7 @@ export function resolveApiKey(
   isProd: boolean,
 ): { key: string; isDemo: boolean } {
   if (envKey && envKey.trim() !== '') {
-    return { key: envKey, isDemo: false }
+    return { key: envKey.trim(), isDemo: false }
   }
   if (isProd) {
     // 不能静默回退到公开 demo key——运维需显式配置 VITE_API_KEY

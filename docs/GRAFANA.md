@@ -14,7 +14,7 @@
 | Token 消耗 Top10 | `agentflow_tokens_consumed_total` |
 | LLM 成本按 model | `agentflow_workflow_cost_estimated_total` |
 | 预算超限 + 窗口总成本 | `agentflow_workflow_cost_budget_exceeded_total` |
-| 失败率 | `agentflow_workflow_executed_total{status="FAILED"}` |
+| 失败率 | `agentflow_workflow_executed_total{status="failed"}` |
 
 指标由 `com.agentflow.observability.AgentFlowMetrics`（agentflow-core）注册。Micrometer→Prometheus 命名转换：点号转下划线、Counter 加 `_total`、Timer 以秒为单位并加 `_seconds_bucket`。
 
