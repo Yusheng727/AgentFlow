@@ -12,6 +12,7 @@ import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.NodeTrace;
 import com.agentflow.prompt.OutputSchemaValidator;
 import com.agentflow.prompt.SpelPromptResolver;
+import com.agentflow.security.PromptRedactionFilter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,6 +22,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.expression.spel.SpelEvaluationException;
 
+import java.lang.reflect.Method;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -119,7 +121,9 @@ public class SpringAiAgentAdapter implements AgentFunction {
         this.advisors = advisors == null ? List.of() : List.copyOf(advisors);
         this.toolBeans = toolBeans == null ? List.of() : List.copyOf(toolBeans);
         this.trace = trace;
-        this.redactor = redactor == null ? Function.identity() : redactor;
+        // C3 收尾：不注入 redactor 时默认 PromptRedactionFilter::redact（原 identity 让 trace 摘要不脱敏；
+        // 生产默认脱敏敏感信息——sk-/Bearer/手机号/身份证）。显式注入可覆盖为自定义脱敏。
+        this.redactor = redactor == null ? PromptRedactionFilter::redact : redactor;
         this.schemaValidator = schemaValidator;
         this.metrics = metrics;
         this.model = model;
@@ -219,8 +223,11 @@ public class SpringAiAgentAdapter implements AgentFunction {
         if (!advisors.isEmpty()) {
             spec = spec.advisors(advisors.toArray(new Advisor[0]));
         }
-        if (!toolBeans.isEmpty()) {
-            spec = spec.tools(toolBeans.toArray());
+        // C4 收尾：节点声明 input.tools() 时只注入含被请求 @Tool 的 bean（bean 级粒度；Spring spec.tools 按对象
+        // 注册全部 @Tool 方法，无法像 LC4j 按方法过滤）；空 = 注册全部，向后兼容
+        List<Object> beans = filterToolBeans(input);
+        if (!beans.isEmpty()) {
+            spec = spec.tools(beans.toArray());
         }
         ChatResponse chatResponse = spec.call().chatResponse();
         String content = null;
@@ -231,6 +238,32 @@ public class SpringAiAgentAdapter implements AgentFunction {
         UsageTokens tokens = UsageTokens.from(chatResponse);
         recordBudgetSpend(input, tokens.promptTokens(), tokens.completionTokens());
         return new LlmResult(content, tokens.promptTokens(), tokens.completionTokens());
+    }
+
+    /** C4 收尾：按节点声明过滤 toolBeans。空请求 = 全部（向后兼容）；非空 = 只保留含被请求 @Tool 的 bean。 */
+    private List<Object> filterToolBeans(AgentInput input) {
+        List<String> requested = input.tools();
+        if (toolBeans.isEmpty() || requested == null || requested.isEmpty()) {
+            return toolBeans;
+        }
+        return toolBeans.stream().filter(bean -> hasRequestedTool(bean, requested)).toList();
+    }
+
+    /** C4 收尾：某 bean 是否含任一被请求的 @Tool（Spring @Tool name 空则回落到方法名）。包私有供测试验证。 */
+    static boolean hasRequestedTool(Object bean, List<String> requested) {
+        for (Method m : bean.getClass().getMethods()) {
+            org.springframework.ai.tool.annotation.Tool t =
+                    m.getAnnotation(org.springframework.ai.tool.annotation.Tool.class);
+            if (t == null) {
+                continue;
+            }
+            String name = t.name();
+            String toolName = (name == null || name.isBlank()) ? m.getName() : name;
+            if (requested.contains(toolName)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** C1 per-workflow 预算记账（真实 LLM 路径）：每个真实调用并入预算，首次超限触发 budget_exceeded。

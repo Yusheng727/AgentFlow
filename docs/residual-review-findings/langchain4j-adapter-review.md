@@ -57,11 +57,15 @@
 - 实现细节点：core pom + root dependencyManagement 加 `com.networknt:json-schema-validator:3.0.1`（对齐 Spring AI 传递版本）；检查型 `FatalException` 穿过 `Function` 回调用 `callForSchema` 包装 + `catch(RuntimeException)` 解包原样抛。
 - 测试：`LangChain4jAgentAdapterTest` +3（成功填充/反馈重试/耗尽 Fatal）+ core `OutputSchemaValidatorTest` 8 移入。
 
-### C3. [P3] `redactor` 默认 `Function.identity()`（未脱敏）
-- 两适配器默认不脱敏；生产接入时应注入 `PromptRedactionFilter` 的脱敏函数，与 Spring 路径一致。
+### C3. [P3] ✅ **已解决（2026-08-13）** `redactor` 默认 `Function.identity()`（未脱敏）
+- **现状（已解决）**：两适配器构造不注入 redactor 时，默认为 `PromptRedactionFilter::redact`（core `com.agentflow.security` 静态脱敏：sk-/Bearer/手机号/身份证）——不再是 identity，trace 摘要默认脱敏敏感信息；显式注入可覆盖为自定义脱敏函数。
+- 测试：两适配器各 +1（构造不注入 redactor → 内容里的 `sk-...` 在 NodeTrace 摘要被脱敏为 `sk-***`）。
 
-### C4. [P3] `input.tools()` 两适配器都不读（沿用构造器注入 toolBeans）
-- pre-existing（Spring 同款）；per-node 运行时工具过滤留待引擎支持。
+### C4. [P3] ✅ **已解决（2026-08-13）** `input.tools()` 两适配器都不读（沿用构造器注入 toolBeans）
+- **现状（已解决）**：两适配器都读 `input.tools()` 做 per-node 运行时工具过滤——`LangChain4jAgentAdapter` 在 `collectTools` 按被请求工具名过滤注册（**方法级**）；`SpringAiAgentAdapter` 在 `callLlm` 按含被请求 `@Tool` 的 bean 过滤注入（**bean 级**——Spring `spec.tools` 按对象注册，无法按方法，记此差异）。空 `tools` = 注册全部，向后兼容。
+- 测试：两适配器各 +1（LC4j 节点只声明 alpha → 模型只见 alpha 的 spec 且 alpha 真执行；Spring `hasRequestedTool` 命中/未命中/显式 name）。
+
+> **至此 residual 全部闭环 ✅**（B1/B2/B3/C1/C2/C3/C4/M2）——v1.1 的 P2/P3 代码项全部处理完毕。
 
 ---
 

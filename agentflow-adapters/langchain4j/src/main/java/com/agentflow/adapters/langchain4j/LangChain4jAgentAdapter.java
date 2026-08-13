@@ -12,6 +12,7 @@ import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.NodeTrace;
 import com.agentflow.prompt.OutputSchemaValidator;
 import com.agentflow.prompt.SpelPromptResolver;
+import com.agentflow.security.PromptRedactionFilter;
 
 import dev.langchain4j.agent.tool.Tool;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
@@ -138,7 +139,9 @@ public class LangChain4jAgentAdapter implements AgentFunction {
         this.chatModel = Objects.requireNonNull(chatModel, "chatModel");
         this.toolBeans = toolBeans == null ? List.of() : List.copyOf(toolBeans);
         this.trace = trace;
-        this.redactor = redactor == null ? Function.identity() : redactor;
+        // C3 收尾：不注入 redactor 时默认 PromptRedactionFilter::redact（原 identity 让 trace 摘要不脱敏，
+        // 生产应默认脱敏敏感信息——sk-/Bearer/手机号/身份证）。显式注入可覆盖为自定义脱敏。
+        this.redactor = redactor == null ? PromptRedactionFilter::redact : redactor;
         this.metrics = metrics;
         this.model = model;
         this.schemaValidator = schemaValidator;
@@ -247,7 +250,8 @@ public class LangChain4jAgentAdapter implements AgentFunction {
         messages.add(new UserMessage(prompt));
         List<ToolSpecification> specs = new ArrayList<>();
         Map<String, ToolExecutor> executors = new HashMap<>();
-        collectTools(specs, executors);
+        // C4 收尾：按节点声明 input.tools() 过滤注册（空 = 注册全部，向后兼容）
+        collectTools(specs, executors, input.tools());
 
         long promptTokens = 0;
         long completionTokens = 0;
@@ -335,10 +339,17 @@ public class LangChain4jAgentAdapter implements AgentFunction {
      * <p>B3/ADV-2：改用 {@link #collectToolMethods} 全层级遍历（含基类/接口），不再用
      * {@code getDeclaredMethods()}（只扫本类，漏继承 @Tool）。
      */
-    private void collectTools(List<ToolSpecification> specs, Map<String, ToolExecutor> executors) {
+    private void collectTools(List<ToolSpecification> specs, Map<String, ToolExecutor> executors,
+                              List<String> requestedTools) {
+        List<String> requested = requestedTools == null ? List.of() : requestedTools;
         for (Object bean : toolBeans) {
             for (Method m : collectToolMethods(bean.getClass())) {
                 ToolSpecification spec = ToolSpecifications.toolSpecificationFrom(m);
+                // C4 收尾：节点声明了 tools（非空）时只注册被请求的名称，其余 @Tool 不对模型暴露
+                // （per-node 运行时工具过滤；空 = 注册全部，向后兼容）
+                if (!requested.isEmpty() && !requested.contains(spec.name())) {
+                    continue;
+                }
                 // C1 review（agent-native+adversarial）：executors 键是 spec.name()（last-wins）。同名 @Tool
                 // （重载，或 B3 扩大枚举后两个共享类层级的 bean）会给模型重复 ToolSpecification 名——只在
                 // 首次遇到某名字时 add 一次，执行器仍按 name 映射到具体 Method

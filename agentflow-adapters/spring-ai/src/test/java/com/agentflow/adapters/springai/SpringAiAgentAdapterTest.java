@@ -479,4 +479,40 @@ class SpringAiAgentAdapterTest {
         // 末次 metadata 语义保留
         assertThat(out.metadata()).containsEntry("totalTokens", 30L);
     }
+
+    @Test
+    @DisplayName("C3 默认脱敏：构造不注入 redactor 时，trace 摘要里的 API key 被 PromptRedactionFilter 脱敏")
+    void defaultRedactorRedactsSensitiveKeyFromTrace() throws Exception {
+        StubChatModel model = new StubChatModel();
+        model.content = "调用: sk-123456789012345678901234 ok";
+        ExecutionTrace trace = new ExecutionTrace("wf-spring-redact");
+        SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
+                client(model), passThroughAdvisors(), List.of(), trace, null, null); // redactor=null → 默认脱敏
+        AgentInput in = new AgentInput("R2", "test-agent", "t", new WorkflowContext(),
+                Map.of(), List.of(), Map.of(), null, trace);
+
+        adapter.execute(in);
+
+        String summary = trace.snapshot().nodes().get(0).outputSummary();
+        assertThat(summary).contains("sk-***").doesNotContain("123456789012345678901234");
+    }
+
+    @Test
+    @DisplayName("C4 Spring bean 级工具过滤：hasRequestedTool 只认含被请求 @Tool 名的 bean（空 name 回落方法名）")
+    void hasRequestedToolFiltersByRequestedNames() {
+        class ToolABean {
+            @org.springframework.ai.tool.annotation.Tool
+            public String alpha() { return "a"; }
+        }
+        class ToolBBean {
+            @org.springframework.ai.tool.annotation.Tool(name = "beta")
+            public String otherMethod() { return "b"; }
+        }
+        // alpha bean 含被请求的 alpha
+        assertThat(SpringAiAgentAdapter.hasRequestedTool(new ToolABean(), List.of("alpha"))).isTrue();
+        // beta bean（@Tool("beta") 显式名）不含 alpha
+        assertThat(SpringAiAgentAdapter.hasRequestedTool(new ToolBBean(), List.of("alpha"))).isFalse();
+        // beta bean 含被请求的 beta（显式 @Tool name 命中）
+        assertThat(SpringAiAgentAdapter.hasRequestedTool(new ToolBBean(), List.of("beta"))).isTrue();
+    }
 }

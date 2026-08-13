@@ -791,4 +791,66 @@ class LangChain4jAgentAdapterTest {
         assertThat(registry.counter(AgentFlowMetrics.TOKENS_CONSUMED,
                 "agent", "lc4j-agent", "model", "gpt-4o-mini").count()).isEqualTo(75.0);
     }
+
+    @Test
+    @DisplayName("C3 默认脱敏：构造不注入 redactor 时，trace 摘要里的 API key 被 PromptRedactionFilter 脱敏")
+    void defaultRedactorRedactsSensitiveKeyFromTrace() throws Exception {
+        ChatModel model = new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                return ChatResponse.builder()
+                        .aiMessage(AiMessage.from("调用: sk-123456789012345678901234 ok"))
+                        .tokenUsage(new TokenUsage(10, 20)).build();
+            }
+        };
+        ExecutionTrace trace = new ExecutionTrace("wf-redact");
+        // 4-arg 构造 redactor=null → 默认 PromptRedactionFilter::redact（C3 收尾，不再 identity）
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(model, List.of(), trace, null);
+        AgentInput in = new AgentInput("R", "lc4j-agent", "t", new WorkflowContext(),
+                Map.of(), List.of(), Map.of(), null, trace);
+
+        adapter.execute(in);
+
+        String summary = trace.snapshot().nodes().get(0).outputSummary();
+        assertThat(summary).contains("sk-***").doesNotContain("123456789012345678901234");
+    }
+
+    @Test
+    @DisplayName("C4 逐节点工具过滤：input.tools() 只注册被请求的工具，其他 @Tool 不对模型暴露")
+    void perNodeToolFilteringByInputTools() throws Exception {
+        class TwoTools {
+            @Tool
+            String alpha() { return "alpha-ok"; }
+            @Tool
+            String beta() { return "beta-ok"; }
+        }
+        // 第 1 轮：请求 alpha；第 2 轮检查模型第 1 轮只看到 alpha 的 spec、且执行了 alpha
+        AtomicInteger chatCalls = new AtomicInteger();
+        AtomicInteger requestedSpecs = new AtomicInteger(-1);
+        ChatModel model = new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                if (chatCalls.incrementAndGet() == 1) {
+                    requestedSpecs.set(request.toolSpecifications() == null ? 0 : request.toolSpecifications().size());
+                    boolean onlyAlpha = request.toolSpecifications().stream()
+                            .allMatch(s -> s.name().equals("alpha"));
+                    return ChatResponse.builder().aiMessage(AiMessage.from(
+                            onlyAlpha ? ToolExecutionRequest.builder().id("req-1").name("alpha").arguments("{}").build()
+                                    : ToolExecutionRequest.builder().id("req-1").name("beta").arguments("{}").build()))
+                            .tokenUsage(new TokenUsage(1, 1)).build();
+                }
+                boolean hasAlpha = request.messages().stream()
+                        .anyMatch(m -> m instanceof ToolExecutionResultMessage tr && tr.text().contains("alpha-ok"));
+                return ChatResponse.builder().aiMessage(AiMessage.from(hasAlpha ? "done" : "no")).build();
+            }
+        };
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(model, List.of(new TwoTools()), null, null);
+        // 节点只声明使用 alpha 工具
+        AgentInput in = new AgentInput("FT", "lc4j-agent", "t", new WorkflowContext(),
+                Map.of(), List.of("alpha"), Map.of(), null, null);
+        AgentOutput out = adapter.execute(in);
+
+        assertThat(requestedSpecs.get()).isEqualTo(1);       // 只有 alpha 被注册给模型
+        assertThat(out.content()).isEqualTo("done");          // alpha 真执行并回填
+    }
 }
