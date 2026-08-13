@@ -7,9 +7,11 @@
 
 ## 自我介绍 30 秒版
 
-「AgentFlow 是我从零复现的 Java 原生 Multi-Agent 编排引擎，YAML 声明工作流，BSP 执行模型驱动多 Agent 协作，支持崩溃恢复。技术栈 Java 21 Virtual Threads + Spring Boot 4.1 + Spring AI 2.0 + PostgreSQL。我做了 15 个实现单元，从 DSL 解析、BSP 引擎、Agent 适配器、容错机制到两级 Checkpoint 持久化。每个单元都过 `mvn verify` + JaCoCo 80% 门禁 + 多 agent code review。」
+「AgentFlow 是我从零复现的 Java 原生 Multi-Agent 编排引擎：YAML 声明工作流，BSP 执行模型驱动多 Agent 协作，带两级 Checkpoint 崩溃恢复。技术栈 Java 21 Virtual Threads + Spring Boot 4.1 + Spring AI/LangChain4j 双适配器 + PostgreSQL，15 个实现单元从 DSL 解析、引擎、容错、可观测到 API 安全，每一步都过 `mvn verify` + JaCoCo 80% 门禁 + 多 agent code review。」
 
-**深挖钩子**（等面试官问，再展开）：BSP 是什么 / 为什么从零复现 / Virtual Threads 怎么用 / Checkpoint 怎么恢复 / code review 怎么做。
+「我最想讲两点：一是 KTD-7 可移植性——两个框架适配器（Spring AI / LangChain4j）收敛在同一个窄表面，换框架只动适配器、上游无感知；二是**闭环习惯**——review 抓到『测试全绿但生产不生效』的预算记账缺口，我把它修掉，再用真实 DeepSeek key 把 per-workflow 预算、工具执行、指标监控整条链路端到端跑通」（凭证安全、真实 token 落 Grafana）。
+
+**深挖钩子**（等面试官问，再展开）：BSP 是什么 / 为什么从零复现 / Virtual Threads 怎么用 / Checkpoint 怎么恢复 / 双适配器如何保证可移植性 / 真实 LLM 端到端怎么验证 / code review 怎么做。
 
 ---
 
