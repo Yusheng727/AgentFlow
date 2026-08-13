@@ -309,6 +309,33 @@
 - 「这种 bug 在 agent 编排里为什么危险？」（坏状态伪装成功，下游 SpEL 才炸，根因藏在 warn 日志）
 - 「为什么不用截断标志而是直接失败？」（截断的 token/副作用已不可回滚，安静成功比显式失败代价更高）
 
+### C1+B1+B3 ce-code-review 复审（2026-08-12，10-persona）★工程 rigor
+
+**可讲故事**：
+- 对已合 main 的三个 commit 做 10 个 persona 的复审，抓到 7 条 P2，应用 4 条 high-conf 修复
+- **预算「只记成功路径末次」低估 ≤3x**：schema 校验重试是多次真实付费，`AtomicReference last` 只留末次 → 重试花的 2/3 成本被静默剔除（正对「测试绿 ≠ 生产生效」的又一个形态）。修复：把记账从"成功路径收尾"改成**每轮真实调用即记**（`metricAndBudget`），失败/重试轮自然都入预算
+- **自写 coerce 想对齐框架却漏了 CCE**：`{"count":"3"}` 字符串数字 → `((Number)value).intValue()` 抛 ClassCastException，而 Jackson `convertValue("3", int.class)` 能转。修复=删分支、复用框架语义——**「尽量复用而非重造易碎强转」**
+- **SafeToolExecutor 吞 InterruptedException 不恢复标志**：cancel 到达被清 flag → 上层 REL-1 中断失效，已取消节点再开付费轮。修复=root cause 为 Interrupted 时 `Thread.currentThread().interrupt()`
+- **重名 @Tool**：B3 故意枚举基类/接口后，同名重载/共享基类会给模型重复 ToolSpecification 名 → 只首次 add
+
+**深挖点（面试官最可能问）**：
+- 「为什么 7 条里 4 条都是『我的修复引入的』？」——闭环：正是对自己上一轮代码的独立复审才有这个价值；被多 persona 交叉命中的 conf 提到 100
+- 「预算语义是记账还是强制？」——**拍板为记账/告警非阻断**：运行中不中止（R10 本意是告警），硬性防护归提交前 `WorkflowSubmissionGuard`（422）。讲清楚「观察 vs 治理」的分层
+
+### 档 1 真实 DeepSeek 端到端（2026-08-13）★最硬闭环
+
+**可讲故事**：
+- 评审残留「demo-api/starter 从不构造真实适配器 → C1/B1/B3 部署未生效」（能力已具备、wiring 缺失）
+- 补生产接线：demo-api 加真实 agent 条件装配（`agentflow.real.enabled` + env `DEEPSEEK_API_KEY`），**凭证只从 env 读、缺失启动失败**，其他 agent 名回落 mock 兼容
+- **真实端到端跑通**：REST `POST /api/workflows` → DSL → BspEngine → `LangChain4jAgentAdapter`（OpenAI 兼容 → DeepSeek `deepseek-chat`）→ 2 节点串行逐级传参 → SUCCESS
+- **真实指标落盘**（`/actuator/prometheus`）：`tokens_consumed_total{agent="deepseek",model="deepseek-chat"}=3275`、`cost_estimated_total{model="deepseek-chat"}=7.68e-4 USD`、`node_duration_seconds_sum=20.47s`（2 节点）、`workflow_executed_total{status="success"}=1`——**真实 token/成本/耗时**，非 mock 模拟值
+- 全程 key 只走 env，未入文件/commit/日志——**凭证安全**也是可讲的点
+
+**深挖点（面试官最可能问）**：
+- 「能力早就有了为什么不直接跑？」——仓库里根本没有生产接线路径，mock fallback 包住了所有 agent 名；这正是评审抓的「test 全绿但生产不生效」根源，档 1 补的就是这条可部署路径
+- 「为什么端到端要真实 key？」——mock 模拟 token 永远不能证明 KTD-7 第二适配器对接真实 OpenAI 兼容 provider；真实 key 才拿到 `usage`/`TokenUsage` 走通 C1 逐轮记账
+- 「凭证安全怎么保证？」——`CredentialManager` 规范：env 注入、启动校验、检测 yml 硬编码占位符即启动失败
+
 ---
 
 ## 08-07 Grafana 可观测全闭环 + PG 收尾（详见 06）

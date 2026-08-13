@@ -1,6 +1,6 @@
 # AgentFlow — 接手指南（给 Claude Code）
 
-> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-11（WorkflowSubmissionGuard + R10 per-workflow budget + **v1.1 LangChain4jAgentAdapter**（KTD-7 可移植性实证）已 push 远程；`mvn verify` 10 模块绿 + JaCoCo 达标）。
+> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-13（v1.1 residual 全闭环 + 档 1 真实 DeepSeek 端到端已跑通，见下方进度；`mvn verify` 10 模块绿 + JaCoCo 达标）。
 >
 > **状态/路线文档**：`docs/ROADMAP.md`（v1 交付盘点 · 剩余工作 · v2 路线图）+ `docs/GRAFANA.md`（可观测/Grafana 部署与验证）——接手或规划下一步先看这两份。
 

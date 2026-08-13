@@ -38,6 +38,20 @@
   `tokens_consumed_total{agent,model}`、`cost_estimated_total{model}`、`cost_budget_exceeded_total`。
 - **6 面板现均可有数据**。
 
+## 真实 LLM 路径指标证据（2026-08-13，档 1 真实 DeepSeek 端到端）
+
+> demo-api `agentflow.real.enabled=true` + env `DEEPSEEK_API_KEY` 起服，REST POST 一条 `agent: deepseek` 的 2 节点串行工作流，`/actuator/prometheus` 抓到**真实（非 mock 模拟）指标**：
+
+```
+agentflow_workflow_executed_total{status="success"} 1.0
+agentflow_node_duration_seconds_sum{agent="deepseek"} 20.467 (count=2)
+agentflow_node_duration_seconds_max{agent="deepseek"} 11.84
+agentflow_tokens_consumed_total{agent="deepseek",model="deepseek-chat"} 3275.0
+agentflow_workflow_cost_estimated_total{model="deepseek-chat"} 7.6804E-4
+```
+
+意义：`tokens.consumed`/`cost.estimated` 走到**真实 LLM usage**（非 mock 4 字符≈1 token 模拟），`node.duration` 是真实每节点耗时——Grafana 的 Token/成本/耗时面板在有真实 DeepSeek 流量时可填真实数据。档 1 接线 / 结果见 `developer-notes/00-interview-arsenal.md`「档 1 真实 DeepSeek 端到端」。
+
 ## 在真实 Grafana 环境验证（有 Docker/Grafana/Prometheus 时按此做）
 
 ```bash
