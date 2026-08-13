@@ -228,7 +228,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - 补测试：coerce 字符串数字 / 重写 dedup concrete-wins / 同名重载单 spec / 中断标志恢复 / schema 重试预算累加 / 失败路径预算计入。
 
 **待人工决策（未自动改）**：
-- **预算记账非阻断**（agent-native，P2 manual）：`src/main` 无任何代码读 `WorkflowBudget.isExceeded()` 去 halt/skip——C1 文档写的「强制执行」与代码（记账/告警）不符。二选一：改文档为「记账/告警（非阻断）」或加 pre-call guard（isExceeded → FatalException）。
+- **预算记账非阻断**（agent-native，P2 manual）→ **✅ 已解决（2026-08-12，拍板为「记账/告警非阻断」）**：`src/main` 无任何代码读 `WorkflowBudget.isExceeded()` 去 halt/skip——C1 文档原称「强制执行」与代码不符。决定：per-workflow budget 是**记账 + `budget_exceeded` 告警**，运行中不中止执行；硬性防护由提交前 `WorkflowSubmissionGuard`（422）承担。已统一 residual/CLAUDE.md 措辞为「记账/告警（非阻断）」，本文档对应历史 C1 节同步修正。
 - **Spring 适配器预算路径**（正确性上同样存在 schema last-wins / 失败路径缺口，且 8-arg 构造无生产接线）：本批只修了 LC4j（工具循环所在地），Spring 因 advisors + 无生产消费者未动——若后续接真实 Spring 路径需补。
 - **metrics==null 静默停用预算**（adversarial，conf 50 → residual）：两真实适配器把 recordBudget 挂 metrics 非空之后，手配/极简部署无 Micrometer bean 时预算被静默禁用；且仓库内 demo-api/starter **均不构造真实适配器**（无生产接线）——端到端预算强制在仓库内不可验证（同 B2「retryPolicy wired null」模式）。
 

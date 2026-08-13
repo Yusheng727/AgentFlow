@@ -32,6 +32,7 @@ import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.within;
 
 /**
  * SpringAiAgentAdapter 骨架测试（U3-3）：stub ChatModel + SpEL 解析 + SpEL 安全 +
@@ -445,5 +446,37 @@ class SpringAiAgentAdapterTest {
 
         assertThat(budget.isExceeded()).isFalse();
         assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_COST_BUDGET_EXCEEDED).count()).isZero();
+    }
+
+    @Test
+    @DisplayName("C1 review 预算对齐：Spring schema 重试每次尝试的用量都计入预算（非仅末次，与 LC4j 一致）")
+    void schemaRetryBudgetAccumulatesAllAttempts() throws Exception {
+        StubChatModel model = new StubChatModel();
+        java.util.concurrent.atomic.AtomicInteger calls = new java.util.concurrent.atomic.AtomicInteger();
+        model.caller = p -> {
+            calls.incrementAndGet();
+            return calls.get() < 3 ? "not-json" : "{\"riskLevel\":\"HIGH\"}";
+        };
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        AgentFlowMetrics metrics = new AgentFlowMetrics(registry);
+        SpringAiAgentAdapter adapter = new SpringAiAgentAdapter(
+                client(model), passThroughAdvisors(), List.of(), null, Function.identity(), new OutputSchemaValidator(),
+                metrics, "gpt-4o-mini");
+        Map<String, Object> schema = new java.util.LinkedHashMap<>();
+        schema.put("type", "object");
+        schema.put("properties", Map.of("riskLevel", Map.of("type", "string", "enum", List.of("LOW", "MEDIUM", "HIGH"))));
+        schema.put("required", List.of("riskLevel"));
+        WorkflowBudget budget = new WorkflowBudget(null, 100.0);
+        AgentInput in = new AgentInput("S2", "test-agent", "t", new WorkflowContext(),
+                Map.of(), List.of(), schema, null, null, budget);
+
+        AgentOutput out = adapter.execute(in);
+
+        assertThat(calls.get()).isEqualTo(3); // schema 校验重试共 3 次真实调用
+        // 3 次 × (10 in + 20 out) 全计入预算（gpt-4o-mini: in $0.15 / out $0.60 per 1M）
+        assertThat(budget.cost()).isCloseTo((10.0 * 0.15 + 20.0 * 0.60) * 3 / 1_000_000.0, within(1e-9));
+        assertThat(budget.tokens()).isEqualTo((10 + 20) * 3L);
+        // 末次 metadata 语义保留
+        assertThat(out.metadata()).containsEntry("totalTokens", 30L);
     }
 }

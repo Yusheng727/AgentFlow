@@ -152,11 +152,12 @@ public class SpringAiAgentAdapter implements AgentFunction {
         long completionTokens;
         try {
             if (schemaValidator != null && !input.outputSchema().isEmpty()) {
-                // schema 校验 + 重试：validator 内部多次 callLlm，用 AtomicReference 捕获最后一次 usage
+                // schema 校验 + 重试：validator 内部多次 callLlm，用 AtomicReference 捕获末次 usage
+                // 供 AgentOutput.metadata（展示用）；预算已在 callLlm 逐次记账，重试花费不丢失
                 java.util.concurrent.atomic.AtomicReference<LlmResult> last = new java.util.concurrent.atomic.AtomicReference<>();
                 OutputSchemaValidator.ValidatedOutput vo = schemaValidator.validateWithRetry(
                         resolvedPrompt, input.outputSchema(), p -> {
-                            LlmResult r = callLlm(p);
+                            LlmResult r = callLlm(input, p);
                             last.set(r);
                             return r.content();
                         });
@@ -166,7 +167,7 @@ public class SpringAiAgentAdapter implements AgentFunction {
                 promptTokens = lastResult == null ? 0 : lastResult.promptTokens();
                 completionTokens = lastResult == null ? 0 : lastResult.completionTokens();
             } else {
-                LlmResult r = callLlm(resolvedPrompt);
+                LlmResult r = callLlm(input, resolvedPrompt);
                 content = r.content();
                 promptTokens = r.promptTokens();
                 completionTokens = r.completionTokens();
@@ -180,13 +181,6 @@ public class SpringAiAgentAdapter implements AgentFunction {
             Throwable cause = (e.getCause() instanceof Exception) ? e.getCause() : e;
             nodeTrace.fail(cause.getMessage());
             throw mapException(e); // 传原始 e（保留 Spring 异常，toExecutionException 沿 cause 兜底）
-        }
-
-        // C1 per-workflow 预算：真实路径读 input.budget() 累加并触发超限。
-        // 用 metrics.recordBudget——costCalculator 纯算成本，不写 token/cost counter（避免与
-        // TokenCountingAdvisor 已记的指标双计）；metrics 或 budget 为 null 则 no-op。
-        if (metrics != null && input.budget() != null) {
-            metrics.recordBudget(input.budget(), model, promptTokens, completionTokens);
         }
 
         // 3. 构造 AgentOutput（content + metadata{tokens} + structuredOutput）
@@ -211,7 +205,16 @@ public class SpringAiAgentAdapter implements AgentFunction {
      * <p>Spring AI 2.0：.chatResponse() / .content() 各自触发一次 advisor 链执行，
      * callAdvisors deque 是 mutable（nextCall pop），故只调一次 .chatResponse()。
      */
-    private LlmResult callLlm(String prompt) {
+    /**
+     * 单次 LLM 调用（advisors + tools 注入）。返回 content + usage。
+     *
+     * <p>Spring AI 2.0：.chatResponse() / .content() 各自触发一次 advisor 链执行，
+     * callAdvisors deque 是 mutable（nextCall pop），故只调一次 .chatResponse()。
+     *
+     * <p>C1 review 对齐：每个真实调用即记预算（而非成功路径记末次）——schema 重试/随后失败已付费的调用
+     * 都计入 per-workflow 预算，与 LangChain4j 适配器语义一致（KTD-7 相同 DSL 相同结果）。
+     */
+    private LlmResult callLlm(AgentInput input, String prompt) {
         ChatClient.ChatClientRequestSpec spec = chatClient.prompt(prompt);
         if (!advisors.isEmpty()) {
             spec = spec.advisors(advisors.toArray(new Advisor[0]));
@@ -226,7 +229,16 @@ public class SpringAiAgentAdapter implements AgentFunction {
             content = chatResponse.getResult().getOutput().getText();
         }
         UsageTokens tokens = UsageTokens.from(chatResponse);
+        recordBudgetSpend(input, tokens.promptTokens(), tokens.completionTokens());
         return new LlmResult(content, tokens.promptTokens(), tokens.completionTokens());
+    }
+
+    /** C1 per-workflow 预算记账（真实 LLM 路径）：每个真实调用并入预算，首次超限触发 budget_exceeded。
+     *  只用 recordBudget——Spring 的 token/cost counter 由 TokenCountingAdvisor 记账，此处不 recordTokens 防双计。 */
+    private void recordBudgetSpend(AgentInput input, long promptTokens, long completionTokens) {
+        if (metrics != null && input.budget() != null) {
+            metrics.recordBudget(input.budget(), model, promptTokens, completionTokens);
+        }
     }
 
     /**

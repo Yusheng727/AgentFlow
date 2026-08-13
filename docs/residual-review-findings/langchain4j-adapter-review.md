@@ -46,7 +46,8 @@
 - **修复（C1）**：
   - core `AgentFlowMetrics` 新增 `recordBudget(WorkflowBudget, model, promptTokens, completionTokens)` 助手——**单一真相源**：`costCalculator.cost` **纯算成本不写 token/cost counter**（避免与 Spring `TokenCountingAdvisor` 双计），累进 budget 后首次超限触发一次 `budget_exceeded`（edge-triggered，事件数 ≠ 节点数）。
   - `LangChain4jAgentAdapter`：在既有 `metrics.recordTokens` 记账处一并 `metrics.recordBudget(input.budget(), ...)`。
-  - `SpringAiAgentAdapter`：新增 8-arg 构造注入 `AgentFlowMetrics` + `model`（6-arg 委托 null 向后兼容，构造点零改动），成功路径 `metrics.recordBudget(input.budget(), ...)`——真实 LLM 路径预算自此强制执行。
+  - `SpringAiAgentAdapter`：新增 8-arg 构造注入 `AgentFlowMetrics` + `model`（6-arg 委托 null 向后兼容，构造点零改动），成功路径 `metrics.recordBudget(input.budget(), ...)`——真实 LLM 路径预算自此**记账/告警生效**。
+  - **语义（2026-08-12 拍板，非阻断）**：per-workflow budget 是**记账 + `budget_exceeded` 告警事件**，**不**在运行中中止执行（`src/main` 无代码读 `isExceeded()` 去 halt/skip）。硬性防护由提交前 `WorkflowSubmissionGuard`（422 超预估成本/超节点）承担；运行时记账给 Grafana 观察与告警。文档勿再称「强制」。
   - `MockAgentFunction`：per-workflow 分支改用 `recordBudget`（复用同一助手，去重复逻辑）。
 - 测试：`AgentFlowMetricsTest` +3（edge-triggered 一次 / 未超限+null budget / 不双记 token-cost）+ 两真实适配器各 +2（超限/未超限，`LangChain4jAgentAdapterTest`、`SpringAiAgentAdapterTest`）。
 - **全仓 `mvn verify` 10 模块绿 + JaCoCo 达标**。
