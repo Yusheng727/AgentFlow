@@ -1,0 +1,14 @@
+# AgentFlow Prometheus 抓取配置（v1 档 A 可观测部署验证）
+#
+# AgentFlow 应用在宿主机运行（mvn spring-boot:run / docker run），
+# 暴露 /actuator/prometheus。容器内经 host.docker.internal 回宿主机抓取。
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'agentflow'
+    metrics_path: '/actuator/prometheus'
+    static_configs:
+      - targets: ['host.docker.internal:8080']

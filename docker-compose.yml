@@ -5,6 +5,13 @@
 #
 # 生产模式：PG + Redis + API 端点
 #   docker compose --profile production up
+#
+# 可观测：Prometheus + Grafana（v1 档 A 部署验证）
+#   docker compose --profile observability up -d
+#   # Grafana http://localhost:3000（admin/admin），dashboard 自动加载
+#
+# 分布式（v1.1）：Kafka（KRaft，免 Zookeeper）
+#   docker compose --profile distributed up -d
 
 services:
 
@@ -72,6 +79,60 @@ services:
         condition: service_healthy
     profiles:
       - production
+
+  # ── v1.1 分布式模式：Kafka（apache/kafka，KRaft 免 Zookeeper）──
+  kafka:
+    image: apache/kafka:3.9.2
+    ports:
+      - "9092:9092"
+    environment:
+      - KAFKA_NODE_ID=1
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=1@localhost:9093
+      - KAFKA_LISTENERS=PLAINTEXT://:9092,CONTROLLER://:9093
+      - KAFKA_ADVERTISED_LISTENERS=PLAINTEXT://localhost:9092
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CLUSTER_ID=MkU3OEVBNTcwNTJENDM2Qk
+      - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR=1
+      - KAFKA_TRANSACTION_STATE_LOG_MIN_ISR=1
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    profiles:
+      - distributed
+
+  # ── 可观测：Prometheus + Grafana（v1 档 A 部署验证）──
+  prometheus:
+    image: prom/prometheus:v2.53.0
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    profiles:
+      - observability
+
+  grafana:
+    image: grafana/grafana:11.1.0
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./agentflow-starter/src/main/resources/grafana/agentflow-dashboard.json:/var/lib/grafana/dashboards/agentflow-dashboard.json:ro
+    depends_on:
+      - prometheus
+    profiles:
+      - observability
 
 volumes:
   pg-data:

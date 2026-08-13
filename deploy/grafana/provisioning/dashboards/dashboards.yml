@@ -1,0 +1,13 @@
+# Grafana dashboard 自动装配：从 /var/lib/grafana/dashboards 加载。
+# 该目录由 docker-compose 挂载 agentflow-dashboard.json（源文件，避免复制漂移）。
+apiVersion: 1
+
+providers:
+  - name: 'AgentFlow'
+    orgId: 1
+    folder: 'AgentFlow'
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

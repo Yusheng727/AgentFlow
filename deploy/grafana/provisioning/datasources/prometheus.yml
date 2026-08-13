@@ -1,0 +1,12 @@
+# Grafana 数据源自动装配：Prometheus。
+# uid 固定为 DS_PROMETHEUS，与 agentflow-dashboard.json 的 ${DS_PROMETHEUS} 模板变量对齐，
+# dashboard 自动加载时无需手动选数据源。
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: DS_PROMETHEUS
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
