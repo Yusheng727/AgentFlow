@@ -1,5 +1,6 @@
 package com.agentflow.demo.api;
 
+import com.agentflow.adapters.langchain4j.LangChain4jAgentAdapter;
 import com.agentflow.adapters.mock.MockAgentFunction;
 import com.agentflow.agent.NodeRegistry;
 import com.agentflow.api.security.ApiKeyAuthFilter;
@@ -15,12 +16,17 @@ import com.agentflow.engine.checkpoint.InMemoryCheckpointManager;
 import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.observability.CostCalculator;
 import com.agentflow.observability.ExecutionTraceRegistry;
+import com.agentflow.prompt.OutputSchemaValidator;
 import com.agentflow.version.InMemoryWorkflowDefinitionStore;
 import com.agentflow.version.WorkflowDefinitionStore;
 import com.agentflow.version.WorkflowVersionManager;
 
+import dev.langchain4j.model.openai.OpenAiChatModel;
+
 import io.micrometer.core.instrument.MeterRegistry;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
@@ -29,6 +35,7 @@ import org.springframework.context.annotation.Configuration;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * REST API wiring（后续任务 #9，可运行 server）。
@@ -45,6 +52,8 @@ import java.util.Set;
  */
 @Configuration
 public class ApiConfig {
+
+    private static final Logger log = LoggerFactory.getLogger(ApiConfig.class);
 
     @Bean
     public WorkflowDSLParser workflowDSLParser() {
@@ -81,15 +90,51 @@ public class ApiConfig {
         return new InMemoryCheckpointManager();
     }
 
-    /** mock 模式：NodeRegistry fallback → 任意 agent 名 → MockAgentFunction（共享无状态单例，零 LLM）。
-     *  注入 AgentFlowMetrics + mock model + 预算阈值 → mock 也记 token/cost/budget 指标（Grafana Token/成本面板数据源）。 */
+    /**
+     * NodeRegistry：默认 fallback → MockAgentFunction（任意未注册 agent 名 → 零 LLM mock，向后兼容）。
+     *
+     * <p><b>真实 LLM 接线（档 1，C1/B1/B3 端到端生效）</b>：{@code agentflow.real.enabled=true} 且 env
+     * {@code DEEPSEEK_API_KEY} 存在时，把指定 agent 名（{@code agentflow.real.agent}，默认 {@code deepseek}）
+     * 注册到真实适配器（OpenAI 兼容 → DeepSeek），注入 metrics/model/schemaValidator 全配——YAML
+     * {@code agent: deepseek} 的节点即走真实 LLM，其余 agent 名仍回落 mock。凭证只从 env 读，禁止写死。
+     */
     @Bean
     public NodeRegistry nodeRegistry(
             AgentFlowMetrics agentFlowMetrics,
-            @Value("${agentflow.mock.model:gpt-4o-mini}") String model,
-            @Value("${agentflow.mock.budget-threshold-usd:}") String budgetThresholdUsd) {
-        MockAgentFunction mock = new MockAgentFunction(agentFlowMetrics, model, parseBudget(budgetThresholdUsd));
-        return new NodeRegistry(name -> mock);
+            @Value("${agentflow.mock.model:gpt-4o-mini}") String mockModel,
+            @Value("${agentflow.mock.budget-threshold-usd:}") String budgetThresholdUsd,
+            @Value("${agentflow.real.enabled:false}") boolean realEnabled,
+            @Value("${agentflow.real.agent:deepseek}") String realAgentName,
+            @Value("${agentflow.real.model:deepseek-chat}") String realModel,
+            @Value("${agentflow.real.base-url:https://api.deepseek.com}") String realBaseUrl) {
+        MockAgentFunction mock = new MockAgentFunction(agentFlowMetrics, mockModel, parseBudget(budgetThresholdUsd));
+        NodeRegistry registry = new NodeRegistry(name -> mock);
+        if (realEnabled) {
+            registry.register(realAgentName, realDeepSeekAdapter(agentFlowMetrics, realAgentName, realModel, realBaseUrl));
+        }
+        return registry;
+    }
+
+    /** 构造真实 DeepSeek 适配器（OpenAI 兼容）。凭证从 env {@code DEEPSEEK_API_KEY} 读，缺则启动失败（不做静默回落）。 */
+    private LangChain4jAgentAdapter realDeepSeekAdapter(
+            AgentFlowMetrics metrics, String agentName, String model, String baseUrl) {
+        String apiKey = System.getenv("DEEPSEEK_API_KEY");
+        if (apiKey == null || apiKey.isBlank()) {
+            throw new IllegalStateException(
+                    "agentflow.real.enabled=true 但缺 DEEPSEEK_API_KEY 环境变量：真实 LLM 路径需要凭证，禁止硬编码。"
+                            + "请 export DEEPSEEK_API_KEY=... 后重启，或设 agentflow.real.enabled=false 退回 mock。");
+        }
+        OpenAiChatModel chat = OpenAiChatModel.builder()
+                .baseUrl(baseUrl)
+                .apiKey(apiKey)
+                .modelName(model)
+                .build();
+        LangChain4jAgentAdapter adapter = new LangChain4jAgentAdapter(
+                chat, java.util.List.of(), null, Function.identity(),
+                metrics, model, new OutputSchemaValidator());
+        log.info("真实 LLM agent [{}] 已注册：model={} baseUrl={}（凭证来自 env DEEPSEEK_API_KEY）",
+                agentName, model, baseUrl);
+        return adapter;
     }
 
     /** 解析预算阈值：空串/非法 → null（不查预算）。 */

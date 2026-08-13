@@ -24,6 +24,12 @@
             <groupId>com.agentflow</groupId>
             <artifactId>agentflow-api</artifactId>
         </dependency>
+        <!-- v1.1 真实 LLM 适配器（KTD-7 第二框架，OpenAI 兼容 → 可接 DeepSeek 等）：demo-api 生产接线点。
+             默认不启用（agentflow.real.enabled=false）；配了 DEEPSEEK_API_KEY 才构造真实适配器（见 ApiConfig）。 -->
+        <dependency>
+            <groupId>com.agentflow</groupId>
+            <artifactId>agentflow-adapters-langchain4j</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
