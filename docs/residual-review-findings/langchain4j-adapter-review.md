@@ -72,4 +72,4 @@
 4. ~~**B1**（工具异常泄漏模型）~~ → ✅ 已办（2026-08-12，`SafeToolExecutor` 自持 invoke + 泛化错误）。
 5. ~~**B3**（继承/接口 `@Tool` 不注册，ADV-2）~~ → ✅ 已办（2026-08-12，`collectToolMethods` 全层级遍历 + 签名去重，保留非 public）。
 6. **C3 / C4**——均非代码阻断：C3（默认脱敏 identity）偏部署决策；C4（`input.tools()` 运行时过滤）牵动引擎层，doc 已标 Deferred。**至此 v1.1 的 P2 代码项（B1/B2/B3/C1/C2/M2）已全部闭环，剩余仅非代码即阻断项。**
-7. ~~**「无生产接线」残留**~~ → **✅ 已补（2026-08-13，档 1）**：demo-api `ApiConfig.nodeRegistry` 加真实 agent 条件装配（`agentflow.real.enabled` + env `DEEPSEEK_API_KEY` → DeepSeek/OpenAI 兼容 `LangChain4jAgentAdapter`，注入 metrics/model/schemaValidator；其他 agent 名回落 mock）；新增 `DeepSeekE2eIT`（Failsafe，env key 门控，无 key 跳过）。真实端到端跑通后此残留闭环。
+7. ~~**「无生产接线」残留**~~ → **✅ 已补（2026-08-13，档 1）并真实端到端跑通**：demo-api `ApiConfig.nodeRegistry` 加真实 agent 条件装配（`agentflow.real.enabled` + env `DEEPSEEK_API_KEY` → DeepSeek/OpenAI 兼容 `LangChain4jAgentAdapter`，注入 metrics/model/schemaValidator；其他 agent 名回落 mock）；`DeepSeekE2eIT`（Failsafe，env key 门控）已用**真实 DeepSeek** 跑通——DSL→BspEngine→真实适配器→DeepSeek 2 节点串行逐级传参，断言真实 content 非空 + `metrics.totalCost()>0`（真实 token），`Tests run: 1, Failures: 0`。**残留闭环 ✅**。

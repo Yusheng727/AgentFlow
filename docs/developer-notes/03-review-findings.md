@@ -230,7 +230,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 **待人工决策（未自动改）**：
 - **预算记账非阻断**（agent-native，P2 manual）→ **✅ 已解决（2026-08-12，拍板为「记账/告警非阻断」）**：`src/main` 无任何代码读 `WorkflowBudget.isExceeded()` 去 halt/skip——C1 文档原称「强制执行」与代码不符。决定：per-workflow budget 是**记账 + `budget_exceeded` 告警**，运行中不中止执行；硬性防护由提交前 `WorkflowSubmissionGuard`（422）承担。已统一 residual/CLAUDE.md 措辞为「记账/告警（非阻断）」，本文档对应历史 C1 节同步修正。
 - **Spring 适配器预算路径**（正确性上同样存在 schema last-wins / 失败路径缺口，且 8-arg 构造无生产接线）：本批只修了 LC4j（工具循环所在地），Spring 因 advisors + 无生产消费者未动——若后续接真实 Spring 路径需补。
-- **metrics==null 静默停用预算**（adversarial，conf 50 → residual）：两真实适配器把 recordBudget 挂 metrics 非空之后，手配/极简部署无 Micrometer bean 时预算被静默禁用；且仓库内 demo-api/starter **均不构造真实适配器**（无生产接线）——端到端预算强制在仓库内不可验证（同 B2「retryPolicy wired null」模式）。
+- **metrics==null 静默停用预算**（adversarial，conf 50 → residual）：两真实适配器把 recordBudget 挂 metrics 非空之后，手配/极简部署无 Micrometer bean 时预算被静默禁用；且仓库内 demo-api/starter **均不构造真实适配器**（无生产接线）——端到端预算强制在仓库内不可验证（同 B2「retryPolicy wired null」模式）。→ **✅ 档 1（2026-08-13）已补生产接线 + 真实端到端跑通**：demo-api `ApiConfig.nodeRegistry` 加 `agentflow.real.enabled` + env `DEEPSEEK_API_KEY` 条件装配真实 DeepSeek 适配器；`DeepSeekE2eIT` 用真实 key 跑通（DSL→BspEngine→真实适配器→DeepSeek，`metrics.totalCost()>0`）。
 
 **面试讲法**：「审自己前一轮的代码，10 个 persona 抓到一个共性：C1 预算只在成功路径记**末次** token——schema 重试（3 次真实付费）只算最后一次，重试花的 2/3 成本被静默剔除，正是『测试绿 ≠ 生产生效』的又一形态。修复是把记账从『成功路径收尾』改成『每轮真实调用即记』，重试和失败轮自然都进预算。另外自写 coerce 想对齐 DefaultToolExecutor 却漏了字符串数字→CCE——教训是**尽量复用框架/Jackson 语义，别手写易碎的强转**。」——这是「跨评审互证抓分数账 bug + 复用而非重造」的强表达。
 

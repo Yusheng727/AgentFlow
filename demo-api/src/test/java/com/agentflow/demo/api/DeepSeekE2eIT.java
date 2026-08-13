@@ -65,7 +65,6 @@ class DeepSeekE2eIT {
         registry.register("deepseek", real);
 
         WorkflowDefinition def = new WorkflowDSLParser().parse("""
-                name: deepseek-e2e
                 nodes:
                   - id: n1
                     agent: deepseek
@@ -73,7 +72,9 @@ class DeepSeekE2eIT {
                   - id: n2
                     agent: deepseek
                     prompt_template: "请把【${context.n1}】翻译成英文，只输出译文，不要任何解释。"
-                    depends_on: [n1]
+                edges:
+                  - from: n1
+                    to: n2
                 """);
 
         WorkflowContext ctx = engine.execute(def, registry, Map.of());
