@@ -80,4 +80,20 @@ class PredicateEvaluatorTest {
                 .isInstanceOf(FatalException.class)
                 .hasMessageContaining("when");
     }
+
+    @Test
+    @DisplayName("context.<channel> 谓词 → 从 channel 扁平视图取值")
+    void contextReference() throws FatalException {
+        assertThat(evaluator.evaluate("context.riskLevel == 'high'",
+                Map.of(), Map.of("riskLevel", "high"), Map.of())).isTrue();
+        assertThat(evaluator.evaluate("context.riskLevel == 'high'",
+                Map.of(), Map.of("riskLevel", "low"), Map.of())).isFalse();
+    }
+
+    @Test
+    @DisplayName("inputs.<key> 谓词 → 从工作流入参取值")
+    void inputsReference() throws FatalException {
+        assertThat(evaluator.evaluate("inputs.verdict == 'approved'",
+                Map.of(), Map.of(), Map.of("verdict", "approved"))).isTrue();
+    }
 }

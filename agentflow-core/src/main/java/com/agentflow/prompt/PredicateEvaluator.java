@@ -16,8 +16,9 @@ import java.util.Map;
  *
  * <p>复用 {@link SpelPromptResolver} 的 hardened {@link SimpleEvaluationContext}
  * （禁 T()/反射/方法调用，KTD-2 安全），但这是「原始表达式 → boolean」的布尔求值入口，
- * 非 SpelPromptResolver 的 {@code ${...}} 字符串模板替换。根对象 {@code { output: ... }}，
- * 谓词用 {@code output.<field>} 引用。
+ * 非 SpelPromptResolver 的 {@code ${...}} 字符串模板替换。根对象
+ * {@code { output: from 节点输出, context: channel 扁平视图, inputs: 工作流入参 }}，
+ * 谓词用 {@code output.<field>} / {@code context.<channel>} / {@code inputs.<key>} 引用。
  *
  * <p>求值错误（解析错误 / 类型不匹配 / T() 违例）与非 boolean 结果按 {@link FatalException}
  * 抛出（对齐「SpEL 错误即 Fatal」约定）；只有成功求值为 false 才表示「该边不命中」。
@@ -36,8 +37,18 @@ public final class PredicateEvaluator {
      * @return 谓词求值结果
      * @throws FatalException 求值错误或结果非 boolean
      */
+    /** 便捷重载：无 context/inputs（向后兼容既有调用与测试）。 */
     public boolean evaluate(String expression, Map<String, Object> output) throws FatalException {
-        Root root = new Root(output == null ? Map.of() : output);
+        return evaluate(expression, output, Map.of(), Map.of());
+    }
+
+    /** 求值布尔谓词。根对象 = output（from 节点输出）+ context（channel 扁平视图）+ inputs（工作流入参）。 */
+    public boolean evaluate(String expression, Map<String, Object> output,
+                            Map<String, Object> context, Map<String, Object> inputs) throws FatalException {
+        Root root = new Root(
+                output == null ? Map.of() : output,
+                context == null ? Map.of() : context,
+                inputs == null ? Map.of() : inputs);
         EvaluationContext evalContext = SimpleEvaluationContext
                 .forPropertyAccessors(
                         DataBindingPropertyAccessor.forReadOnlyAccess(),
@@ -60,7 +71,7 @@ public final class PredicateEvaluator {
                 + " → " + (value == null ? "null" : value.getClass().getSimpleName()));
     }
 
-    /** SpEL 根对象：output（from 节点输出 Map）。 */
-    private record Root(Map<String, Object> output) {
+    /** SpEL 根对象：output + context（channel 扁平视图）+ inputs（工作流入参）。 */
+    private record Root(Map<String, Object> output, Map<String, Object> context, Map<String, Object> inputs) {
     }
 }

@@ -143,4 +143,41 @@ class BspEngineConditionalTest {
 
         assertThat(called).contains("fallback").doesNotContain("approved");
     }
+
+    @Test
+    @DisplayName("when 谓词引用 context.<channel>（跨节点输出）→ 正确路由")
+    void contextReferenceRouting() {
+        WorkflowDefinition def = wf(
+                List.of(node("A", "a"), node("R", "r"), node("B1", "b1"), node("B2", "b2")),
+                List.of(edge("A", "R"), whenEdge("R", "B1", "context.A == 'high'"), edge("R", "B2")));
+
+        Set<String> called = ConcurrentHashMap.newKeySet();
+        Map<String, AgentFunction> agents = Map.of(
+                "a", input -> AgentOutput.of("high"),
+                "r", input -> AgentOutput.of("whatever"),
+                "b1", input -> { called.add("B1"); return AgentOutput.of("b1"); },
+                "b2", input -> { called.add("B2"); return AgentOutput.of("b2"); });
+
+        engine.execute(def, agents, Map.of());
+
+        assertThat(called).contains("B1").doesNotContain("B2");
+    }
+
+    @Test
+    @DisplayName("when 谓词引用 inputs.<key>（工作流入参）→ 正确路由")
+    void inputsReferenceRouting() {
+        WorkflowDefinition def = wf(
+                List.of(node("R", "r"), node("B1", "b1"), node("B2", "b2")),
+                List.of(whenEdge("R", "B1", "inputs.verdict == 'approved'"), edge("R", "B2")));
+
+        Set<String> called = ConcurrentHashMap.newKeySet();
+        Map<String, AgentFunction> agents = Map.of(
+                "r", input -> AgentOutput.of("whatever"),
+                "b1", input -> { called.add("B1"); return AgentOutput.of("b1"); },
+                "b2", input -> { called.add("B2"); return AgentOutput.of("b2"); });
+
+        engine.execute(def, agents, Map.of("verdict", "approved"));
+
+        assertThat(called).contains("B1").doesNotContain("B2");
+    }
 }

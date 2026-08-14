@@ -346,7 +346,8 @@ public final class BspEngine {
         List<String> takenEdges = new ArrayList<>(cp.findRoutingDecisions(workflowId));
         for (NodeOutputStore n : cp.findCompletedNodes(workflowId, state.nextSuperStep())) {
             try {
-                for (String target : resolveTakenTargets(n.nodeId(), n.output(), def)) {
+                // 恢复期 inputs 不可得（原入参未持久化），传空 Map；context 用重建后的 channel 快照
+                for (String target : resolveTakenTargets(n.nodeId(), n.output(), context, Map.of(), def)) {
                     takenEdges.add(EdgeDefinition.edgeKey(n.nodeId(), target));
                 }
             } catch (FatalException fe) {
@@ -524,7 +525,7 @@ public final class BspEngine {
                 onErrorActivated, trace, takenEdges);
         active.addAll(onErrorTargets);
         // v2 条件分支：成功节点计算路由决策、激活后继（无分支命中 → Fatal → 工作流 FAILED）
-        updateReachability(results, active, def, step.index(), trace, takenEdges);
+        updateReachability(results, active, def, step.index(), trace, takenEdges, context, inputs);
         // 先持久化路由决策、再写 barrier（崩溃窗口内路由已落盘，恢复不丢下游）
         cp.saveRoutingDecisions(workflowId, step.index(), List.copyOf(takenEdges));
         cp.saveBarrier(workflowId, step.index(), context);
@@ -617,11 +618,11 @@ public final class BspEngine {
     /** v2 条件分支：成功节点计算路由决策、激活后继节点 + 记录路由决策；无分支命中抛 WorkflowExecutionException。 */
     private void updateReachability(List<NodeResult> results, Set<String> active,
                                     WorkflowDefinition def, int stepIndex, ExecutionTrace trace,
-                                    List<String> takenEdges) {
+                                    List<String> takenEdges, WorkflowContext context, Map<String, Object> inputs) {
         for (NodeResult r : results) {
             if (r instanceof NodeResult.Success s) {
                 try {
-                    for (String target : resolveTakenTargets(s.nodeId(), s.output(), def)) {
+                    for (String target : resolveTakenTargets(s.nodeId(), s.output(), context, inputs, def)) {
                         active.add(target);
                         recordRouting(s.nodeId(), target, trace, takenEdges);
                     }
@@ -707,7 +708,8 @@ public final class BspEngine {
      * 纯 fan-out（无 when 边）→ 所有出边都走（v1 语义）；路由节点（有 when 边）→ 按声明序取第一条 true，
      * 否则默认边；无 when 命中且无默认边 → 抛 FatalException（无分支命中）。
      */
-    private List<String> resolveTakenTargets(String nodeId, AgentOutput output, WorkflowDefinition def)
+    private List<String> resolveTakenTargets(String nodeId, AgentOutput output, WorkflowContext context,
+                                             Map<String, Object> inputs, WorkflowDefinition def)
             throws FatalException {
         List<EdgeDefinition> outgoing = def.edges() == null ? List.of()
                 : def.edges().stream().filter(e -> e.from().equals(nodeId)).toList();
@@ -724,8 +726,9 @@ public final class BspEngine {
             return outgoing.stream().map(EdgeDefinition::to).toList();
         }
         Map<String, Object> outputMap = outputMap(output);
+        Map<String, Object> contextMap = flattenContext(context);
         for (EdgeDefinition e : whenEdges) {
-            if (predicateEvaluator.evaluate(e.when(), outputMap)) {
+            if (predicateEvaluator.evaluate(e.when(), outputMap, contextMap, inputs)) {
                 return List.of(e.to());
             }
         }
@@ -745,5 +748,14 @@ public final class BspEngine {
             map.put("content", output.content());
         }
         return map;
+    }
+
+    /** 谓词求值的 context 根对象：channel 名 → 值（对齐 SpelPromptResolver 的 channel 扁平视图）。 */
+    private static Map<String, Object> flattenContext(WorkflowContext context) {
+        Map<String, Object> flat = new HashMap<>();
+        if (context != null) {
+            context.values().forEach((k, cv) -> flat.put(k, cv.value()));
+        }
+        return flat;
     }
 }
