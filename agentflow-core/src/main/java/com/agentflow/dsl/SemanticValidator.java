@@ -61,7 +61,7 @@ public class SemanticValidator {
             if (!ids.contains(e.to())) {
                 throw new WorkflowValidationException("edge to 引用不存在节点: " + e.to());
             }
-            String key = e.from() + "->" + e.to();
+            String key = EdgeDefinition.edgeKey(e.from(), e.to());
             if (!edgeKeys.add(key)) {
                 throw new WorkflowValidationException("重复 edge: " + e.from() + " → " + e.to());
             }

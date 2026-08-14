@@ -2,6 +2,7 @@ package com.agentflow.engine;
 
 import com.agentflow.agent.AgentFunction;
 import com.agentflow.agent.AgentOutput;
+import com.agentflow.agent.FatalException;
 import com.agentflow.agent.NodeRegistry;
 import com.agentflow.dsl.DAGLayerer;
 import com.agentflow.dsl.WorkflowDefinition;
@@ -90,6 +91,30 @@ class BspEngineMetricsTest {
 
         assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_EXECUTED, "status", "failed").count()).isEqualTo(1.0);
         assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_EXECUTED, "status", "success").count()).isZero();
+    }
+
+    @Test
+    @DisplayName("on_error 兜底完成：workflow.executed{fallback} 计 1，success/failed 计 0（三终态）")
+    void onErrorFallbackRecordsFallbackStatus() throws Exception {
+        AgentFunction boom = input -> { throw new FatalException("A 失败"); };
+        BspEngine engine = new BspEngine(new DAGLayerer(), null, null, null, null, metrics);
+        String yaml = """
+                agentflow:
+                  version: "1.0"
+                nodes:
+                  - { id: A, agent: boom, on_error: cleanup }
+                  - { id: B, agent: mock, mock_response: "b" }
+                  - { id: cleanup, agent: mock, mock_response: "cleaned" }
+                edges:
+                  - { from: A, to: B }
+                """;
+
+        engine.execute(parse(yaml), new NodeRegistry(Map.of("boom", boom, "mock", ECHO)), Map.of(),
+                new NoopCheckpointManager(), new ChannelReducer(), "wf-metrics-fallback");
+
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_EXECUTED, "status", "fallback").count()).isEqualTo(1.0);
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_EXECUTED, "status", "success").count()).isZero();
+        assertThat(registry.counter(AgentFlowMetrics.WORKFLOW_EXECUTED, "status", "failed").count()).isZero();
     }
 
     @Test

@@ -218,29 +218,8 @@ public final class BspEngine {
             // v2 条件分支：已走边（from→to，累计），供 checkpoint 持久化路由决策（恢复期重算 SKIPPED）
             List<String> takenEdges = new ArrayList<>();
             for (SuperStep step : steps) {
-                // 工作流总超时：super-step 间检查（超时则 abort，不推进下游）
-                if (timeoutPolicy != null && timeoutPolicy.isWorkflowExceeded(workflowStart)) {
-                    throw new WorkflowExecutionException(step.index(),
-                            List.of(new TimeoutException("workflow total timeout exceeded")));
-                }
-                // 只跑本层可达节点；不可达节点被路由决策剪枝（SKIPPED，不执行、不写 channel）
-                List<String> activeIds = step.nodeIds().stream().filter(active::contains).toList();
-                SuperStep activeStep = new SuperStep(step.index(), activeIds);
-                // v2 可观测：被剪枝节点标记 SKIPPED（trace）
-                markSkippedNodes(trace, step, activeIds, dag);
-                WorkflowContext snapshot = context.readOnlySnapshot();
-                List<NodeResult> results = runSuperStep(activeStep, dag, snapshot, nodeExecutor, cp, workflowId,
-                        executor, effInputs, workflowStart, trace, budget);
-                // U10 后续 #10：记录本 super-step 各节点所属层号（含被剪枝节点，供 UI 真实拓扑分组）
-                recordSuperStepTrace(trace, step);
-                List<String> onErrorTargets = applyBarrier(activeStep, results, context, dag, def, reducer, cp,
-                        workflowId, onErrorActivated, trace, takenEdges);
-                active.addAll(onErrorTargets);
-                // v2 条件分支：成功节点计算路由决策、激活后继（无分支命中 → Fatal → 工作流 FAILED）
-                updateReachability(results, active, def, step.index(), trace, takenEdges);
-                // v2 条件分支：先持久化路由决策、再写 barrier（崩溃窗口内路由已落盘，恢复不丢下游）
-                cp.saveRoutingDecisions(workflowId, step.index(), List.copyOf(takenEdges));
-                cp.saveBarrier(workflowId, step.index(), context);
+                runStep(step, active, Set.of(), -1, effInputs, context, dag, def, reducer, cp, workflowId,
+                        nodeExecutor, executor, workflowStart, trace, budget, onErrorActivated, takenEdges);
             }
             if (trace != null) {
                 if (!onErrorActivated.isEmpty()) {
@@ -368,7 +347,7 @@ public final class BspEngine {
         for (NodeOutputStore n : cp.findCompletedNodes(workflowId, state.nextSuperStep())) {
             try {
                 for (String target : resolveTakenTargets(n.nodeId(), n.output(), def)) {
-                    takenEdges.add(n.nodeId() + "->" + target);
+                    takenEdges.add(EdgeDefinition.edgeKey(n.nodeId(), target));
                 }
             } catch (FatalException fe) {
                 log.warn("恢复 wf={}: 崩溃层已完成节点 {} 路由重算失败: {}", workflowId, n.nodeId(), fe.getMessage());
@@ -384,28 +363,9 @@ public final class BspEngine {
         try {
             cp.updateStatus(workflowId, WorkflowStatus.RUNNING);
             for (SuperStep step : remaining) {
-                if (timeoutPolicy != null && timeoutPolicy.isWorkflowExceeded(workflowStart)) {
-                    throw new WorkflowExecutionException(step.index(),
-                            List.of(new TimeoutException("workflow total timeout exceeded")));
-                }
-                WorkflowContext snapshot = context.readOnlySnapshot();
-                // v2 可达性：只跑可达节点；崩溃层再剔除已完成节点（输出已在 replayOutputs 重放，不重跑）
-                List<String> activeInStep = step.nodeIds().stream().filter(active::contains).toList();
-                SuperStep stepToRun = new SuperStep(step.index(), activeInStep.stream()
-                        .filter(id -> step.index() != state.nextSuperStep() || !state.completedNodeIds().contains(id))
-                        .toList());
-                // v2 可观测：被剪枝（不可达）节点标记 SKIPPED
-                markSkippedNodes(trace, step, activeInStep, dag);
-                List<NodeResult> results = runSuperStep(stepToRun, dag, snapshot, nodeExecutor, cp, workflowId,
-                        executor, Map.of(), workflowStart, trace, budget);
-                // U10 后续 #10：记录本 super-step 各节点所属层号（用完整 step.nodeIds，含崩溃层跳过节点）
-                recordSuperStepTrace(trace, step);
-                List<String> onErrorTargets = applyBarrier(step, results, context, dag, def, reducer, cp, workflowId,
-                        onErrorActivated, trace, takenEdges);
-                active.addAll(onErrorTargets);
-                updateReachability(results, active, def, step.index(), trace, takenEdges);
-                cp.saveRoutingDecisions(workflowId, step.index(), List.copyOf(takenEdges));
-                cp.saveBarrier(workflowId, step.index(), context);
+                runStep(step, active, state.completedNodeIds(), state.nextSuperStep(), Map.of(), context, dag, def,
+                        reducer, cp, workflowId, nodeExecutor, executor, workflowStart, trace, budget,
+                        onErrorActivated, takenEdges);
             }
             cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
             if (trace != null) {
@@ -533,6 +493,43 @@ public final class BspEngine {
         return results;
     }
 
+    /**
+     * v2 条件分支：跑一个 super-step 的公共主体（execute 与 recoverAndExecute 共用，review P1 收敛）。
+     * 只跑可达节点；崩溃层（{@code crashLayerStep}）再剔除 {@code excludedNodeIds}（已完成节点，输出已重放）。
+     * 顺序：过滤可达 → 标 SKIPPED → 并行执行 → 路由决策持久化 → barrier 落盘（路由先于 barrier，崩溃窗口不丢）。
+     */
+    private void runStep(SuperStep step, Set<String> active, Set<String> excludedNodeIds, int crashLayerStep,
+                         Map<String, Object> inputs, WorkflowContext context, DAGraph dag, WorkflowDefinition def,
+                         ChannelReducer reducer, CheckpointManager cp, String workflowId, NodeExecutor nodeExecutor,
+                         ExecutorService executor, Instant workflowStart, ExecutionTrace trace, WorkflowBudget budget,
+                         Set<String> onErrorActivated, List<String> takenEdges) {
+        // 工作流总超时：super-step 间检查（超时则 abort，不推进下游）
+        if (timeoutPolicy != null && timeoutPolicy.isWorkflowExceeded(workflowStart)) {
+            throw new WorkflowExecutionException(step.index(),
+                    List.of(new TimeoutException("workflow total timeout exceeded")));
+        }
+        // 只跑本层可达节点；崩溃层再剔除已完成节点（输出已重放，不重跑防 LLM 重复计费）
+        List<String> activeInStep = step.nodeIds().stream().filter(active::contains).toList();
+        SuperStep stepToRun = new SuperStep(step.index(), activeInStep.stream()
+                .filter(id -> step.index() != crashLayerStep || !excludedNodeIds.contains(id))
+                .toList());
+        // v2 可观测：被剪枝（不可达）节点标记 SKIPPED
+        markSkippedNodes(trace, step, activeInStep, dag);
+        WorkflowContext snapshot = context.readOnlySnapshot();
+        List<NodeResult> results = runSuperStep(stepToRun, dag, snapshot, nodeExecutor, cp, workflowId,
+                executor, inputs, workflowStart, trace, budget);
+        // U10 后续 #10：记录本 super-step 各节点所属层号（含被剪枝节点，供 UI 真实拓扑分组）
+        recordSuperStepTrace(trace, step);
+        List<String> onErrorTargets = applyBarrier(step, results, context, dag, def, reducer, cp, workflowId,
+                onErrorActivated, trace, takenEdges);
+        active.addAll(onErrorTargets);
+        // v2 条件分支：成功节点计算路由决策、激活后继（无分支命中 → Fatal → 工作流 FAILED）
+        updateReachability(results, active, def, step.index(), trace, takenEdges);
+        // 先持久化路由决策、再写 barrier（崩溃窗口内路由已落盘，恢复不丢下游）
+        cp.saveRoutingDecisions(workflowId, step.index(), List.copyOf(takenEdges));
+        cp.saveBarrier(workflowId, step.index(), context);
+    }
+
     /** Barrier 阶段：按声明序合并成功节点输出；on_error 节点失败转兜底（激活目标、不 abort），
      *  其余失败聚合抛出。返回本层 on_error 激活的目标节点（调用方加入可达集）。 */
     private List<String> applyBarrier(SuperStep step, List<NodeResult> results, WorkflowContext context,
@@ -637,7 +634,7 @@ public final class BspEngine {
 
     /** v2 条件分支：记录路由决策到 takenEdges（持久化）与 trace（可观测）。 */
     private void recordRouting(String from, String to, ExecutionTrace trace, List<String> takenEdges) {
-        takenEdges.add(from + "->" + to);
+        takenEdges.add(EdgeDefinition.edgeKey(from, to));
         if (trace != null) {
             trace.recordRoutingDecision(from, to);
         }
@@ -651,7 +648,7 @@ public final class BspEngine {
         }
         for (NodeDefinition n : def.nodes()) {
             if (n.onError() != null && !n.onError().isBlank()
-                    && takenEdges.contains(n.id() + "->" + n.onError())) {
+                    && takenEdges.contains(EdgeDefinition.edgeKey(n.id(), n.onError()))) {
                 result.add(n.onError());
             }
         }
@@ -678,10 +675,10 @@ public final class BspEngine {
             boolean hasWhen = outgoing.stream().anyMatch(e -> e.when() != null && !e.when().isBlank());
             // on_error 已走（该节点失败转兜底）→ 正常出边被剪枝，按路由节点处理（不 fan-out）
             boolean onErrorTaken = nd.onError() != null && !nd.onError().isBlank()
-                    && takenEdges.contains(node + "->" + nd.onError());
+                    && takenEdges.contains(EdgeDefinition.edgeKey(node, nd.onError()));
             boolean fanOut = !hasWhen && !onErrorTaken;
             for (EdgeDefinition e : outgoing) {
-                boolean taken = fanOut || takenEdges.contains(node + "->" + e.to());
+                boolean taken = fanOut || takenEdges.contains(EdgeDefinition.edgeKey(node, e.to()));
                 if (taken) {
                     queue.add(e.to());
                 }

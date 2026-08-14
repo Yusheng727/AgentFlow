@@ -16,4 +16,9 @@ public record EdgeDefinition(String from, String to, String when) {
     public EdgeDefinition(String from, String to) {
         this(from, to, null);
     }
+
+    /** 边键（from->to）：路由决策持久化 / 环校验 / 去重共用单一编码（review 收敛点）。 */
+    public static String edgeKey(String from, String to) {
+        return from + "->" + to;
+    }
 }
