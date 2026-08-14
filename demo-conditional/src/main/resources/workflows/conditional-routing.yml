@@ -1,0 +1,56 @@
+# 条件分支工作流（v2 Demo，R15 + v2 条件分支）
+#
+# 拓扑：分类 → (approve | reject) 二路分支 → 报告 → 风险复查（on_error 兜底）
+# - classify 节点 mock_response 固定 "approved"，when 谓词 `output.content == 'approved'` 命中 approve 分支，
+#   reject 分支被 SKIPPED（可达性剪枝）
+# - approve/reject 汇合到 report（join 只执行一次，不被跳过分支阻塞）
+# - risk-check 故意缺 mock_response → MissingMockResponseException（Fatal）→ on_error: goto cleanup 兜底
+#
+# MockAgentFunction 返回 AgentOutput.of(content)（无 structuredOutput），谓词经 output.content 读取。
+
+agentflow:
+  version: "1.0"
+
+nodes:
+  # ─── super-step 0：分类（路由节点） ───
+  - id: classify
+    agent: classifier
+    prompt_template: "判断申请是否通过"
+    mock_response: "approved"
+
+  # ─── super-step 1：二路分支（approve 命中 / reject 被 SKIPPED） ───
+  - id: approve
+    agent: approver
+    prompt_template: "处理通过申请"
+    mock_response: "申请已通过"
+
+  - id: reject
+    agent: rejecter
+    prompt_template: "处理拒绝申请"
+    mock_response: "申请已拒绝"
+
+  # ─── super-step 2：汇合报告 ───
+  - id: report
+    agent: reporter
+    prompt_template: "汇总审批结果"
+    mock_response: "审批报告已生成"
+
+  # ─── super-step 3：风险复查（终态失败 → on_error 兜底） ───
+  - id: risk-check
+    agent: risk-checker
+    on_error: cleanup
+    prompt_template: "风险复查"
+    # 故意缺 mock_response → MissingMockResponseException
+
+  # ─── super-step 4：兜底清理（on_error 目标） ───
+  - id: cleanup
+    agent: cleaner
+    prompt_template: "兜底清理"
+    mock_response: "已触发兜底清理"
+
+edges:
+  - { from: classify, to: approve, when: "output.content == 'approved'" }
+  - { from: classify, to: reject }
+  - { from: approve, to: report }
+  - { from: reject, to: report }
+  - { from: report, to: risk-check }

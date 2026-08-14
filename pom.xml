@@ -37,6 +37,7 @@
         <module>demo-supplier-risk</module>
         <module>demo-contract-review</module>
         <module>demo-investment-analysis</module>
+        <module>demo-conditional</module>
         <module>demo-api</module>
     </modules>
 
