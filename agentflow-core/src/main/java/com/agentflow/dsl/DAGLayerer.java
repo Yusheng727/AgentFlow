@@ -26,7 +26,7 @@ public class DAGLayerer {
             inDegree.put(id, 0);
             successors.put(id, new ArrayList<>());
         }
-        List<EdgeDefinition> edges = def.edges() == null ? List.of() : def.edges();
+        List<EdgeDefinition> edges = def.allEdges();
         for (EdgeDefinition e : edges) {
             successors.get(e.from()).add(e.to());
             inDegree.merge(e.to(), 1, Integer::sum);

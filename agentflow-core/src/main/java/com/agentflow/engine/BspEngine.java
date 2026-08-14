@@ -212,6 +212,8 @@ public final class BspEngine {
         try {
             // v2 条件分支：可达节点集（初始 = 源节点，随路由决策增量激活后继）；空工作流 → 空集
             Set<String> active = steps.isEmpty() ? new HashSet<>() : new HashSet<>(steps.get(0).nodeIds());
+            // v2 on_error：经 on_error 激活的目标节点（其自身失败不二次跳转，避免级联兜底）
+            Set<String> onErrorActivated = new HashSet<>();
             for (SuperStep step : steps) {
                 // 工作流总超时：super-step 间检查（超时则 abort，不推进下游）
                 if (timeoutPolicy != null && timeoutPolicy.isWorkflowExceeded(workflowStart)) {
@@ -226,7 +228,9 @@ public final class BspEngine {
                         executor, effInputs, workflowStart, trace, budget);
                 // U10 后续 #10：记录本 super-step 各节点所属层号（含被剪枝节点，供 UI 真实拓扑分组）
                 recordSuperStepTrace(trace, step);
-                applyBarrier(activeStep, results, context, dag, def, reducer, cp, workflowId);
+                List<String> onErrorTargets = applyBarrier(activeStep, results, context, dag, def, reducer, cp,
+                        workflowId, onErrorActivated);
+                active.addAll(onErrorTargets);
                 // v2 条件分支：成功节点计算路由决策、激活后继（无分支命中 → Fatal → 工作流 FAILED）
                 updateReachability(results, active, def, step.index());
             }
@@ -369,7 +373,9 @@ public final class BspEngine {
                         executor, Map.of(), workflowStart, trace, budget);
                 // U10 后续 #10：记录本 super-step 各节点所属层号（用完整 step.nodeIds，含崩溃层跳过节点）
                 recordSuperStepTrace(trace, step);
-                applyBarrier(step, results, context, dag, def, reducer, cp, workflowId);
+                // U5 注意：recoverAndExecute 不做 on_error 兜底（on_error 恢复路由在 U7 落地），
+                // 此处传空 onErrorActivated 保持静态 DAG 恢复行为不变。
+                applyBarrier(step, results, context, dag, def, reducer, cp, workflowId, new HashSet<>());
             }
             cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
             if (trace != null) {
@@ -493,24 +499,34 @@ public final class BspEngine {
         return results;
     }
 
-    /** Barrier 阶段：按声明序合并成功节点输出，收集失败，失败则聚合抛出；仅成功 super-step 写 barrier checkpoint。 */
-    private void applyBarrier(SuperStep step, List<NodeResult> results, WorkflowContext context,
-                              DAGraph dag, WorkflowDefinition def, ChannelReducer reducer,
-                              CheckpointManager cp, String workflowId) {
-        List<Throwable> failures = new ArrayList<>();
+    /** Barrier 阶段：按声明序合并成功节点输出；on_error 节点失败转兜底（激活目标、不 abort），
+     *  其余失败聚合抛出。返回本层 on_error 激活的目标节点（调用方加入可达集）。 */
+    private List<String> applyBarrier(SuperStep step, List<NodeResult> results, WorkflowContext context,
+                                      DAGraph dag, WorkflowDefinition def, ChannelReducer reducer,
+                                      CheckpointManager cp, String workflowId, Set<String> onErrorActivated) {
+        List<Throwable> fatalFailures = new ArrayList<>();
+        List<String> onErrorTargets = new ArrayList<>();
         // results 已按声明序（提交序），保证 Reducer 合并确定
         for (NodeResult r : results) {
             if (r instanceof NodeResult.Success s) {
                 applyOutput(context, dag.node(s.nodeId()), s.output(), def, reducer);
             } else if (r instanceof NodeResult.Failure f) {
-                failures.add(f.error());
+                NodeDefinition node = dag.node(f.nodeId());
+                // on_error 兜底：终态失败转跳转；on_error 目标自身失败不二次跳转（走致命失败）
+                if (node.onError() != null && !node.onError().isBlank()
+                        && !onErrorActivated.contains(f.nodeId())) {
+                    onErrorTargets.add(node.onError());
+                    onErrorActivated.add(node.onError());
+                } else {
+                    fatalFailures.add(f.error());
+                }
             }
         }
-        if (!failures.isEmpty()) {
+        if (!fatalFailures.isEmpty()) {
             // U4 ErrorHandler：转 FAILED 前 context 补偿（写 errorHandled=true 等；
             // 写全局 context，非 agent 只读快照，保 BSP 互不可见）
             if (errorHandler != null) {
-                for (Throwable cause : failures) {
+                for (Throwable cause : fatalFailures) {
                     try {
                         errorHandler.handle(context, cause);
                     } catch (RuntimeException he) {
@@ -520,9 +536,10 @@ public final class BspEngine {
             }
             // 失败 super-step 不写 barrier checkpoint——KTD-3：barrier checkpoint 记录"已完成"super-step，
             // 失败层未完成；U5 Recovery 查 nextSuperStep 的节点级 COMPLETED 输出重跑失败节点
-            throw new WorkflowExecutionException(step.index(), failures);
+            throw new WorkflowExecutionException(step.index(), fatalFailures);
         }
         cp.saveBarrier(workflowId, step.index(), context);
+        return onErrorTargets;
     }
 
     /** 把 AgentOutput 的 channelWrites 合并进全局 context（按 channel 的 Reducer）。 */
