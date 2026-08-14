@@ -3,7 +3,7 @@ package com.agentflow.prompt;
 import com.agentflow.agent.FatalException;
 import org.springframework.expression.EvaluationContext;
 import org.springframework.expression.Expression;
-import org.springframework.expression.spel.SpelEvaluationException;
+import org.springframework.expression.ExpressionException;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 import org.springframework.expression.spel.support.DataBindingPropertyAccessor;
 import org.springframework.expression.spel.support.MapAccessor;
@@ -21,8 +21,8 @@ import java.util.Map;
  *
  * <p>求值错误（解析错误 / 类型不匹配 / T() 违例）与非 boolean 结果按 {@link FatalException}
  * 抛出（对齐「SpEL 错误即 Fatal」约定）；只有成功求值为 false 才表示「该边不命中」。
- * 注：Map 缺失键经 MapAccessor 返回 null（不抛异常），故 {@code output.missing == 'x'} 得 false
- * 而非错误；裸字段 {@code output.missing} 得 null → 非 boolean → 抛 Fatal。
+ * 注：Map 缺失键经 MapAccessor 抛 SpelEvaluationException（canRead 对缺键返回 false），
+ * 故 {@code output.missing == 'x'}（拼错字段）也抛 Fatal，恰使「谓词错误可诊断」成立。
  */
 public final class PredicateEvaluator {
 
@@ -49,8 +49,8 @@ public final class PredicateEvaluator {
         try {
             Expression expr = parser.parseExpression(expression);
             value = expr.getValue(evalContext);
-        } catch (SpelEvaluationException e) {
-            // 解析错误 / 类型不匹配 / T() 安全违例 → 暴露为 Fatal，而非静默「不命中」
+        } catch (ExpressionException e) {
+            // 解析错误（SpelParseException）/ 求值错误（SpelEvaluationException）/ T() 违例 → Fatal
             throw new FatalException("when 谓词求值失败: " + expression, e);
         }
         if (value instanceof Boolean b) {

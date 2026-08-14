@@ -72,4 +72,12 @@ class PredicateEvaluatorTest {
                 .isInstanceOf(FatalException.class)
                 .hasMessageContaining("boolean");
     }
+
+    @Test
+    @DisplayName("语法错误 → FatalException（ExpressionException 覆盖 ParseException，非裸泄漏）")
+    void syntaxErrorThrowsFatal() {
+        assertThatThrownBy(() -> evaluator.evaluate("output.verdict ==", Map.of("verdict", "approved")))
+                .isInstanceOf(FatalException.class)
+                .hasMessageContaining("when");
+    }
 }

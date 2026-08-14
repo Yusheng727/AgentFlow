@@ -238,8 +238,9 @@ public final class BspEngine {
                 active.addAll(onErrorTargets);
                 // v2 条件分支：成功节点计算路由决策、激活后继（无分支命中 → Fatal → 工作流 FAILED）
                 updateReachability(results, active, def, step.index(), trace, takenEdges);
-                // v2 条件分支：持久化路由决策（恢复期据此重算 SKIPPED，不复活已跳节点）
+                // v2 条件分支：先持久化路由决策、再写 barrier（崩溃窗口内路由已落盘，恢复不丢下游）
                 cp.saveRoutingDecisions(workflowId, step.index(), List.copyOf(takenEdges));
+                cp.saveBarrier(workflowId, step.index(), context);
             }
             if (trace != null) {
                 if (!onErrorActivated.isEmpty()) {
@@ -374,7 +375,7 @@ public final class BspEngine {
             }
         }
         Set<String> active = computeReachable(allSteps.get(0).nodeIds(), dag, def, takenEdges);
-        Set<String> onErrorActivated = new HashSet<>();
+        Set<String> onErrorActivated = rebuildOnErrorActivated(def, takenEdges);
 
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         NodeExecutor nodeExecutor = new NodeExecutor(agentResolver, executor);
@@ -404,12 +405,17 @@ public final class BspEngine {
                 active.addAll(onErrorTargets);
                 updateReachability(results, active, def, step.index(), trace, takenEdges);
                 cp.saveRoutingDecisions(workflowId, step.index(), List.copyOf(takenEdges));
+                cp.saveBarrier(workflowId, step.index(), context);
             }
             cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
             if (trace != null) {
+                if (!onErrorActivated.isEmpty()) {
+                    trace.markCompletedViaOnError();
+                }
                 trace.markCompleted(ExecutionTrace.Status.COMPLETED);
             }
-            recordWorkflowOutcome(AgentFlowMetrics.STATUS_SUCCESS);
+            recordWorkflowOutcome(onErrorActivated.isEmpty()
+                    ? AgentFlowMetrics.STATUS_SUCCESS : AgentFlowMetrics.STATUS_FALLBACK);
             outcomeRecorded = true;
             return context;
         } catch (WorkflowExecutionException we) {
@@ -568,7 +574,8 @@ public final class BspEngine {
             // 失败层未完成；U5 Recovery 查 nextSuperStep 的节点级 COMPLETED 输出重跑失败节点
             throw new WorkflowExecutionException(step.index(), fatalFailures);
         }
-        cp.saveBarrier(workflowId, step.index(), context);
+        // v2 注：saveBarrier 移到调用方（execute/recoverAndExecute）在 saveRoutingDecisions 之后执行，
+        // 保证路由决策先于 barrier 落盘（review P1：崩溃窗口内路由不丢）
         return onErrorTargets;
     }
 
@@ -636,6 +643,21 @@ public final class BspEngine {
         }
     }
 
+    /** v2 on_error：从已走边重建「经 on_error 激活的目标集合」，恢复期级联守卫（review P1）。 */
+    private Set<String> rebuildOnErrorActivated(WorkflowDefinition def, List<String> takenEdges) {
+        Set<String> result = new HashSet<>();
+        if (def.nodes() == null) {
+            return result;
+        }
+        for (NodeDefinition n : def.nodes()) {
+            if (n.onError() != null && !n.onError().isBlank()
+                    && takenEdges.contains(n.id() + "->" + n.onError())) {
+                result.add(n.onError());
+            }
+        }
+        return result;
+    }
+
     /**
      * v2 条件分支：从源节点 BFS 计算可达集（恢复期用）。
      * 纯 fan-out 节点（无 when 边）→ 所有出边总是走；路由节点（有 when 边）→ 仅已走边（takenEdges）；
@@ -650,18 +672,21 @@ public final class BspEngine {
             if (!active.add(node)) {
                 continue;
             }
+            NodeDefinition nd = dag.node(node);
             List<EdgeDefinition> outgoing = def.edges() == null ? List.of()
                     : def.edges().stream().filter(e -> e.from().equals(node)).toList();
             boolean hasWhen = outgoing.stream().anyMatch(e -> e.when() != null && !e.when().isBlank());
+            // on_error 已走（该节点失败转兜底）→ 正常出边被剪枝，按路由节点处理（不 fan-out）
+            boolean onErrorTaken = nd.onError() != null && !nd.onError().isBlank()
+                    && takenEdges.contains(node + "->" + nd.onError());
+            boolean fanOut = !hasWhen && !onErrorTaken;
             for (EdgeDefinition e : outgoing) {
-                boolean taken = !hasWhen || takenEdges.contains(node + "->" + e.to());
+                boolean taken = fanOut || takenEdges.contains(node + "->" + e.to());
                 if (taken) {
                     queue.add(e.to());
                 }
             }
-            NodeDefinition nd = dag.node(node);
-            if (nd.onError() != null && !nd.onError().isBlank()
-                    && takenEdges.contains(node + "->" + nd.onError())) {
+            if (onErrorTaken) {
                 queue.add(nd.onError());
             }
         }

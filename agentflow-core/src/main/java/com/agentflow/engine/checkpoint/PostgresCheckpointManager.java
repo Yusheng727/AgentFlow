@@ -166,6 +166,26 @@ public final class PostgresCheckpointManager implements CheckpointManager {
         }
     }
 
+    @Override
+    public void saveRoutingDecisions(String workflowId, int superStep, List<String> decisions) {
+        String json = toJson(decisions);
+        acquireSemaphore();
+        try {
+            jdbc.update(
+                    """
+                    INSERT INTO workflow_routing_decisions (workflow_id, super_step, decisions)
+                    VALUES (?, ?, ?::jsonb)
+                    ON CONFLICT (workflow_id)
+                    DO UPDATE SET super_step = EXCLUDED.super_step,
+                                  decisions = EXCLUDED.decisions,
+                                  updated_at = now()
+                    """,
+                    workflowId, superStep, json);
+        } finally {
+            writeSemaphore.release();
+        }
+    }
+
     // ────────────────────────── 查询 ──────────────────────────
 
     @Override
@@ -217,6 +237,20 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                             ts != null ? ts.toInstant() : null);
                 },
                 workflowId, superStep);
+    }
+
+    @Override
+    public List<String> findRoutingDecisions(String workflowId) {
+        List<String> rows = jdbc.query(
+                """
+                SELECT decisions FROM workflow_routing_decisions WHERE workflow_id = ?
+                """,
+                (rs, rowNum) -> rs.getString("decisions"),
+                workflowId);
+        if (rows.isEmpty() || rows.getFirst() == null) {
+            return List.of();
+        }
+        return fromJson(rows.getFirst(), new TypeReference<List<String>>() {});
     }
 
     // ─────────────────── 工作流生命周期 ───────────────────

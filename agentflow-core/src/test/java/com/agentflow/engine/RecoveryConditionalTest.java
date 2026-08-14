@@ -2,6 +2,7 @@ package com.agentflow.engine;
 
 import com.agentflow.agent.AgentFunction;
 import com.agentflow.agent.AgentOutput;
+import com.agentflow.agent.FatalException;
 import com.agentflow.dsl.EdgeDefinition;
 import com.agentflow.dsl.NodeDefinition;
 import com.agentflow.dsl.WorkflowDefinition;
@@ -27,6 +28,10 @@ class RecoveryConditionalTest {
 
     private static NodeDefinition node(String id, String agent) {
         return new NodeDefinition(id, agent, null, null, null, null, null, null);
+    }
+
+    private static NodeDefinition node(String id, String agent, String onError) {
+        return new NodeDefinition(id, agent, null, null, null, null, null, null, onError);
     }
 
     private static EdgeDefinition edge(String from, String to) {
@@ -87,5 +92,31 @@ class RecoveryConditionalTest {
 
         assertThat(called).contains("B1", "J").doesNotContain("B2");
         assertThat(result.getValue("J")).isEqualTo("j");
+    }
+
+    @Test
+    @DisplayName("on_error 恢复：持久化 A->cleanup 后崩溃 → 恢复不复活 A 正常下游、cleanup 执行")
+    void recoveryReplaysOnErrorPath() {
+        // A 失败走 on_error → cleanup；A 正常下游 B 应被剪枝。
+        WorkflowDefinition def = wf(
+                List.of(node("A", "a", "cleanup"), node("B", "b"), node("cleanup", "cl")),
+                List.of(edge("A", "B")));
+
+        InMemoryCheckpointManager cp = new InMemoryCheckpointManager();
+        cp.initWorkflow("wf", "test", "1.0", null);
+        cp.saveBarrier("wf", 0, new WorkflowContext(Map.of()));
+        cp.saveRoutingDecisions("wf", 0, List.of("A->cleanup"));
+        cp.updateStatus("wf", WorkflowStatus.RUNNING);
+
+        Set<String> called = ConcurrentHashMap.newKeySet();
+        Map<String, AgentFunction> agents = Map.of(
+                "a", input -> { throw new FatalException("A 失败"); },
+                "b", input -> { called.add("B"); return AgentOutput.of("b"); },
+                "cl", input -> { called.add("cleanup"); return AgentOutput.of("cleaned"); });
+
+        RecoveryProtocol recovery = new RecoveryProtocol(cp);
+        engine.recoverAndExecute(recovery, def, agents::get, new ChannelReducer(), "wf");
+
+        assertThat(called).contains("cleanup").doesNotContain("B");
     }
 }
