@@ -145,5 +145,10 @@ public final class ExecutionTrace {
             boolean completedViaOnError,
             long totalTokens
     ) {
+        /** 便捷构造：无路由决策/兜底标志（向后兼容旧 6-arg 调用点，如 api 测试）。 */
+        public Snapshot(String workflowId, Instant startTime, Instant endTime, Status status,
+                        List<NodeTrace> nodes, long totalTokens) {
+            this(workflowId, startTime, endTime, status, nodes, List.of(), false, totalTokens);
+        }
     }
 }
