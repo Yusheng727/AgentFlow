@@ -67,8 +67,30 @@ public class SemanticValidator {
             }
         }
 
-        // DAG 无环（Kahn）
-        checkAcyclic(def.nodes().size(), ids, edges);
+        // v2 条件边 + on_error 校验
+        Map<String, Integer> whenEdgeCount = new HashMap<>();
+        Map<String, Integer> defaultEdgeCount = new HashMap<>();
+        for (EdgeDefinition e : edges) {
+            if (e.when() != null && !e.when().isBlank()) {
+                whenEdgeCount.merge(e.from(), 1, Integer::sum);
+            } else {
+                defaultEdgeCount.merge(e.from(), 1, Integer::sum);
+            }
+        }
+        for (NodeDefinition node : def.nodes()) {
+            // on_error 目标必须存在
+            if (node.onError() != null && !node.onError().isBlank() && !ids.contains(node.onError())) {
+                throw new WorkflowValidationException("on_error 目标不存在: " + node.id() + " → " + node.onError());
+            }
+            // 路由节点（有 when 边）最多一条默认边（无 when）；纯 fan-out 节点（无 when 边）不受限
+            if (whenEdgeCount.getOrDefault(node.id(), 0) > 0
+                    && defaultEdgeCount.getOrDefault(node.id(), 0) > 1) {
+                throw new WorkflowValidationException("路由节点多条默认边（无 when）: " + node.id());
+            }
+        }
+
+        // DAG 无环（Kahn，含 on_error 隐式边）
+        checkAcyclic(def.nodes().size(), ids, def.allEdges());
 
         // channels reducer 合法
         if (def.channels() != null) {

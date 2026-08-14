@@ -1,5 +1,6 @@
 package com.agentflow.dsl;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -30,5 +31,25 @@ public record WorkflowDefinition(
             return agentflow().version();
         }
         return "1.0";
+    }
+
+    /**
+     * 所有边（普通边 + on_error 隐式边）。
+     * on_error 目标作为 from=节点、to=目标的隐式边参与环校验与分层（KTD-4），
+     * 使纯 cleanup 节点（无正常入边）被正确分层到其触发节点之后，而非 level-0 源。
+     */
+    public List<EdgeDefinition> allEdges() {
+        List<EdgeDefinition> result = new ArrayList<>();
+        if (edges() != null) {
+            result.addAll(edges());
+        }
+        if (nodes() != null) {
+            for (NodeDefinition n : nodes()) {
+                if (n.onError() != null && !n.onError().isBlank()) {
+                    result.add(new EdgeDefinition(n.id(), n.onError()));
+                }
+            }
+        }
+        return result;
     }
 }
