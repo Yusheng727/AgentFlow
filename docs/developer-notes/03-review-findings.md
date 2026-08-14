@@ -235,3 +235,20 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 **面试讲法**：「审自己前一轮的代码，10 个 persona 抓到一个共性：C1 预算只在成功路径记**末次** token——schema 重试（3 次真实付费）只算最后一次，重试花的 2/3 成本被静默剔除，正是『测试绿 ≠ 生产生效』的又一形态。修复是把记账从『成功路径收尾』改成『每轮真实调用即记』，重试和失败轮自然都进预算。另外自写 coerce 想对齐 DefaultToolExecutor 却漏了字符串数字→CCE——教训是**尽量复用框架/Jackson 语义，别手写易碎的强转**。」——这是「跨评审互证抓分数账 bug + 复用而非重造」的强表达。
 
 **面试讲法**：「我写过 update 打的 P1 是『测试全绿但功能没生效』——根因是框架异常是 marker-外层-包裹结构，适配器 unwrap 剥掉了可重试标记，而测试用了无 cause 的构造器给了假确认。两位评审各自对 jar 做 javap 独立证实同一处，交叉提到 conf 100。教训：测试必须用框架真实产出的形状。」——这是「怎么防止假绿测试」的强表达。
+
+---
+
+## v2 条件分支 ce-code-review（2026-08-14，10 评审）
+
+**背景**：对 `feat/v2-conditional-branching` 全量 diff（U1–U8，26 文件 ~1330 行，BASE `acab553`）做 10-persona 代码审查。核心正常路径（条件路由/on_error/三终态）逻辑正确、Security 0 漏洞（SpEL 正确复用 KTD-2 hardened 上下文）；抓到 4 条 P1，全落在**生产/恢复路径**——再次印证「mock 绿 ≠ 生产生效」。
+
+**已应用修复（`fix(review)`，`db1eb99`）**：
+- **Postgres 路由决策持久化未实现（correctness+reliability+adversarial+project-standards，4 票，conf 100）**：`saveRoutingDecisions`/`findRoutingDecisions` 是 interface default no-op，只有 InMemory 实现——生产 Postgres 恢复时 `findRoutingDecisions` 恒空，条件分支工作流崩溃恢复会整片误 SKIPPED/复活。补 `PostgresCheckpointManager` 实现 + `V4__routing_decisions.sql`（累计列表，upsert latest-wins）。
+- **`computeReachable` 恢复 BFS 把 on_error 已走的节点误当 fan-out（reliability，conf 80）**：节点类型判定只看「有无 when 边」，漏了「已走 on_error」这一维——失败转兜底的节点其正常出边应被剪枝，却按 fan-out 全走，恢复复活本应 SKIPPED 的正常下游。修复：`fanOut = !hasWhen && !onErrorTaken`。
+- **`saveBarrier` 先于 `saveRoutingDecisions` 落盘（correctness+adversarial，2 票，conf 100）**：崩溃窗口内 barrier 已写、路由未写，恢复丢本层路由。修复：把 `saveBarrier` 移出 `applyBarrier`，在两个执行循环里统一 `saveRoutingDecisions → saveBarrier` 顺序。
+- **`recoverAndExecute` 丢 on_error 三终态 + 不重建 onErrorActivated（5 票，最高共识）**：恢复路径硬编码 `STATUS_SUCCESS`、不标 `markCompletedViaOnError`、级联守卫从空集重建——`execute`/`recoverAndExecute` 双路径已开始漂移。修复：从 takenEdges 重建 `onErrorActivated`，终态对齐 execute（FALLBACK + markCompletedViaOnError）。
+- **`PredicateEvaluator` 只 catch SpelEvaluationException（correctness，conf 100）**：`SpelParseException`（语法错误）与 `SpelEvaluationException`（求值错误）是兄弟类，语法错误泄漏为裸异常。修复：catch `ExpressionException` 超类。
+
+**面试讲法**：「这轮审出最有价值的两个 P1 都是『测试全绿但生产不生效』：一是 Postgres 路由持久化是接口 default no-op、只有内存实现，生产崩溃恢复直接丢路由——这正是我项目里反复出现的那类『mock 绿 ≠ 部署生效』坑，这次 4 个 reviewer 独立命中同一处；二是 execute 和 recoverAndExecute 两条 BSP 主循环复制粘贴后开始漂移，恢复路径漏了 on_error 三终态，5 个 reviewer 都抓到——教训是**核心循环要抽共享方法，复制必然漂移**。还有一个纯逻辑 bug：恢复期 BFS 判定节点是 fan-out 还是路由只看『有无 when 边』，漏了『已走 on_error』这一维，把失败节点当成并行 fan-out、复活了本应跳过的下游——单测全过因为恢复+on_error 组合路径根本没覆盖到。」
+
+**待人工/后续**：`execute`/`recoverAndExecute` 循环仍有 ~15 行重复（本次只修行为、未抽共享方法，见 maintainability P1）；`"from->to"` 边键字符串 4 处手写无单一真相源；`STATUS_FALLBACK` 指标 tag 无 metrics-registry 断言（当前 on_error 测试均 metrics=null）。
