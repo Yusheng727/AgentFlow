@@ -1,7 +1,7 @@
 # AgentFlow v1 交付状态 · 剩余工作 · v2 路线图
 
 > 本文档是 2026-08-07 对 v1 的交付盘点与 v2 边界的一手来源，供接手/面试口径自洽。
-> 更新日期：2026-08-07（2026-08-10 更新：WorkflowSubmissionGuard + per-workflow budget 已交付，见档 B）。计划权威件：`docs/plans/agentflow/`（本文档不替代 plan，只做状态与路线的快照）。
+> 更新日期：2026-08-07（2026-08-10 更新：WorkflowSubmissionGuard + per-workflow budget 已交付，见档 B；2026-08-14 更新：档 A Grafana/Prometheus/Kafka 环境落地已部署验证，见档 A）。计划权威件：`docs/plans/agentflow/`（本文档不替代 plan，只做状态与路线的快照）。
 
 ---
 
@@ -25,7 +25,7 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 ## 2. v1 剩余工作（按"能否现在做"分三档）
 
 ### 档 A — 需环境（Deferred，代码/IT 已就位，只差实际环境）
-- **Grafana 真实部署验证**：需 Docker/Grafana/Prometheus，`import` dashboard 后看 6 面板数据落盘。代码/指标已就绪（见 `docs/GRAFANA.md`）。
+- **Grafana 真实部署验证**：✅ **已交付**（2026-08-14，`54e5415`）——`docker-compose.yml` 加 `prometheus`+`grafana` 服务（`--profile observability`）+ `deploy/prometheus/prometheus.yml` + `deploy/grafana/provisioning/`（datasource uid=`DS_PROMETHEUS` 对齐模板变量 + dashboard 源文件挂载自动加载，不复制不漂移）；本机 Docker 实跑 5 容器健康 + Grafana datasource/dashboard 自动装配（见 `docs/GRAFANA.md`）。
 - **真 PG `verify` 实跑绿**：`PostgresCheckpointManagerIT` 已写（Failsafe，CI 有真 PG 全跑 / 本地无 PG 跳过）。需 CI 回执或本地起 PG 实跑，顺带验证真 PG 下 listByCreatedBy / diagnosis 端到端。
 
 ### 档 B — 真实未落地的 v1 代码缺口（可立刻做）
@@ -45,7 +45,7 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 ## 3. v1.1 路线图（介于 v1 / v2）
 
 - ~~**`LangChain4jAgentAdapter`**（R5）~~ → ✅ **已交付**（2026-08-10，`f4651b2`，本地未推送）——新模块 `agentflow-adapters/langchain4j`（1.0.0 GA），依赖面仅 core + langchain4j 无 Spring AI，窄表面对齐（SpEL/ChatModel/@Tool 循环/TokenUsage/ErrorClassifier/trace/cancel）；KTD-7 可移植性约束实证
-- **分布式模式**：Redis + Kafka（R18③ / R19，v1 用内存 @Async + DB 任务表轻量替代）
+- **分布式模式**：Redis + Kafka（R18③ / R19，v1 用内存 @Async + DB 任务表轻量替代）——Kafka 环境已落地（2026-08-14，`54e5415`：`apache/kafka:3.9.2` KRaft 免 Zookeeper，`--profile distributed`），引擎侧 R18③/R19 仍未动
 - **工具级授权 DB 表 + 管理 API**（R21，v1 为 config/env 硬编码 `CallerToolAllowlist`）
 - **checkpoint 敏感数据列级加密**（R22 注明的升级点，v1 文档标注"明文存储 + R21 鉴权保护"）
 
@@ -68,6 +68,6 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 ## 5. 建议的 v1 收尾优先级
 
 1. **WorkflowSubmissionGuard**（档 B，真安全缺口）—— ✅ 已交付（2026-08-10，`a37d9dc`，见档 B 表）。
-2. Grafana / 真 PG 部署验证（档 A，等环境/CI）。
+2. Grafana / 真 PG 部署验证（档 A）—— Grafana 已交付（2026-08-14，`54e5415`）；真 PG `verify` 实跑仍等 CI/环境。
 3. ~~R20 archetypes、Reducer 冲突演练~~（档 B，2026-08-10 决策明确不做）→ **档 B 已全部闭环**。
 4. 档 C 面试口径 → 定稿一份 30s/5min 自述稿附到 `07-sources-revision-interview.md` 或本仓库面试文档（待定）。
