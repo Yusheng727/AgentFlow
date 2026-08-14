@@ -137,4 +137,20 @@ public interface CheckpointManager {
     default Optional<String> findVersion(String workflowId) {
         return Optional.empty();
     }
+
+    /**
+     * v2 条件分支：持久化路由决策（已走边 from→to，累计列表）。
+     * 恢复时用「已走路径 + 静态图」确定性重算 SKIPPED 集合，不单独落 SKIPPED 态（KTD-5）。
+     * 默认 no-op（Noop/未实现的条件分支场景无路由）。
+     */
+    default void saveRoutingDecisions(String workflowId, int superStep, List<String> routingDecisions) {
+    }
+
+    /**
+     * v2 条件分支：查最新持久化的路由决策（累计列表）。
+     * 默认空列表（无条件分支的工作流无路由决策）。
+     */
+    default List<String> findRoutingDecisions(String workflowId) {
+        return List.of();
+    }
 }

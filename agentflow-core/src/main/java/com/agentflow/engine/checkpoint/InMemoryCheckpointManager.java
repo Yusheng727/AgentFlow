@@ -42,6 +42,7 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
     private final ConcurrentHashMap<String, String[]> workflowMeta = new ConcurrentHashMap<>(); // [name, version]
     private final ConcurrentHashMap<String, String> workflowCreatedBy = new ConcurrentHashMap<>(); // U14 所有权校验
     private final ConcurrentHashMap<String, Instant> workflowCreatedAt = new ConcurrentHashMap<>(); // U10 后续 #12 列表排序
+    private final ConcurrentHashMap<String, List<String>> routingDecisions = new ConcurrentHashMap<>(); // v2 路由决策（累计）
 
     // ──────────────────────────── 写入 ────────────────────────────
 
@@ -142,6 +143,16 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
     public Optional<String> findVersion(String workflowId) {
         String[] meta = workflowMeta.get(workflowId);
         return meta == null ? Optional.empty() : Optional.ofNullable(meta[1]);
+    }
+
+    @Override
+    public void saveRoutingDecisions(String workflowId, int superStep, List<String> decisions) {
+        routingDecisions.put(workflowId, List.copyOf(decisions));
+    }
+
+    @Override
+    public List<String> findRoutingDecisions(String workflowId) {
+        return routingDecisions.getOrDefault(workflowId, List.of());
     }
 
     // ──────────────────────── 辅助方法 ────────────────────────

@@ -14,6 +14,7 @@ import com.agentflow.dsl.AgentflowMeta;
 import com.agentflow.dsl.WorkflowDefinition;
 import com.agentflow.engine.checkpoint.CheckpointManager;
 import com.agentflow.engine.checkpoint.ExecutionState;
+import com.agentflow.engine.checkpoint.NodeOutputStore;
 import com.agentflow.engine.checkpoint.NoopCheckpointManager;
 import com.agentflow.engine.checkpoint.RecoveryProtocol;
 import com.agentflow.engine.checkpoint.WorkflowStatus;
@@ -214,6 +215,8 @@ public final class BspEngine {
             Set<String> active = steps.isEmpty() ? new HashSet<>() : new HashSet<>(steps.get(0).nodeIds());
             // v2 on_error：经 on_error 激活的目标节点（其自身失败不二次跳转，避免级联兜底）
             Set<String> onErrorActivated = new HashSet<>();
+            // v2 条件分支：已走边（from→to，累计），供 checkpoint 持久化路由决策（恢复期重算 SKIPPED）
+            List<String> takenEdges = new ArrayList<>();
             for (SuperStep step : steps) {
                 // 工作流总超时：super-step 间检查（超时则 abort，不推进下游）
                 if (timeoutPolicy != null && timeoutPolicy.isWorkflowExceeded(workflowStart)) {
@@ -231,10 +234,12 @@ public final class BspEngine {
                 // U10 后续 #10：记录本 super-step 各节点所属层号（含被剪枝节点，供 UI 真实拓扑分组）
                 recordSuperStepTrace(trace, step);
                 List<String> onErrorTargets = applyBarrier(activeStep, results, context, dag, def, reducer, cp,
-                        workflowId, onErrorActivated, trace);
+                        workflowId, onErrorActivated, trace, takenEdges);
                 active.addAll(onErrorTargets);
                 // v2 条件分支：成功节点计算路由决策、激活后继（无分支命中 → Fatal → 工作流 FAILED）
-                updateReachability(results, active, def, step.index(), trace);
+                updateReachability(results, active, def, step.index(), trace, takenEdges);
+                // v2 条件分支：持久化路由决策（恢复期据此重算 SKIPPED，不复活已跳节点）
+                cp.saveRoutingDecisions(workflowId, step.index(), List.copyOf(takenEdges));
             }
             if (trace != null) {
                 if (!onErrorActivated.isEmpty()) {
@@ -355,6 +360,22 @@ public final class BspEngine {
         List<SuperStep> remaining = allSteps.subList(state.nextSuperStep(), allSteps.size());
 
         CheckpointManager cp = recovery.checkpointManager();
+
+        // v2 条件分支：重建可达集 = 源节点 ∪ {已走边目标}。已走边 = 持久化路由决策（步骤 0..nextSuperStep-1）
+        // + 崩溃层已完成节点的路由重算（其输出在 node 级 checkpoint，路由是输出的确定性函数）。
+        List<String> takenEdges = new ArrayList<>(cp.findRoutingDecisions(workflowId));
+        for (NodeOutputStore n : cp.findCompletedNodes(workflowId, state.nextSuperStep())) {
+            try {
+                for (String target : resolveTakenTargets(n.nodeId(), n.output(), def)) {
+                    takenEdges.add(n.nodeId() + "->" + target);
+                }
+            } catch (FatalException fe) {
+                log.warn("恢复 wf={}: 崩溃层已完成节点 {} 路由重算失败: {}", workflowId, n.nodeId(), fe.getMessage());
+            }
+        }
+        Set<String> active = computeReachable(allSteps.get(0).nodeIds(), dag, def, takenEdges);
+        Set<String> onErrorActivated = new HashSet<>();
+
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         NodeExecutor nodeExecutor = new NodeExecutor(agentResolver, executor);
         Instant workflowStart = Instant.now();
@@ -367,21 +388,22 @@ public final class BspEngine {
                             List.of(new TimeoutException("workflow total timeout exceeded")));
                 }
                 WorkflowContext snapshot = context.readOnlySnapshot();
-                // 崩溃层（remaining 的第一个 = nextSuperStep）剔除已完成节点——它们的输出已在
-                // replayOutputs 阶段重放进 context，这里不重跑（防 LLM 重复计费 + 避免覆盖已重放 channel）。
-                // 非崩溃层或无已完成节点时原样执行。
-                SuperStep stepToRun = (step.index() == state.nextSuperStep() && !state.completedNodeIds().isEmpty())
-                        ? new SuperStep(step.index(), step.nodeIds().stream()
-                                .filter(id -> !state.completedNodeIds().contains(id))
-                                .toList())
-                        : step;
+                // v2 可达性：只跑可达节点；崩溃层再剔除已完成节点（输出已在 replayOutputs 重放，不重跑）
+                List<String> activeInStep = step.nodeIds().stream().filter(active::contains).toList();
+                SuperStep stepToRun = new SuperStep(step.index(), activeInStep.stream()
+                        .filter(id -> step.index() != state.nextSuperStep() || !state.completedNodeIds().contains(id))
+                        .toList());
+                // v2 可观测：被剪枝（不可达）节点标记 SKIPPED
+                markSkippedNodes(trace, step, activeInStep, dag);
                 List<NodeResult> results = runSuperStep(stepToRun, dag, snapshot, nodeExecutor, cp, workflowId,
                         executor, Map.of(), workflowStart, trace, budget);
                 // U10 后续 #10：记录本 super-step 各节点所属层号（用完整 step.nodeIds，含崩溃层跳过节点）
                 recordSuperStepTrace(trace, step);
-                // U5 注意：recoverAndExecute 不做 on_error 兜底（on_error 恢复路由在 U7 落地），
-                // 此处传空 onErrorActivated 保持静态 DAG 恢复行为不变。
-                applyBarrier(step, results, context, dag, def, reducer, cp, workflowId, new HashSet<>(), trace);
+                List<String> onErrorTargets = applyBarrier(step, results, context, dag, def, reducer, cp, workflowId,
+                        onErrorActivated, trace, takenEdges);
+                active.addAll(onErrorTargets);
+                updateReachability(results, active, def, step.index(), trace, takenEdges);
+                cp.saveRoutingDecisions(workflowId, step.index(), List.copyOf(takenEdges));
             }
             cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
             if (trace != null) {
@@ -510,7 +532,7 @@ public final class BspEngine {
     private List<String> applyBarrier(SuperStep step, List<NodeResult> results, WorkflowContext context,
                                       DAGraph dag, WorkflowDefinition def, ChannelReducer reducer,
                                       CheckpointManager cp, String workflowId, Set<String> onErrorActivated,
-                                      ExecutionTrace trace) {
+                                      ExecutionTrace trace, List<String> takenEdges) {
         List<Throwable> fatalFailures = new ArrayList<>();
         List<String> onErrorTargets = new ArrayList<>();
         // results 已按声明序（提交序），保证 Reducer 合并确定
@@ -524,9 +546,7 @@ public final class BspEngine {
                         && !onErrorActivated.contains(f.nodeId())) {
                     onErrorTargets.add(node.onError());
                     onErrorActivated.add(node.onError());
-                    if (trace != null) {
-                        trace.recordRoutingDecision(f.nodeId(), node.onError());
-                    }
+                    recordRouting(f.nodeId(), node.onError(), trace, takenEdges);
                 } else {
                     fatalFailures.add(f.error());
                 }
@@ -592,21 +612,60 @@ public final class BspEngine {
 
     /** v2 条件分支：成功节点计算路由决策、激活后继节点 + 记录路由决策；无分支命中抛 WorkflowExecutionException。 */
     private void updateReachability(List<NodeResult> results, Set<String> active,
-                                    WorkflowDefinition def, int stepIndex, ExecutionTrace trace) {
+                                    WorkflowDefinition def, int stepIndex, ExecutionTrace trace,
+                                    List<String> takenEdges) {
         for (NodeResult r : results) {
             if (r instanceof NodeResult.Success s) {
                 try {
                     for (String target : resolveTakenTargets(s.nodeId(), s.output(), def)) {
                         active.add(target);
-                        if (trace != null) {
-                            trace.recordRoutingDecision(s.nodeId(), target);
-                        }
+                        recordRouting(s.nodeId(), target, trace, takenEdges);
                     }
                 } catch (FatalException fe) {
                     throw new WorkflowExecutionException(stepIndex, List.of(fe));
                 }
             }
         }
+    }
+
+    /** v2 条件分支：记录路由决策到 takenEdges（持久化）与 trace（可观测）。 */
+    private void recordRouting(String from, String to, ExecutionTrace trace, List<String> takenEdges) {
+        takenEdges.add(from + "->" + to);
+        if (trace != null) {
+            trace.recordRoutingDecision(from, to);
+        }
+    }
+
+    /**
+     * v2 条件分支：从源节点 BFS 计算可达集（恢复期用）。
+     * 纯 fan-out 节点（无 when 边）→ 所有出边总是走；路由节点（有 when 边）→ 仅已走边（takenEdges）；
+     * on_error 隐式边按已走边判断。
+     */
+    private Set<String> computeReachable(List<String> sources, DAGraph dag, WorkflowDefinition def,
+                                         List<String> takenEdges) {
+        Set<String> active = new HashSet<>();
+        java.util.Deque<String> queue = new java.util.ArrayDeque<>(sources);
+        while (!queue.isEmpty()) {
+            String node = queue.poll();
+            if (!active.add(node)) {
+                continue;
+            }
+            List<EdgeDefinition> outgoing = def.edges() == null ? List.of()
+                    : def.edges().stream().filter(e -> e.from().equals(node)).toList();
+            boolean hasWhen = outgoing.stream().anyMatch(e -> e.when() != null && !e.when().isBlank());
+            for (EdgeDefinition e : outgoing) {
+                boolean taken = !hasWhen || takenEdges.contains(node + "->" + e.to());
+                if (taken) {
+                    queue.add(e.to());
+                }
+            }
+            NodeDefinition nd = dag.node(node);
+            if (nd.onError() != null && !nd.onError().isBlank()
+                    && takenEdges.contains(node + "->" + nd.onError())) {
+                queue.add(nd.onError());
+            }
+        }
+        return active;
     }
 
     /** v2 可观测：把本层被剪枝（不可达）节点标记为 SKIPPED（trace 记录）。 */
