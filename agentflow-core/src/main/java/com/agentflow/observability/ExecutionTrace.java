@@ -25,6 +25,10 @@ public final class ExecutionTrace {
     private volatile Instant endTime;
     private volatile Status status = Status.RUNNING;
     private final CopyOnWriteArrayList<NodeTrace> nodes = new CopyOnWriteArrayList<>();
+    /** v2 条件分支：路由决策（已走边 from→to），供事后诊断解释为何选某分支。 */
+    private final CopyOnWriteArrayList<String> routingDecisions = new CopyOnWriteArrayList<>();
+    /** v2 on_error：是否经 on_error 兜底完成（区分「正常完成」与「兜底完成」三终态）。 */
+    private volatile boolean completedViaOnError;
 
     public ExecutionTrace(String workflowId) {
         this.workflowId = workflowId;
@@ -57,6 +61,28 @@ public final class ExecutionTrace {
         this.status = status;
     }
 
+    /** v2 条件分支：记录一次路由决策（已走边 from→to）。 */
+    public void recordRoutingDecision(String from, String to) {
+        if (from != null && to != null) {
+            routingDecisions.add(from + "->" + to);
+        }
+    }
+
+    /** v2 条件分支：追加一个 SKIPPED 节点 trace（被路由剪枝、未执行）。 */
+    public void addSkippedNode(String nodeId, String agentName) {
+        if (nodeId == null) {
+            return;
+        }
+        NodeTrace skipped = new NodeTrace(nodeId, agentName == null ? "" : agentName);
+        skipped.markSkipped();
+        nodes.add(skipped);
+    }
+
+    /** v2 on_error：标记工作流经 on_error 兜底完成。 */
+    public void markCompletedViaOnError() {
+        this.completedViaOnError = true;
+    }
+
     public String workflowId() {
         return workflowId;
     }
@@ -78,6 +104,16 @@ public final class ExecutionTrace {
         return List.copyOf(nodes);
     }
 
+    /** 路由决策列表（实时视图，按追加序）。 */
+    public List<String> routingDecisions() {
+        return List.copyOf(routingDecisions);
+    }
+
+    /** 是否经 on_error 兜底完成。 */
+    public boolean completedViaOnError() {
+        return completedViaOnError;
+    }
+
     /** 全工作流 token 总和（已完成节点）。 */
     public long totalTokens() {
         return nodes.stream().mapToLong(NodeTrace::totalTokens).sum();
@@ -91,7 +127,7 @@ public final class ExecutionTrace {
     /** 不可变快照。 */
     public Snapshot snapshot() {
         return new Snapshot(workflowId, startTime, endTime, status,
-                List.copyOf(nodes), totalTokens());
+                List.copyOf(nodes), List.copyOf(routingDecisions), completedViaOnError, totalTokens());
     }
 
     public enum Status {
@@ -105,6 +141,8 @@ public final class ExecutionTrace {
             Instant endTime,
             Status status,
             List<NodeTrace> nodes,
+            List<String> routingDecisions,
+            boolean completedViaOnError,
             long totalTokens
     ) {
     }

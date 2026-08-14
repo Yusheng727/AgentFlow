@@ -223,21 +223,27 @@ public final class BspEngine {
                 // 只跑本层可达节点；不可达节点被路由决策剪枝（SKIPPED，不执行、不写 channel）
                 List<String> activeIds = step.nodeIds().stream().filter(active::contains).toList();
                 SuperStep activeStep = new SuperStep(step.index(), activeIds);
+                // v2 可观测：被剪枝节点标记 SKIPPED（trace）
+                markSkippedNodes(trace, step, activeIds, dag);
                 WorkflowContext snapshot = context.readOnlySnapshot();
                 List<NodeResult> results = runSuperStep(activeStep, dag, snapshot, nodeExecutor, cp, workflowId,
                         executor, effInputs, workflowStart, trace, budget);
                 // U10 后续 #10：记录本 super-step 各节点所属层号（含被剪枝节点，供 UI 真实拓扑分组）
                 recordSuperStepTrace(trace, step);
                 List<String> onErrorTargets = applyBarrier(activeStep, results, context, dag, def, reducer, cp,
-                        workflowId, onErrorActivated);
+                        workflowId, onErrorActivated, trace);
                 active.addAll(onErrorTargets);
                 // v2 条件分支：成功节点计算路由决策、激活后继（无分支命中 → Fatal → 工作流 FAILED）
-                updateReachability(results, active, def, step.index());
+                updateReachability(results, active, def, step.index(), trace);
             }
             if (trace != null) {
+                if (!onErrorActivated.isEmpty()) {
+                    trace.markCompletedViaOnError();
+                }
                 trace.markCompleted(ExecutionTrace.Status.COMPLETED);
             }
-            recordWorkflowOutcome(AgentFlowMetrics.STATUS_SUCCESS);
+            recordWorkflowOutcome(onErrorActivated.isEmpty()
+                    ? AgentFlowMetrics.STATUS_SUCCESS : AgentFlowMetrics.STATUS_FALLBACK);
             outcomeRecorded = true;
             return context;
         } catch (WorkflowExecutionException we) {
@@ -375,7 +381,7 @@ public final class BspEngine {
                 recordSuperStepTrace(trace, step);
                 // U5 注意：recoverAndExecute 不做 on_error 兜底（on_error 恢复路由在 U7 落地），
                 // 此处传空 onErrorActivated 保持静态 DAG 恢复行为不变。
-                applyBarrier(step, results, context, dag, def, reducer, cp, workflowId, new HashSet<>());
+                applyBarrier(step, results, context, dag, def, reducer, cp, workflowId, new HashSet<>(), trace);
             }
             cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
             if (trace != null) {
@@ -503,7 +509,8 @@ public final class BspEngine {
      *  其余失败聚合抛出。返回本层 on_error 激活的目标节点（调用方加入可达集）。 */
     private List<String> applyBarrier(SuperStep step, List<NodeResult> results, WorkflowContext context,
                                       DAGraph dag, WorkflowDefinition def, ChannelReducer reducer,
-                                      CheckpointManager cp, String workflowId, Set<String> onErrorActivated) {
+                                      CheckpointManager cp, String workflowId, Set<String> onErrorActivated,
+                                      ExecutionTrace trace) {
         List<Throwable> fatalFailures = new ArrayList<>();
         List<String> onErrorTargets = new ArrayList<>();
         // results 已按声明序（提交序），保证 Reducer 合并确定
@@ -517,6 +524,9 @@ public final class BspEngine {
                         && !onErrorActivated.contains(f.nodeId())) {
                     onErrorTargets.add(node.onError());
                     onErrorActivated.add(node.onError());
+                    if (trace != null) {
+                        trace.recordRoutingDecision(f.nodeId(), node.onError());
+                    }
                 } else {
                     fatalFailures.add(f.error());
                 }
@@ -580,16 +590,33 @@ public final class BspEngine {
         return steps;
     }
 
-    /** v2 条件分支：成功节点计算路由决策、激活后继节点；无分支命中抛 WorkflowExecutionException（工作流 FAILED）。 */
+    /** v2 条件分支：成功节点计算路由决策、激活后继节点 + 记录路由决策；无分支命中抛 WorkflowExecutionException。 */
     private void updateReachability(List<NodeResult> results, Set<String> active,
-                                    WorkflowDefinition def, int stepIndex) {
+                                    WorkflowDefinition def, int stepIndex, ExecutionTrace trace) {
         for (NodeResult r : results) {
             if (r instanceof NodeResult.Success s) {
                 try {
-                    active.addAll(resolveTakenTargets(s.nodeId(), s.output(), def));
+                    for (String target : resolveTakenTargets(s.nodeId(), s.output(), def)) {
+                        active.add(target);
+                        if (trace != null) {
+                            trace.recordRoutingDecision(s.nodeId(), target);
+                        }
+                    }
                 } catch (FatalException fe) {
                     throw new WorkflowExecutionException(stepIndex, List.of(fe));
                 }
+            }
+        }
+    }
+
+    /** v2 可观测：把本层被剪枝（不可达）节点标记为 SKIPPED（trace 记录）。 */
+    private void markSkippedNodes(ExecutionTrace trace, SuperStep step, List<String> activeIds, DAGraph dag) {
+        if (trace == null) {
+            return;
+        }
+        for (String id : step.nodeIds()) {
+            if (!activeIds.contains(id)) {
+                trace.addSkippedNode(id, dag.node(id).agent());
             }
         }
     }

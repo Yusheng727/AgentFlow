@@ -90,6 +90,12 @@ public final class NodeTrace {
         this.error = error;
     }
 
+    /** v2 条件分支：标记节点被路由剪枝跳过（未执行、无输出）。 */
+    public void markSkipped() {
+        this.endNanos = this.startNanos;
+        this.status = Status.SKIPPED;
+    }
+
     @JsonProperty("nodeId")
     public String nodeId() {
         return nodeId;
@@ -160,13 +166,13 @@ public final class NodeTrace {
         return Duration.ofNanos(end - startNanos);
     }
 
-    /** 是否已终结（SUCCESS / FAILED）。 */
+    /** 是否已终结（SUCCESS / FAILED / SKIPPED）。 */
     @JsonIgnore
     public boolean isTerminal() {
-        return status == Status.SUCCESS || status == Status.FAILED;
+        return status == Status.SUCCESS || status == Status.FAILED || status == Status.SKIPPED;
     }
 
     public enum Status {
-        RUNNING, SUCCESS, FAILED
+        RUNNING, SUCCESS, FAILED, SKIPPED
     }
 }

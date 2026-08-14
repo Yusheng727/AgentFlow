@@ -46,6 +46,8 @@ public final class AgentFlowMetrics {
     /** 工作流执行状态 tag 值。 */
     public static final String STATUS_SUCCESS = "success";
     public static final String STATUS_FAILED = "failed";
+    /** v2 on_error：经 on_error 兜底完成（区别于正常 success 的三终态之一）。 */
+    public static final String STATUS_FALLBACK = "fallback";
 
     private final MeterRegistry meterRegistry;
     private final CostCalculator costCalculator;
