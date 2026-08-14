@@ -7,7 +7,13 @@ package com.agentflow.dsl;
  * edges:
  *   - from: financial-analysis
  *     to: aggregate-rating
+ *     when: "output.riskLevel == 'high'"   # 可选：条件边谓词（v2）
  * </pre>
  */
-public record EdgeDefinition(String from, String to) {
+public record EdgeDefinition(String from, String to, String when) {
+
+    /** 便捷构造：无条件边（when 默认 null，向后兼容 v1 静态边）。 */
+    public EdgeDefinition(String from, String to) {
+        this(from, to, null);
+    }
 }

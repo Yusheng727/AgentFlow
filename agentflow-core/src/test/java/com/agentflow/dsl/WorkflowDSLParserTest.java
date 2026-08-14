@@ -259,6 +259,28 @@ class WorkflowDSLParserTest {
         assertThat(node.outputSchema()).containsEntry("type", "object");
     }
 
+    // ========== v2 条件分支字段 ==========
+
+    @Test
+    @DisplayName("解析 when 条件边 + on_error 节点 → 字段映射正确（snake_case）")
+    void parseWhenAndOnError() {
+        WorkflowDefinition def = parseAndValidate("""
+                nodes:
+                  - { id: classify, agent: a, on_error: cleanup }
+                  - { id: approve, agent: b }
+                  - { id: reject, agent: c }
+                  - { id: cleanup, agent: d }
+                edges:
+                  - { from: classify, to: approve, when: "output.verdict == 'approved'" }
+                  - { from: classify, to: reject }
+                """);
+        assertThat(def.nodes().get(0).onError()).isEqualTo("cleanup");
+        assertThat(def.nodes().get(1).onError()).isNull();
+        assertThat(def.edges().get(0).when()).isEqualTo("output.verdict == 'approved'");
+        // 默认边（无 when）→ when 为 null
+        assertThat(def.edges().get(1).when()).isNull();
+    }
+
     // ========== R10 per-workflow 预算字段 ==========
 
     @Test
