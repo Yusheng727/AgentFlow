@@ -3,9 +3,11 @@ package com.agentflow.engine;
 import com.agentflow.agent.AgentFunction;
 import com.agentflow.agent.AgentInput;
 import com.agentflow.agent.AgentOutput;
+import com.agentflow.agent.FatalException;
 import com.agentflow.agent.NodeRegistry;
 import com.agentflow.dsl.ChannelDefinition;
 import com.agentflow.dsl.DAGLayerer;
+import com.agentflow.dsl.EdgeDefinition;
 import com.agentflow.dsl.NodeDefinition;
 import com.agentflow.dsl.Reducer;
 import com.agentflow.dsl.AgentflowMeta;
@@ -22,6 +24,7 @@ import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.observability.ExecutionTrace;
 import com.agentflow.observability.ExecutionTraceRegistry;
 import com.agentflow.observability.WorkflowBudget;
+import com.agentflow.prompt.PredicateEvaluator;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,9 +32,12 @@ import org.slf4j.LoggerFactory;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -77,6 +83,8 @@ public final class BspEngine {
     /** U7 指标挂钩：可空（null = 不记指标，与 U7 之前行为一致，向后兼容）。
      *  非空时工作流完成记 {@code agentflow.workflow.executed}{status}、每节点完成记 {@code agentflow.node.duration}{agent}。 */
     private final AgentFlowMetrics metrics;
+    /** v2 条件分支：when 谓词求值器（复用 hardened SpEL 上下文，表达式 → boolean）。 */
+    private final PredicateEvaluator predicateEvaluator = new PredicateEvaluator();
 
     public BspEngine() {
         this(new DAGLayerer());
@@ -202,18 +210,25 @@ public final class BspEngine {
         Instant workflowStart = Instant.now();
         boolean outcomeRecorded = false; // U7 指标：兜底防漏记/防双记
         try {
+            // v2 条件分支：可达节点集（初始 = 源节点，随路由决策增量激活后继）；空工作流 → 空集
+            Set<String> active = steps.isEmpty() ? new HashSet<>() : new HashSet<>(steps.get(0).nodeIds());
             for (SuperStep step : steps) {
                 // 工作流总超时：super-step 间检查（超时则 abort，不推进下游）
                 if (timeoutPolicy != null && timeoutPolicy.isWorkflowExceeded(workflowStart)) {
                     throw new WorkflowExecutionException(step.index(),
                             List.of(new TimeoutException("workflow total timeout exceeded")));
                 }
+                // 只跑本层可达节点；不可达节点被路由决策剪枝（SKIPPED，不执行、不写 channel）
+                List<String> activeIds = step.nodeIds().stream().filter(active::contains).toList();
+                SuperStep activeStep = new SuperStep(step.index(), activeIds);
                 WorkflowContext snapshot = context.readOnlySnapshot();
-                List<NodeResult> results = runSuperStep(step, dag, snapshot, nodeExecutor, cp, workflowId,
+                List<NodeResult> results = runSuperStep(activeStep, dag, snapshot, nodeExecutor, cp, workflowId,
                         executor, effInputs, workflowStart, trace, budget);
-                // U10 后续 #10：记录本 super-step 各节点所属层号（供 UI 按真实 BSP 拓扑分组）
+                // U10 后续 #10：记录本 super-step 各节点所属层号（含被剪枝节点，供 UI 真实拓扑分组）
                 recordSuperStepTrace(trace, step);
-                applyBarrier(step, results, context, dag, def, reducer, cp, workflowId);
+                applyBarrier(activeStep, results, context, dag, def, reducer, cp, workflowId);
+                // v2 条件分支：成功节点计算路由决策、激活后继（无分支命中 → Fatal → 工作流 FAILED）
+                updateReachability(results, active, def, step.index());
             }
             if (trace != null) {
                 trace.markCompleted(ExecutionTrace.Status.COMPLETED);
@@ -546,5 +561,64 @@ public final class BspEngine {
             steps.add(new SuperStep(i, layers.get(i)));
         }
         return steps;
+    }
+
+    /** v2 条件分支：成功节点计算路由决策、激活后继节点；无分支命中抛 WorkflowExecutionException（工作流 FAILED）。 */
+    private void updateReachability(List<NodeResult> results, Set<String> active,
+                                    WorkflowDefinition def, int stepIndex) {
+        for (NodeResult r : results) {
+            if (r instanceof NodeResult.Success s) {
+                try {
+                    active.addAll(resolveTakenTargets(s.nodeId(), s.output(), def));
+                } catch (FatalException fe) {
+                    throw new WorkflowExecutionException(stepIndex, List.of(fe));
+                }
+            }
+        }
+    }
+
+    /**
+     * v2 条件分支：计算节点完成后的路由决策，返回「已走」边的目标节点集合。
+     * 纯 fan-out（无 when 边）→ 所有出边都走（v1 语义）；路由节点（有 when 边）→ 按声明序取第一条 true，
+     * 否则默认边；无 when 命中且无默认边 → 抛 FatalException（无分支命中）。
+     */
+    private List<String> resolveTakenTargets(String nodeId, AgentOutput output, WorkflowDefinition def)
+            throws FatalException {
+        List<EdgeDefinition> outgoing = def.edges() == null ? List.of()
+                : def.edges().stream().filter(e -> e.from().equals(nodeId)).toList();
+        List<EdgeDefinition> whenEdges = new ArrayList<>();
+        List<EdgeDefinition> defaultEdges = new ArrayList<>();
+        for (EdgeDefinition e : outgoing) {
+            if (e.when() != null && !e.when().isBlank()) {
+                whenEdges.add(e);
+            } else {
+                defaultEdges.add(e);
+            }
+        }
+        if (whenEdges.isEmpty()) {
+            return outgoing.stream().map(EdgeDefinition::to).toList();
+        }
+        Map<String, Object> outputMap = outputMap(output);
+        for (EdgeDefinition e : whenEdges) {
+            if (predicateEvaluator.evaluate(e.when(), outputMap)) {
+                return List.of(e.to());
+            }
+        }
+        if (defaultEdges.size() == 1) {
+            return List.of(defaultEdges.get(0).to());
+        }
+        throw new FatalException("无分支命中: 节点 " + nodeId + " 的 when 谓词均未命中且无默认边");
+    }
+
+    /** 谓词求值的 output 根对象：structuredOutput 优先（键合并）+ content 降级为 content 键。 */
+    private static Map<String, Object> outputMap(AgentOutput output) {
+        Map<String, Object> map = new HashMap<>();
+        if (output.structuredOutput() != null && !output.structuredOutput().isEmpty()) {
+            map.putAll(output.structuredOutput());
+        }
+        if (output.content() != null) {
+            map.put("content", output.content());
+        }
+        return map;
     }
 }
