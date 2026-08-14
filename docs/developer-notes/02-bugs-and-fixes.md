@@ -386,3 +386,15 @@ LangChain4j 网络/限流/超时异常被 core `ErrorClassifier` 误判 Fatal �
 - Spring：`composed(cn.startsWith("org.springframework.web.client."))`
 
 core 保持框架无关（KTD-7 精神），框架可重试语义由适配器持有。**教训**：框架特有的 retry 语义应该由框架适配器注入，而不是写死在框架无关的分类器里。
+
+### 坑：MapAccessor 缺失键抛异常（非返回 null）——v2 PredicateEvaluator 实测
+
+做 `when` 谓词求值时，原本以为 Spring `MapAccessor` 对缺失键返回 null（`output.missing == 'x'` 静默得 false）。实测相反：`MapAccessor.canRead` 对缺失键返回 false → 复合 accessor 抛 `SpelEvaluationException` → 被 PredicateEvaluator catch 转 Fatal。所以「字段拼错」（`output.verdct`）会抛 Fatal 而非静默走默认边——**恰好让 AE9「谓词求值错误可诊断」字面成立**，比预想更安全。**教训**：框架 accessor 的缺失键语义不能凭记忆，要实测（一个测试就推翻假设）。
+
+### 设计决策：fan-out vs routing 的语义切换——恢复期 BFS 必须按节点类型分支
+
+v1 多出边 = 并行 fan-out；v2 一个节点一旦有 `when` 边，其无条件边就从 fan-out 变成「独占默认边」（≤1 条，U3 校验）。这个切换在**恢复期可达性重算**（computeReachable BFS）里是关键：纯 fan-out 节点（无 when 边）所有出边总是走；路由节点（有 when 边）只走「已走边」里的那条。第一版 BFS 把「无条件边总是走」一刀切，导致路由节点的默认边被误当 fan-out 走、被跳分支被复活——静态 DAG 恢复测试（abortedWorkflowRerunsCrashLayer）回归抓出来的。**教训**：一个 DSL 字段的语义随「同节点是否有兄弟 when 边」而切换，重算逻辑必须按节点类型分支。
+
+### 坑：record 加字段破坏向后兼容（Snapshot 6-arg → 8-arg）
+
+`ExecutionTrace.Snapshot` 从 6 组件加 `routingDecisions`/`completedViaOnError` 变 8 组件，规范构造器签名随之变，api 测试里 `new Snapshot(6 args)` 直接 `NoSuchMethodError`。解法：补一个 6-arg 便捷构造委托到规范构造（`routingDecisions=List.of()`, `completedViaOnError=false`）。**教训**：Java record 加组件 = 破坏所有外部构造点，凡是跨模块被消费的 record 都要补便捷构造（或干脆用显式 class）。

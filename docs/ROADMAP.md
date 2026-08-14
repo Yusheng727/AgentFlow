@@ -55,13 +55,13 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 
 | v2 能力 | 说明 |
 |:---|:---|
-| **运行时条件分支 / 动态跳转** | `on_error: goto cleanupNode`，Agent 输出动态决定下一步（KTD-9，v1 仅静态 DAG + super-step） |
+| **运行时条件分支 / 动态跳转** | ✅ **已交付**（2026-08-14，`feat/v2-conditional-branching`，U1–U8）——`when` 谓词条件边 + `on_error: goto` 兜底，BSP 可达性剪枝 + SKIPPED + checkpoint 路由决策持久化；见 `docs/plans/2026-08-14-001-feat-v2-conditional-branching-plan.md` |
 | **完整 Human-in-the-Loop 审批中间件** | 中断→外部审批→恢复执行 |
 | **Web 可视化工作流编辑器** | |
 | **多租户 SaaS 平台** | v2+ |
 | **RAG 演示加分项**（2026-08-10 拍板） | 自定义 `RagAgentFunction`（AgentFunction 内调向量检索），引擎层零改动——验证 KTD-6 扩展点设计成立。与 InterviewCoach（RAG 项目）分工不重复：AgentFlow 只做编排侧接入 |
 
-> 注意：v1 明确只做**静态 DAG**（KTD-9）；条件分支、动态路由、ErrorHandler 跳转路径均属 v2。
+> 注意：v1 只做**静态 DAG**（KTD-9）；条件分支（动态路由 + on_error 跳转）已交付 v2（2026-08-14）；其余（Human-in-the-Loop、Web 编辑器、多租户、RAG 演示）仍属 v2。
 
 ---
 
