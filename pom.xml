@@ -39,6 +39,7 @@
         <module>demo-contract-review</module>
         <module>demo-investment-analysis</module>
         <module>demo-conditional</module>
+        <module>demo-loop</module>
         <module>demo-api</module>
     </modules>
 

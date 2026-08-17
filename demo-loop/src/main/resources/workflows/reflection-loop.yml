@@ -1,0 +1,29 @@
+# 反思循环工作流（v2 Demo：循环/回边）
+#
+# 拓扑：draft → critique →（回边 draft | 退出 finalize）
+# - critique 输出 score 低于 0.8 → 回边重跑 draft（喂回上一轮 critique 输出）
+# - critique 输出 score 高于 0.8 → 退出边 finalize 定稿
+# - max_iterations: 3 兜底（score 恒低时 3 轮后 FAILED「迭代超限」）
+#
+# 注：critique 的逐轮 score 由 stateful mock AgentFunction 驱动（mock_response 静态无法表达逐轮变化）。
+
+agentflow:
+  version: "1.0"
+
+nodes:
+  - id: draft
+    agent: drafter
+    prompt_template: "草拟内容（结合上一轮评估 ${critique} 改进）"
+
+  - id: critique
+    agent: critic
+    prompt_template: "评估草稿质量"
+
+  - id: finalize
+    agent: finalizer
+    prompt_template: "定稿"
+
+edges:
+  - { from: draft, to: critique }
+  - { from: critique, to: draft, when: "output.score < 0.8", loop: true, max_iterations: 3 }
+  - { from: critique, to: finalize }
