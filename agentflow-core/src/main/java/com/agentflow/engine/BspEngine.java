@@ -319,6 +319,19 @@ public final class BspEngine {
         return -1;
     }
 
+    /** v2 循环：判断已走边列表里是否含回边（loop 边）决策——恢复期轮次转换检测用。 */
+    private static boolean hasLoopDecision(List<String> takenEdges, WorkflowDefinition def) {
+        if (def.edges() == null) {
+            return false;
+        }
+        for (EdgeDefinition e : def.edges()) {
+            if (e.loop() && takenEdges.contains(EdgeDefinition.edgeKey(e.from(), e.to()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * 崩溃恢复 + 续跑入口（U5 KTD-3 Recovery，P0 修复 ADV-1/ADV-2 的消费端）。
      *
@@ -377,16 +390,28 @@ public final class BspEngine {
             applyReplayOutput(context, replay, def, reducer);
         }
 
-        // Step 3: 从 nextSuperStep 起跑剩余 super-step
+        // Step 3: 重建 round 维度 + 轮次转换检测
         List<SuperStep> allSteps = buildSuperSteps(layerer.computeSuperSteps(def));
-        List<SuperStep> remaining = allSteps.subList(state.nextSuperStep(), allSteps.size());
-
         CheckpointManager cp = recovery.checkpointManager();
 
-        // v2 条件分支：重建可达集 = 源节点 ∪ {已走边目标}。已走边 = 持久化路由决策（步骤 0..nextSuperStep-1）
+        int round = state.round();
+        int crashLayerStep = state.nextSuperStep();
+        // 轮次转换检测：最新 barrier 是「最后一层」且该轮回边命中 → 崩溃在轮边界，进入下一轮从层 0 续跑
+        if (crashLayerStep >= allSteps.size()) {
+            if (hasLoopDecision(cp.findRoutingDecisions(workflowId, round), def)) {
+                round++;
+                crashLayerStep = 0;
+                log.info("恢复 wf={}: 轮边界回边命中，进入下一轮 round={} 从层 0 续跑", workflowId, round);
+            } else {
+                crashLayerStep = 0; // 无回边且越界（理论不应发生），保守从层 0 续跑
+            }
+        }
+        Set<String> excluded = (round == state.round()) ? state.completedNodeIds() : Set.of();
+
+        // v2 条件分支/循环：重建可达集 = 源节点 ∪ {已走边目标}。已走边 = 当前 round 持久化路由决策
         // + 崩溃层已完成节点的路由重算（其输出在 node 级 checkpoint，路由是输出的确定性函数）。
-        List<String> takenEdges = new ArrayList<>(cp.findRoutingDecisions(workflowId));
-        for (NodeOutputStore n : cp.findCompletedNodes(workflowId, state.nextSuperStep())) {
+        List<String> takenEdges = new ArrayList<>(cp.findRoutingDecisions(workflowId, round));
+        for (NodeOutputStore n : cp.findCompletedNodes(workflowId, round, crashLayerStep)) {
             try {
                 // 恢复期 inputs 不可得（原入参未持久化），传空 Map；context 用重建后的 channel 快照
                 for (EdgeDefinition e : resolveTakenEdges(n.nodeId(), n.output(), context, Map.of(), def)) {
@@ -399,17 +424,43 @@ public final class BspEngine {
         Set<String> active = computeReachable(allSteps.get(0).nodeIds(), dag, def, takenEdges);
         Set<String> onErrorActivated = rebuildOnErrorActivated(def, takenEdges);
 
+        int maxIterations = maxIterationsOf(def);
         ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
         NodeExecutor nodeExecutor = new NodeExecutor(agentResolver, executor);
         Instant workflowStart = Instant.now();
         boolean outcomeRecorded = false; // U7 指标：兜底防漏记/防双记
         try {
             cp.updateStatus(workflowId, WorkflowStatus.RUNNING);
-            // U4：恢复路径先以单轮续跑（round=0、nextActive 空）；U6 补 round 重建 + 轮次循环
-            for (SuperStep step : remaining) {
-                runStep(step, active, new HashSet<>(), state.completedNodeIds(), state.nextSuperStep(), 0,
-                        Map.of(), context, dag, def, reducer, cp, workflowId, nodeExecutor, executor, workflowStart,
-                        trace, budget, onErrorActivated, takenEdges);
+            // v2 循环：恢复轮（currentRound == round）从 crashLayerStep 起跑（剔除已完成节点），
+            // 后续轮从层 0 完整遍历；每轮结束 nextActive 非空则 round++ 继续迭代。
+            int currentRound = round;
+            while (true) {
+                Set<String> nextActive = new HashSet<>();
+                int startLayer = (currentRound == round) ? crashLayerStep : 0;
+                Set<String> excludeThisRound = (currentRound == round) ? excluded : Set.of();
+                int crashLayer = (currentRound == round) ? crashLayerStep : -1;
+                for (int i = startLayer; i < allSteps.size(); i++) {
+                    SuperStep step = allSteps.get(i);
+                    runStep(step, active, nextActive, excludeThisRound, crashLayer, currentRound,
+                            Map.of(), context, dag, def, reducer, cp, workflowId, nodeExecutor, executor,
+                            workflowStart, trace, budget, onErrorActivated, takenEdges);
+                }
+                if (trace != null) {
+                    trace.recordRound(currentRound);
+                }
+                if (nextActive.isEmpty()) {
+                    break;
+                }
+                currentRound++;
+                if (maxIterations >= 0 && currentRound >= maxIterations) {
+                    throw new WorkflowExecutionException(-1, List.of(
+                            new FatalException("迭代超限: 达到 max_iterations=" + maxIterations)));
+                }
+                if (currentRound >= MAX_TOTAL_ROUNDS) {
+                    throw new WorkflowExecutionException(-1, List.of(
+                            new FatalException("迭代超限(全局): 达到 maxTotalRounds=" + MAX_TOTAL_ROUNDS)));
+                }
+                active = nextActive;
             }
             cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
             if (trace != null) {

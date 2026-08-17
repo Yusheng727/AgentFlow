@@ -68,21 +68,24 @@ public final class RecoveryProtocol {
         // Step 1: 查找最新已完成的 barrier checkpoint
         Optional<BarrierCheckpoint> latestOpt = checkpointManager.findLatestBarrier(workflowId);
 
+        int round;
         int nextSuperStep;
         Map<String, Object> channelSnapshot;
 
         if (latestOpt.isPresent()) {
             BarrierCheckpoint latest = latestOpt.get();
-            // barrier 到 step=k → 下一个待执行是 step=k+1
+            // barrier 到 (round, step=k) → 下一个待执行是 (round, step=k+1)
+            round = latest.round();
             nextSuperStep = latest.superStep() + 1;
             channelSnapshot = new HashMap<>(latest.channelValues());
-            log.debug("恢复 wf={}: 最新 barrier step={}, 下一 super-step={}",
-                    workflowId, latest.superStep(), nextSuperStep);
+            log.debug("恢复 wf={}: 最新 barrier round={} step={}, 下一 super-step={}",
+                    workflowId, round, latest.superStep(), nextSuperStep);
         } else {
-            // 从未 barrier 过 → 从 step=0 开始，channel 为空
+            // 从未 barrier 过 → 从 round 0、step=0 开始，channel 为空
+            round = 0;
             nextSuperStep = 0;
             channelSnapshot = new HashMap<>();
-            log.debug("恢复 wf={}: 无 barrier checkpoint，从 super-step 0 开始", workflowId);
+            log.debug("恢复 wf={}: 无 barrier checkpoint，从 round 0 super-step 0 开始", workflowId);
         }
 
         // Step 2: stray 记录防护（P0 修复 ADV-2）——查工作流状态
@@ -94,13 +97,13 @@ public final class RecoveryProtocol {
             // 安全策略：崩溃层整体重跑——宁可 LLM 重复计费（R3 软约束），不换错误结果（正确性硬约束）。
             log.warn("恢复 wf={}: 工作流状态=FAILED（abort），崩溃层 step={} 整体重跑（忽略 stray COMPLETED）",
                     workflowId, nextSuperStep);
-            return new ExecutionState(workflowId, nextSuperStep, channelSnapshot, Set.of(), List.of());
+            return new ExecutionState(workflowId, round, nextSuperStep, channelSnapshot, Set.of(), List.of());
         }
 
         // Step 3: 查询崩溃 super-step（= nextSuperStep）中已完成的节点级 checkpoint
         // 🔑 查询的是 nextSuperStep 本身（崩溃层），不是 nextSuperStep-1（已 barrier 层）
         List<NodeOutputStore> completedNodes = checkpointManager.findCompletedNodes(
-                workflowId, nextSuperStep);
+                workflowId, round, nextSuperStep);
 
         // Step 4: 构建已完成节点集合 + 重放输出（P0 修复 ADV-1）
         // 双重保护：status=COMPLETED（已在 SQL/查询层过滤） + output 非空
@@ -122,6 +125,6 @@ public final class RecoveryProtocol {
                 workflowId, nextSuperStep, completedNodeIds.size(), replayOutputs.size(),
                 channelSnapshot.keySet());
 
-        return new ExecutionState(workflowId, nextSuperStep, channelSnapshot, completedNodeIds, replayOutputs);
+        return new ExecutionState(workflowId, round, nextSuperStep, channelSnapshot, completedNodeIds, replayOutputs);
     }
 }

@@ -31,6 +31,7 @@ import java.util.Set;
  */
 public record ExecutionState(
         String workflowId,
+        int round,
         int nextSuperStep,
         Map<String, Object> channelSnapshot,
         Set<String> completedNodeIds,
