@@ -237,16 +237,7 @@ public final class BspEngine {
                     break; // 本轮无回边命中 → 收敛
                 }
                 round++;
-                if (maxIterations >= 0 && round >= maxIterations) {
-                    // 回边命中达 max_iterations 仍未退出 → 超限（诊断「迭代超限」）
-                    throw new WorkflowExecutionException(-1, List.of(
-                            new FatalException("迭代超限: 达到 max_iterations=" + maxIterations)));
-                }
-                if (round >= MAX_TOTAL_ROUNDS) {
-                    // 引擎全局 hard stop（纵深防御，防未声明上界/逻辑 bug 导致的死循环）
-                    throw new WorkflowExecutionException(-1, List.of(
-                            new FatalException("迭代超限(全局): 达到 maxTotalRounds=" + MAX_TOTAL_ROUNDS)));
-                }
+                checkIterationCap(round, maxIterations);
                 active = nextActive;
             }
             if (trace != null) {
@@ -330,6 +321,18 @@ public final class BspEngine {
             }
         }
         return false;
+    }
+
+    /** v2 循环：迭代轮次超限检查（per-loop max_iterations + 引擎 maxTotalRounds 双保险，execute/recover 共享）。 */
+    private static void checkIterationCap(int round, int maxIterations) {
+        if (maxIterations >= 0 && round >= maxIterations) {
+            throw new WorkflowExecutionException(-1, List.of(
+                    new FatalException("迭代超限: 达到 max_iterations=" + maxIterations)));
+        }
+        if (round >= MAX_TOTAL_ROUNDS) {
+            throw new WorkflowExecutionException(-1, List.of(
+                    new FatalException("迭代超限(全局): 达到 maxTotalRounds=" + MAX_TOTAL_ROUNDS)));
+        }
     }
 
     /**
@@ -452,14 +455,7 @@ public final class BspEngine {
                     break;
                 }
                 currentRound++;
-                if (maxIterations >= 0 && currentRound >= maxIterations) {
-                    throw new WorkflowExecutionException(-1, List.of(
-                            new FatalException("迭代超限: 达到 max_iterations=" + maxIterations)));
-                }
-                if (currentRound >= MAX_TOTAL_ROUNDS) {
-                    throw new WorkflowExecutionException(-1, List.of(
-                            new FatalException("迭代超限(全局): 达到 maxTotalRounds=" + MAX_TOTAL_ROUNDS)));
-                }
+                checkIterationCap(currentRound, maxIterations);
                 active = nextActive;
             }
             cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
