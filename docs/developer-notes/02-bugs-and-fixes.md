@@ -398,3 +398,23 @@ v1 多出边 = 并行 fan-out；v2 一个节点一旦有 `when` 边，其无条�
 ### 坑：record 加字段破坏向后兼容（Snapshot 6-arg → 8-arg）
 
 `ExecutionTrace.Snapshot` 从 6 组件加 `routingDecisions`/`completedViaOnError` 变 8 组件，规范构造器签名随之变，api 测试里 `new Snapshot(6 args)` 直接 `NoSuchMethodError`。解法：补一个 6-arg 便捷构造委托到规范构造（`routingDecisions=List.of()`, `completedViaOnError=false`）。**教训**：Java record 加组件 = 破坏所有外部构造点，凡是跨模块被消费的 record 都要补便捷构造（或干脆用显式 class）。
+
+---
+
+## 2026-08-17 — 档 A 真 PG verify 暴露的两处测试环境差异缺陷
+
+> 背景：本地起 `postgres:16-alpine` 容器实跑 `mvn verify`，`PostgresCheckpointManagerIT` 第一次真正连上持久化 PG（此前本地无 PG 跳过、CI 每次全新容器）。两处缺陷都是「测试环境 vs 生产环境」差异才现形——mock/H2/CI 全新容器永远发现不了，只有持久化真 PG 实跑暴露。
+
+### Bug：集成测试数据污染（IT 不隔离，真 PG 持久化残留互渗）
+
+- **现象**：`PostgresCheckpointManagerIT.listByCreatedByAgainstRealPostgres` 期望 2 条，实得 3 条——多出 `it-all-a`（另一测试 `listWithNullCreatedByReturnsAllOnRealPostgres` 创建）。
+- **根因**：真 PG 数据持久化（pg-data 卷），测试方法间不清理，`it-all-a`（createdBy=it-creator）残留，污染 `listByCreatedBy("it-creator")` 的过滤断言。H2 内存库/CI 全新容器每次拿到干净库，永远暴露不了。
+- **修复**：`@BeforeEach` 按 `it-%` 前缀清理 4 张关联表（`workflow_routing_decisions`/`workflow_checkpoints`/`workflow_node_outputs`/`workflow_executions`，先子表后父表；子表无外键需显式删）。
+- **教训**：跑真持久化中间件的 IT，必须每个测试前清理自己的测试数据（`@BeforeEach` 比 `@AfterEach` 更防御——能扛住上次崩溃残留）。"跳过就算绿"的 IT 可能从没真正验证过代码。
+
+### Bug：H2 排序 flaky（`now()` 毫秒碰撞让 ORDER BY 不确定）
+
+- **现象**：`PostgresCheckpointManagerTest` 两个倒序断言偶发翻转（期望 `[wf-beta, wf-alpha]`，实得 `[wf-alpha, wf-beta]`），run 1 过 run 2 挂。
+- **根因**：测试注释自认"created_at 用默认 now()，靠插入先后自然形成倒序"——假设插入顺序 = 时间顺序。H2 `now()` 毫秒精度，快速连续插入同时间戳 → `ORDER BY created_at DESC` 遇相等值顺序不确定。
+- **修复**：`insert()` 显式传 `secondsAgo`，`created_at = DATEADD('SECOND', ?, CURRENT_TIMESTAMP)` 确定性错开时间戳，倒序断言不再碰运气。
+- **教训**：断言依赖 DB 自动时间戳排序 = 埋 flaky。要么显式控制排序键，要么断言用 `containsExactlyInAnyOrder`（但后者就测不到排序语义了）。

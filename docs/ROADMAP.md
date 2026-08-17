@@ -1,7 +1,7 @@
 # AgentFlow v1 交付状态 · 剩余工作 · v2 路线图
 
 > 本文档是 2026-08-07 对 v1 的交付盘点与 v2 边界的一手来源，供接手/面试口径自洽。
-> 更新日期：2026-08-07（2026-08-10 更新：WorkflowSubmissionGuard + per-workflow budget 已交付，见档 B；2026-08-14 更新：档 A Grafana/Prometheus/Kafka 环境落地已部署验证，见档 A）。计划权威件：`docs/plans/agentflow/`（本文档不替代 plan，只做状态与路线的快照）。
+> 更新日期：2026-08-07（2026-08-10 更新：WorkflowSubmissionGuard + per-workflow budget 已交付，见档 B；2026-08-14 更新：档 A Grafana/Prometheus/Kafka 环境落地已部署验证，见档 A；2026-08-17 更新：真 PG `verify` 实跑绿，档 A 全闭环）。计划权威件：`docs/plans/agentflow/`（本文档不替代 plan，只做状态与路线的快照）。
 
 ---
 
@@ -26,7 +26,7 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 
 ### 档 A — 需环境（Deferred，代码/IT 已就位，只差实际环境）
 - **Grafana 真实部署验证**：✅ **已交付**（2026-08-14，`54e5415`）——`docker-compose.yml` 加 `prometheus`+`grafana` 服务（`--profile observability`）+ `deploy/prometheus/prometheus.yml` + `deploy/grafana/provisioning/`（datasource uid=`DS_PROMETHEUS` 对齐模板变量 + dashboard 源文件挂载自动加载，不复制不漂移）；本机 Docker 实跑 5 容器健康 + Grafana datasource/dashboard 自动装配（见 `docs/GRAFANA.md`）。
-- **真 PG `verify` 实跑绿**：`PostgresCheckpointManagerIT` 已写（Failsafe，CI 有真 PG 全跑 / 本地无 PG 跳过）。需 CI 回执或本地起 PG 实跑，顺带验证真 PG 下 listByCreatedBy / diagnosis 端到端。
+- **真 PG `verify` 实跑绿**：✅ **已交付**（2026-08-17）——本地起 `postgres:16-alpine` 容器，全量 `mvn verify` 11 模块绿，`PostgresCheckpointManagerIT` **真 PG 实跑**（3 用例非跳过，Flyway 4 迁移）。真 PG 暴露两处测试环境差异缺陷并修复：① IT 数据污染（pg-data 卷持久化导致测试间残留互渗 → `@BeforeEach` 按 `it-%` 前缀清理 4 表）② H2 排序 flaky（`now()` 毫秒碰撞致 `ORDER BY created_at DESC` 不确定 → `insert()` 显式 `secondsAgo` 错开时间戳）。顺带验证真 PG 下 listByCreatedBy / checkpoint 往返端到端。
 
 ### 档 B — 真实未落地的 v1 代码缺口（可立刻做）
 | 项 | 引用 | 现状 |
@@ -68,6 +68,6 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 ## 5. 建议的 v1 收尾优先级
 
 1. **WorkflowSubmissionGuard**（档 B，真安全缺口）—— ✅ 已交付（2026-08-10，`a37d9dc`，见档 B 表）。
-2. Grafana / 真 PG 部署验证（档 A）—— Grafana 已交付（2026-08-14，`54e5415`）；真 PG `verify` 实跑仍等 CI/环境。
+2. Grafana / 真 PG 部署验证（档 A）—— ✅ 均已交付：Grafana（2026-08-14，`54e5415`）；真 PG `verify` 实跑绿（2026-08-17，本地 PG 容器，IT 真跑非跳过）。
 3. ~~R20 archetypes、Reducer 冲突演练~~（档 B，2026-08-10 决策明确不做）→ **档 B 已全部闭环**。
 4. 档 C 面试口径 → 定稿一份 30s/5min 自述稿附到 `07-sources-revision-interview.md` 或本仓库面试文档（待定）。

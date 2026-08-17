@@ -50,9 +50,10 @@ class PostgresCheckpointManagerTest {
     @Test
     @DisplayName("按 created_by 过滤 + created_at 倒序 + status 归一")
     void listFiltersByCreatedByAndSortsDesc() {
-        insert("wf-alpha", "supplier", "creator-A", "PENDING");
-        insert("wf-beta", "market", "creator-A", "RUNNING");
-        insert("wf-gamma", "risk", "creator-B", "SUCCESS");
+        // created_at 显式错开（beta 最新 → 倒序在前），避免 H2 now() 同毫秒碰撞让 ORDER BY 不稳定（flaky）
+        insert("wf-alpha", "supplier", "creator-A", "PENDING", 2);
+        insert("wf-beta", "market", "creator-A", "RUNNING", 1);
+        insert("wf-gamma", "risk", "creator-B", "SUCCESS", 0);
 
         List<WorkflowExecutionRecord> mine =
                 jdbc.query(PostgresCheckpointManager.SELECT_EXECUTION_RECORDS_BY_CREATOR,
@@ -73,8 +74,8 @@ class PostgresCheckpointManagerTest {
     @DisplayName("created_by 为空（不过滤）→ 返回全部，仍按创建时间倒序")
     void listWithoutFilterReturnsAllSortedDesc() {
         // U5 早期实例可能无 created_by
-        insert("wf-a", "w1", "creator-A", "PENDING");
-        insert("wf-b", "w2", null, "SUCCESS");
+        insert("wf-a", "w1", "creator-A", "PENDING", 1);
+        insert("wf-b", "w2", null, "SUCCESS", 0);
 
         List<WorkflowExecutionRecord> all =
                 jdbc.query(PostgresCheckpointManager.SELECT_EXECUTION_RECORDS,
@@ -88,7 +89,7 @@ class PostgresCheckpointManagerTest {
     @Test
     @DisplayName("无匹配创建者 → 返回空列表")
     void listWithUnknownCreatedByReturnsEmpty() {
-        insert("wf-a", "w1", "creator-A", "PENDING");
+        insert("wf-a", "w1", "creator-A", "PENDING", 0);
 
         List<WorkflowExecutionRecord> none =
                 jdbc.query(PostgresCheckpointManager.SELECT_EXECUTION_RECORDS_BY_CREATOR,
@@ -108,13 +109,13 @@ class PostgresCheckpointManagerTest {
 
     // ──────────────────────── 测试辅助 ────────────────────────
 
-    private void insert(String id, String name, String createdBy, String status) {
-        // created_at 用默认 now()，靠插入先后自然形成倒序
+    private void insert(String id, String name, String createdBy, String status, int secondsAgo) {
+        // created_at 显式 = CURRENT_TIMESTAMP - secondsAgo 秒，保证时间戳错开、倒序断言确定
         jdbc.update("""
-                        INSERT INTO workflow_executions (id, workflow_name, status, created_by)
-                        VALUES (?, ?, ?, ?)
+                        INSERT INTO workflow_executions (id, workflow_name, status, created_by, created_at)
+                        VALUES (?, ?, ?, ?, DATEADD('SECOND', ?, CURRENT_TIMESTAMP))
                         """,
-                id, name, status, createdBy);
+                id, name, status, createdBy, -secondsAgo);
     }
 
     private static DataSource h2DataSource() {

@@ -10,6 +10,7 @@ import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.DriverManager;
+import java.sql.Statement;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -48,6 +49,22 @@ class PostgresCheckpointManagerIT {
         // 每次构造跑 Flyway 迁移（幂等：仅执行未应用的版本；CI 每次全新容器）
         DataSource ds = new DriverManagerDataSource(URL, USER, PASS);
         cm = new PostgresCheckpointManager(ds);
+    }
+
+    @BeforeEach
+    void cleanItTestData() {
+        // 真 PG 是持久化的（pg-data 卷），测试间 / 多次 verify 的数据会残留并相互污染——
+        // H2 内存库 / CI 全新容器每次拿到干净库，永远暴露不了；真实持久化 PG 实跑才见。
+        // 按 it-% 前缀清理本类测试数据（先子表后父表，子表无外键需显式删）。
+        try (Connection c = DriverManager.getConnection(URL, USER, PASS);
+             Statement s = c.createStatement()) {
+            s.executeUpdate("DELETE FROM workflow_routing_decisions WHERE workflow_id LIKE 'it-%'");
+            s.executeUpdate("DELETE FROM workflow_checkpoints WHERE workflow_id LIKE 'it-%'");
+            s.executeUpdate("DELETE FROM workflow_node_outputs WHERE workflow_id LIKE 'it-%'");
+            s.executeUpdate("DELETE FROM workflow_executions WHERE id LIKE 'it-%'");
+        } catch (Exception e) {
+            throw new RuntimeException("清理集成测试数据失败", e);
+        }
     }
 
     @Test
