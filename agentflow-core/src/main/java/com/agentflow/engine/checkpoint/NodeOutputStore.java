@@ -21,6 +21,7 @@ import java.time.Instant;
  */
 public record NodeOutputStore(
         String workflowId,
+        int round,
         int superStep,
         String nodeId,
         AgentOutput output,
@@ -38,19 +39,35 @@ public record NodeOutputStore(
         }
     }
 
-    /** 创建 IN_PROGRESS 记录（output 为空）。 */
+    /** 创建 IN_PROGRESS 记录（output 为空）。round=0 便捷构造向后兼容无回边工作流。 */
     public static NodeOutputStore inProgress(String workflowId, int superStep, String nodeId) {
-        return new NodeOutputStore(workflowId, superStep, nodeId, null, NodeStatus.IN_PROGRESS, null, null);
+        return inProgress(workflowId, 0, superStep, nodeId);
     }
 
-    /** 创建 COMPLETED 记录。 */
+    /** 创建 IN_PROGRESS 记录（带 round，v2 循环）。 */
+    public static NodeOutputStore inProgress(String workflowId, int round, int superStep, String nodeId) {
+        return new NodeOutputStore(workflowId, round, superStep, nodeId, null, NodeStatus.IN_PROGRESS, null, null);
+    }
+
+    /** 创建 COMPLETED 记录。round=0 便捷构造向后兼容无回边工作流。 */
     public static NodeOutputStore completed(String workflowId, int superStep, String nodeId,
                                             AgentOutput output, Integer tokensConsumed, Instant completedAt) {
-        return new NodeOutputStore(workflowId, superStep, nodeId, output, NodeStatus.COMPLETED, tokensConsumed, completedAt);
+        return completed(workflowId, 0, superStep, nodeId, output, tokensConsumed, completedAt);
     }
 
-    /** 创建 FAILED 记录。 */
+    /** 创建 COMPLETED 记录（带 round，v2 循环）。 */
+    public static NodeOutputStore completed(String workflowId, int round, int superStep, String nodeId,
+                                            AgentOutput output, Integer tokensConsumed, Instant completedAt) {
+        return new NodeOutputStore(workflowId, round, superStep, nodeId, output, NodeStatus.COMPLETED, tokensConsumed, completedAt);
+    }
+
+    /** 创建 FAILED 记录。round=0 便捷构造向后兼容无回边工作流。 */
     public static NodeOutputStore failed(String workflowId, int superStep, String nodeId) {
-        return new NodeOutputStore(workflowId, superStep, nodeId, null, NodeStatus.FAILED, null, null);
+        return failed(workflowId, 0, superStep, nodeId);
+    }
+
+    /** 创建 FAILED 记录（带 round，v2 循环）。 */
+    public static NodeOutputStore failed(String workflowId, int round, int superStep, String nodeId) {
+        return new NodeOutputStore(workflowId, round, superStep, nodeId, null, NodeStatus.FAILED, null, null);
     }
 }

@@ -19,10 +19,17 @@ import java.util.Map;
  */
 public record BarrierCheckpoint(
         String workflowId,
+        int round,
         int superStep,
         Map<String, Object> channelValues,
         Instant completedAt
 ) {
+
+    /** 便捷构造：round=0（向后兼容无回边工作流）。 */
+    public BarrierCheckpoint(String workflowId, int superStep, Map<String, Object> channelValues, Instant completedAt) {
+        this(workflowId, 0, superStep, channelValues, completedAt);
+    }
+
     public BarrierCheckpoint {
         if (channelValues == null) {
             channelValues = Map.of();

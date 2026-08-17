@@ -45,14 +45,21 @@ public class DiagnosisService {
 
         int failedCount = (int) nodes.stream().filter(n -> n.status() == NodeTrace.Status.FAILED).count();
 
+        // 0. 工作流级失败原因（v2 循环：迭代超限）
+        if (trace.workflowError() != null && trace.workflowError().contains("迭代超限")) {
+            findings.add(new Diagnosis("迭代超限", null,
+                    "工作流循环达到迭代上限仍未退出：" + trace.workflowError(),
+                    "增大 max_iterations 或检查回边 when 退出条件是否正确命中"));
+        }
+
         // 1. 连续超时
         findTimeoutFailures(nodes, findings);
         // 2. Token 异常消耗
         findTokenAnomalies(nodes, findings);
         // 3-4. SpEL / channel 错误
         findErrorPatterns(nodes, findings);
-        // 5. 节点重复
-        findDuplicateNodes(nodes, findings);
+        // 5. 节点重复（循环工作流 maxRound > 0 时节点重复执行是合法迭代，跳过检测）
+        findDuplicateNodes(nodes, findings, trace.maxRound());
 
         return new DiagnosisReport(trace.workflowId(), nodes.size(), failedCount, findings);
     }
@@ -107,7 +114,10 @@ public class DiagnosisService {
         }
     }
 
-    private void findDuplicateNodes(List<NodeTrace> nodes, List<Diagnosis> findings) {
+    private void findDuplicateNodes(List<NodeTrace> nodes, List<Diagnosis> findings, int maxRound) {
+        if (maxRound > 0) {
+            return; // 循环工作流（迭代轮次 > 0）：节点重复执行是合法迭代（每轮一次），不误判为异常
+        }
         Map<String, Long> counts = nodes.stream()
                 .filter(n -> n.status() == NodeTrace.Status.SUCCESS)
                 .collect(Collectors.groupingBy(NodeTrace::nodeId, Collectors.counting()));

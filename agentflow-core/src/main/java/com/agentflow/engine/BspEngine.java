@@ -71,6 +71,9 @@ public final class BspEngine {
 
     private static final Logger log = LoggerFactory.getLogger(BspEngine.class);
 
+    /** v2 循环：引擎级迭代总轮次硬上界（纵深防御，防未声明上界/逻辑 bug 导致的死循环）。 */
+    private static final int MAX_TOTAL_ROUNDS = 1000;
+
     private final DAGLayerer layerer;
     /** U4 容错：可空（null = 不重试，backward compat with U2）。 */
     private final RetryPolicy retryPolicy;
@@ -217,9 +220,34 @@ public final class BspEngine {
             Set<String> onErrorActivated = new HashSet<>();
             // v2 条件分支：已走边（from→to，累计），供 checkpoint 持久化路由决策（恢复期重算 SKIPPED）
             List<String> takenEdges = new ArrayList<>();
-            for (SuperStep step : steps) {
-                runStep(step, active, Set.of(), -1, effInputs, context, dag, def, reducer, cp, workflowId,
-                        nodeExecutor, executor, workflowStart, trace, budget, onErrorActivated, takenEdges);
+            // v2 循环：外层迭代轮次循环。active = 本轮前向传播；nextActive = 回边目标累积（下一轮起点）。
+            // 无回边工作流：首轮结束 nextActive 恒空 → 单轮收敛，行为与 v2 一致（R11）。
+            int round = 0;
+            int maxIterations = maxIterationsOf(def);
+            while (true) {
+                Set<String> nextActive = new HashSet<>();
+                for (SuperStep step : steps) {
+                    runStep(step, active, nextActive, Set.of(), -1, round, effInputs, context, dag, def, reducer, cp,
+                            workflowId, nodeExecutor, executor, workflowStart, trace, budget, onErrorActivated, takenEdges);
+                }
+                if (trace != null) {
+                    trace.recordRound(round);
+                }
+                if (nextActive.isEmpty()) {
+                    break; // 本轮无回边命中 → 收敛
+                }
+                round++;
+                if (maxIterations >= 0 && round >= maxIterations) {
+                    // 回边命中达 max_iterations 仍未退出 → 超限（诊断「迭代超限」）
+                    throw new WorkflowExecutionException(-1, List.of(
+                            new FatalException("迭代超限: 达到 max_iterations=" + maxIterations)));
+                }
+                if (round >= MAX_TOTAL_ROUNDS) {
+                    // 引擎全局 hard stop（纵深防御，防未声明上界/逻辑 bug 导致的死循环）
+                    throw new WorkflowExecutionException(-1, List.of(
+                            new FatalException("迭代超限(全局): 达到 maxTotalRounds=" + MAX_TOTAL_ROUNDS)));
+                }
+                active = nextActive;
             }
             if (trace != null) {
                 if (!onErrorActivated.isEmpty()) {
@@ -234,6 +262,7 @@ public final class BspEngine {
         } catch (WorkflowExecutionException we) {
             if (trace != null) {
                 trace.markCompleted(ExecutionTrace.Status.FAILED);
+                trace.recordWorkflowError(describeFailure(we));
             }
             recordWorkflowOutcome(AgentFlowMetrics.STATUS_FAILED);
             outcomeRecorded = true;
@@ -275,6 +304,19 @@ public final class BspEngine {
             return null;
         }
         return new WorkflowBudget(meta.budgetTokens(), meta.budgetCost());
+    }
+
+    /** v2 循环：取回边的 max_iterations（单回边场景取第一个 loop 边的上界）；无回边 → -1（不设上界）。 */
+    private static int maxIterationsOf(WorkflowDefinition def) {
+        if (def.edges() == null) {
+            return -1;
+        }
+        for (EdgeDefinition e : def.edges()) {
+            if (e.loop() && e.maxIterations() != null) {
+                return e.maxIterations();
+            }
+        }
+        return -1;
     }
 
     /**
@@ -347,8 +389,8 @@ public final class BspEngine {
         for (NodeOutputStore n : cp.findCompletedNodes(workflowId, state.nextSuperStep())) {
             try {
                 // 恢复期 inputs 不可得（原入参未持久化），传空 Map；context 用重建后的 channel 快照
-                for (String target : resolveTakenTargets(n.nodeId(), n.output(), context, Map.of(), def)) {
-                    takenEdges.add(EdgeDefinition.edgeKey(n.nodeId(), target));
+                for (EdgeDefinition e : resolveTakenEdges(n.nodeId(), n.output(), context, Map.of(), def)) {
+                    takenEdges.add(EdgeDefinition.edgeKey(e.from(), e.to()));
                 }
             } catch (FatalException fe) {
                 log.warn("恢复 wf={}: 崩溃层已完成节点 {} 路由重算失败: {}", workflowId, n.nodeId(), fe.getMessage());
@@ -363,10 +405,11 @@ public final class BspEngine {
         boolean outcomeRecorded = false; // U7 指标：兜底防漏记/防双记
         try {
             cp.updateStatus(workflowId, WorkflowStatus.RUNNING);
+            // U4：恢复路径先以单轮续跑（round=0、nextActive 空）；U6 补 round 重建 + 轮次循环
             for (SuperStep step : remaining) {
-                runStep(step, active, state.completedNodeIds(), state.nextSuperStep(), Map.of(), context, dag, def,
-                        reducer, cp, workflowId, nodeExecutor, executor, workflowStart, trace, budget,
-                        onErrorActivated, takenEdges);
+                runStep(step, active, new HashSet<>(), state.completedNodeIds(), state.nextSuperStep(), 0,
+                        Map.of(), context, dag, def, reducer, cp, workflowId, nodeExecutor, executor, workflowStart,
+                        trace, budget, onErrorActivated, takenEdges);
             }
             cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
             if (trace != null) {
@@ -382,6 +425,7 @@ public final class BspEngine {
         } catch (WorkflowExecutionException we) {
             if (trace != null) {
                 trace.markCompleted(ExecutionTrace.Status.FAILED);
+                trace.recordWorkflowError(describeFailure(we));
             }
             recordWorkflowOutcome(AgentFlowMetrics.STATUS_FAILED);
             outcomeRecorded = true;
@@ -425,7 +469,7 @@ public final class BspEngine {
 
     private List<NodeResult> runSuperStep(SuperStep step, DAGraph dag, WorkflowContext snapshot,
                                           NodeExecutor nodeExecutor, CheckpointManager cp, String workflowId,
-                                          ExecutorService executor, Map<String, Object> inputs,
+                                          int round, ExecutorService executor, Map<String, Object> inputs,
                                           Instant workflowStart, ExecutionTrace trace, WorkflowBudget budget) {
         List<CompletableFuture<NodeResult>> futures = new ArrayList<>(step.nodeIds().size());
         for (String id : step.nodeIds()) {
@@ -444,7 +488,7 @@ public final class BspEngine {
                         // 节点级 checkpoint 失败不应崩溃工作流（U5 决定 fatal/non-fatal 策略）；
                         // 降级 warn，主结果保留——recovery 可能因此重跑该节点（LLM 重复计费风险由 U5 兜底）
                         try {
-                            cp.saveNodeOutput(workflowId, step.index(), id, s.output());
+                            cp.saveNodeOutput(workflowId, round, step.index(), id, s.output());
                         } catch (RuntimeException ce) {
                             log.warn("saveNodeOutput 失败 wf={} step={} node={}: {}",
                                     workflowId, step.index(), id, ce.toString());
@@ -499,11 +543,11 @@ public final class BspEngine {
      * 只跑可达节点；崩溃层（{@code crashLayerStep}）再剔除 {@code excludedNodeIds}（已完成节点，输出已重放）。
      * 顺序：过滤可达 → 标 SKIPPED → 并行执行 → 路由决策持久化 → barrier 落盘（路由先于 barrier，崩溃窗口不丢）。
      */
-    private void runStep(SuperStep step, Set<String> active, Set<String> excludedNodeIds, int crashLayerStep,
-                         Map<String, Object> inputs, WorkflowContext context, DAGraph dag, WorkflowDefinition def,
-                         ChannelReducer reducer, CheckpointManager cp, String workflowId, NodeExecutor nodeExecutor,
-                         ExecutorService executor, Instant workflowStart, ExecutionTrace trace, WorkflowBudget budget,
-                         Set<String> onErrorActivated, List<String> takenEdges) {
+    private void runStep(SuperStep step, Set<String> active, Set<String> nextActive, Set<String> excludedNodeIds,
+                         int crashLayerStep, int round, Map<String, Object> inputs, WorkflowContext context, DAGraph dag,
+                         WorkflowDefinition def, ChannelReducer reducer, CheckpointManager cp, String workflowId,
+                         NodeExecutor nodeExecutor, ExecutorService executor, Instant workflowStart, ExecutionTrace trace,
+                         WorkflowBudget budget, Set<String> onErrorActivated, List<String> takenEdges) {
         // 工作流总超时：super-step 间检查（超时则 abort，不推进下游）
         if (timeoutPolicy != null && timeoutPolicy.isWorkflowExceeded(workflowStart)) {
             throw new WorkflowExecutionException(step.index(),
@@ -517,7 +561,7 @@ public final class BspEngine {
         // v2 可观测：被剪枝（不可达）节点标记 SKIPPED
         markSkippedNodes(trace, step, activeInStep, dag);
         WorkflowContext snapshot = context.readOnlySnapshot();
-        List<NodeResult> results = runSuperStep(stepToRun, dag, snapshot, nodeExecutor, cp, workflowId,
+        List<NodeResult> results = runSuperStep(stepToRun, dag, snapshot, nodeExecutor, cp, workflowId, round,
                 executor, inputs, workflowStart, trace, budget);
         // U10 后续 #10：记录本 super-step 各节点所属层号（含被剪枝节点，供 UI 真实拓扑分组）
         recordSuperStepTrace(trace, step);
@@ -525,10 +569,10 @@ public final class BspEngine {
                 onErrorActivated, trace, takenEdges);
         active.addAll(onErrorTargets);
         // v2 条件分支：成功节点计算路由决策、激活后继（无分支命中 → Fatal → 工作流 FAILED）
-        updateReachability(results, active, def, step.index(), trace, takenEdges, context, inputs);
+        updateReachability(results, active, nextActive, def, step.index(), trace, takenEdges, context, inputs);
         // 先持久化路由决策、再写 barrier（崩溃窗口内路由已落盘，恢复不丢下游）
-        cp.saveRoutingDecisions(workflowId, step.index(), List.copyOf(takenEdges));
-        cp.saveBarrier(workflowId, step.index(), context);
+        cp.saveRoutingDecisions(workflowId, round, step.index(), List.copyOf(takenEdges));
+        cp.saveBarrier(workflowId, round, step.index(), context);
     }
 
     /** Barrier 阶段：按声明序合并成功节点输出；on_error 节点失败转兜底（激活目标、不 abort），
@@ -616,15 +660,19 @@ public final class BspEngine {
     }
 
     /** v2 条件分支：成功节点计算路由决策、激活后继节点 + 记录路由决策；无分支命中抛 WorkflowExecutionException。 */
-    private void updateReachability(List<NodeResult> results, Set<String> active,
+    private void updateReachability(List<NodeResult> results, Set<String> active, Set<String> nextActive,
                                     WorkflowDefinition def, int stepIndex, ExecutionTrace trace,
                                     List<String> takenEdges, WorkflowContext context, Map<String, Object> inputs) {
         for (NodeResult r : results) {
             if (r instanceof NodeResult.Success s) {
                 try {
-                    for (String target : resolveTakenTargets(s.nodeId(), s.output(), context, inputs, def)) {
-                        active.add(target);
-                        recordRouting(s.nodeId(), target, trace, takenEdges);
+                    for (EdgeDefinition taken : resolveTakenEdges(s.nodeId(), s.output(), context, inputs, def)) {
+                        if (taken.loop()) {
+                            nextActive.add(taken.to()); // 回边命中 → 目标进下一轮（不终结本轮前向传播）
+                        } else {
+                            active.add(taken.to()); // 前向/退出边 → 后继进本轮
+                        }
+                        recordRouting(s.nodeId(), taken.to(), trace, takenEdges);
                     }
                 } catch (FatalException fe) {
                     throw new WorkflowExecutionException(stepIndex, List.of(fe));
@@ -639,6 +687,15 @@ public final class BspEngine {
         if (trace != null) {
             trace.recordRoutingDecision(from, to);
         }
+    }
+
+    /** 提取工作流失败原因摘要（第一个 failure 的简短 message，供 DiagnosisService 识别「迭代超限」等）。 */
+    private static String describeFailure(WorkflowExecutionException we) {
+        if (we.failures() == null || we.failures().isEmpty()) {
+            return we.getMessage();
+        }
+        Throwable first = we.failures().get(0);
+        return first.getMessage() != null ? first.getMessage() : first.getClass().getSimpleName();
     }
 
     /** v2 on_error：从已走边重建「经 on_error 激活的目标集合」，恢复期级联守卫（review P1）。 */
@@ -704,12 +761,12 @@ public final class BspEngine {
     }
 
     /**
-     * v2 条件分支：计算节点完成后的路由决策，返回「已走」边的目标节点集合。
+     * v2 条件分支/循环：计算节点完成后的路由决策，返回「已走」的边（EdgeDefinition，含 loop 标记）。
      * 纯 fan-out（无 when 边）→ 所有出边都走（v1 语义）；路由节点（有 when 边）→ 按声明序取第一条 true，
-     * 否则默认边；无 when 命中且无默认边 → 抛 FatalException（无分支命中）。
+     * 否则默认边；无 when 命中且无默认边 → 抛 FatalException（无分支命中）。调用方按 edge.loop() 分派。
      */
-    private List<String> resolveTakenTargets(String nodeId, AgentOutput output, WorkflowContext context,
-                                             Map<String, Object> inputs, WorkflowDefinition def)
+    private List<EdgeDefinition> resolveTakenEdges(String nodeId, AgentOutput output, WorkflowContext context,
+                                                   Map<String, Object> inputs, WorkflowDefinition def)
             throws FatalException {
         List<EdgeDefinition> outgoing = def.edges() == null ? List.of()
                 : def.edges().stream().filter(e -> e.from().equals(nodeId)).toList();
@@ -723,17 +780,17 @@ public final class BspEngine {
             }
         }
         if (whenEdges.isEmpty()) {
-            return outgoing.stream().map(EdgeDefinition::to).toList();
+            return outgoing; // fan-out：所有出边（非 loop，fan-out 节点无 when 边）
         }
         Map<String, Object> outputMap = outputMap(output);
         Map<String, Object> contextMap = flattenContext(context);
         for (EdgeDefinition e : whenEdges) {
             if (predicateEvaluator.evaluate(e.when(), outputMap, contextMap, inputs)) {
-                return List.of(e.to());
+                return List.of(e); // 命中的边（可能是 loop 回边）
             }
         }
         if (defaultEdges.size() == 1) {
-            return List.of(defaultEdges.get(0).to());
+            return List.of(defaultEdges.get(0));
         }
         throw new FatalException("无分支命中: 节点 " + nodeId + " 的 when 谓词均未命中且无默认边");
     }

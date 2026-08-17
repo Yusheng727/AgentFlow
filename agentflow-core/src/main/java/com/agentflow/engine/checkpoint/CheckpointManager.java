@@ -50,8 +50,18 @@ public interface CheckpointManager {
     /** 持久化节点级 checkpoint（引擎在节点完成当下、barrier 前调用）。 */
     void saveNodeOutput(String workflowId, int superStep, String nodeId, AgentOutput output);
 
+    /** v2 循环：带 round 的重载。默认委托旧签名（round 忽略），实现类可 override 以按 (round, superStep) 持久化。 */
+    default void saveNodeOutput(String workflowId, int round, int superStep, String nodeId, AgentOutput output) {
+        saveNodeOutput(workflowId, superStep, nodeId, output);
+    }
+
     /** 持久化 barrier 级 checkpoint（引擎在 super-step barrier 成功合并后调用）。 */
     void saveBarrier(String workflowId, int superStep, WorkflowContext context);
+
+    /** v2 循环：带 round 的重载。默认委托旧签名（round 忽略），实现类可 override 以按 (round, superStep) 持久化。 */
+    default void saveBarrier(String workflowId, int round, int superStep, WorkflowContext context) {
+        saveBarrier(workflowId, superStep, context);
+    }
 
     // ────────────────────────── 查询（U5 新增） ──────────────────────────
 
@@ -74,6 +84,11 @@ public interface CheckpointManager {
      * @return COMPLETED 节点列表（可能为空）
      */
     List<NodeOutputStore> findCompletedNodes(String workflowId, int superStep);
+
+    /** v2 循环：带 round 的重载。默认委托旧签名（round 忽略），实现类可 override 以按 (round, superStep) 查询。 */
+    default List<NodeOutputStore> findCompletedNodes(String workflowId, int round, int superStep) {
+        return findCompletedNodes(workflowId, superStep);
+    }
 
     // ─────────────────── 工作流生命周期（U5 新增，U14 扩展） ───────────────────
 
@@ -146,11 +161,21 @@ public interface CheckpointManager {
     default void saveRoutingDecisions(String workflowId, int superStep, List<String> routingDecisions) {
     }
 
+    /** v2 循环：带 round 的重载。默认委托旧签名，实现类可 override 以按 round 存每轮已走边。 */
+    default void saveRoutingDecisions(String workflowId, int round, int superStep, List<String> routingDecisions) {
+        saveRoutingDecisions(workflowId, superStep, routingDecisions);
+    }
+
     /**
      * v2 条件分支：查最新持久化的路由决策（累计列表）。
      * 默认空列表（无条件分支的工作流无路由决策）。
      */
     default List<String> findRoutingDecisions(String workflowId) {
         return List.of();
+    }
+
+    /** v2 循环：带 round 的重载。默认委托旧签名（返回累计列表），实现类可 override 以按 round 查询。 */
+    default List<String> findRoutingDecisions(String workflowId, int round) {
+        return findRoutingDecisions(workflowId);
     }
 }

@@ -29,6 +29,10 @@ public final class ExecutionTrace {
     private final CopyOnWriteArrayList<String> routingDecisions = new CopyOnWriteArrayList<>();
     /** v2 on_error：是否经 on_error 兜底完成（区分「正常完成」与「兜底完成」三终态）。 */
     private volatile boolean completedViaOnError;
+    /** v2 循环：最大迭代轮次（默认 0，无回边工作流恒 0）。 */
+    private volatile int maxRound;
+    /** v2 循环/失败诊断：工作流级失败原因摘要（如「迭代超限」），供 DiagnosisService 识别。 */
+    private volatile String workflowError;
 
     public ExecutionTrace(String workflowId) {
         this.workflowId = workflowId;
@@ -83,6 +87,27 @@ public final class ExecutionTrace {
         this.completedViaOnError = true;
     }
 
+    /** v2 循环：记录迭代轮次（取最大，无回边工作流恒 0）。 */
+    public void recordRound(int round) {
+        if (round > this.maxRound) {
+            this.maxRound = round;
+        }
+    }
+
+    /** 最大迭代轮次（v2 循环）。 */
+    public int maxRound() {
+        return maxRound;
+    }
+
+    /** 记录工作流级失败原因（v2 循环：迭代超限 / 无分支命中等）。 */
+    public void recordWorkflowError(String error) {
+        this.workflowError = error;
+    }
+
+    public String workflowError() {
+        return workflowError;
+    }
+
     public String workflowId() {
         return workflowId;
     }
@@ -127,7 +152,7 @@ public final class ExecutionTrace {
     /** 不可变快照。 */
     public Snapshot snapshot() {
         return new Snapshot(workflowId, startTime, endTime, status,
-                List.copyOf(nodes), List.copyOf(routingDecisions), completedViaOnError, totalTokens());
+                List.copyOf(nodes), List.copyOf(routingDecisions), completedViaOnError, totalTokens(), maxRound, workflowError);
     }
 
     public enum Status {
@@ -143,12 +168,14 @@ public final class ExecutionTrace {
             List<NodeTrace> nodes,
             List<String> routingDecisions,
             boolean completedViaOnError,
-            long totalTokens
+            long totalTokens,
+            int maxRound,
+            String workflowError
     ) {
-        /** 便捷构造：无路由决策/兜底标志（向后兼容旧 6-arg 调用点，如 api 测试）。 */
+        /** 便捷构造：无路由决策/兜底标志/轮次/失败原因（向后兼容旧 6-arg 调用点，如 api 测试）。 */
         public Snapshot(String workflowId, Instant startTime, Instant endTime, Status status,
                         List<NodeTrace> nodes, long totalTokens) {
-            this(workflowId, startTime, endTime, status, nodes, List.of(), false, totalTokens);
+            this(workflowId, startTime, endTime, status, nodes, List.of(), false, totalTokens, 0, null);
         }
     }
 }

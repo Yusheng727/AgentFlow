@@ -229,6 +229,7 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                     Timestamp ts = rs.getTimestamp("completed_at");
                     return new NodeOutputStore(
                             rs.getString("workflow_id"),
+                            0, // round：U5 补 round 列持久化（当前恒 0 向后兼容）
                             rs.getInt("super_step"),
                             rs.getString("node_id"),
                             output,
