@@ -122,4 +122,102 @@ class SemanticValidatorTest {
                   - { from: A, to: C }
                 """)).doesNotThrowAnyException();
     }
+
+    // ========== v2 循环回边校验 ==========
+
+    @Test
+    @DisplayName("回边无 when → 拒绝（AE3）")
+    void loopWithoutWhenRejected() {
+        assertThatThrownBy(() -> parseAndValidate("""
+                nodes:
+                  - { id: draft, agent: a }
+                  - { id: critique, agent: b }
+                  - { id: finalize, agent: c }
+                edges:
+                  - { from: draft, to: critique }
+                  - { from: critique, to: draft, loop: true, max_iterations: 3 }
+                  - { from: critique, to: finalize }
+                """))
+                .isInstanceOf(WorkflowValidationException.class)
+                .hasMessageContaining("无条件回边");
+    }
+
+    @Test
+    @DisplayName("回边有 when 但无 max_iterations → 拒绝（AE4）")
+    void loopWithoutMaxIterationsRejected() {
+        assertThatThrownBy(() -> parseAndValidate("""
+                nodes:
+                  - { id: draft, agent: a }
+                  - { id: critique, agent: b }
+                  - { id: finalize, agent: c }
+                edges:
+                  - { from: draft, to: critique }
+                  - { from: critique, to: draft, when: "output.score < 0.8", loop: true }
+                  - { from: critique, to: finalize }
+                """))
+                .isInstanceOf(WorkflowValidationException.class)
+                .hasMessageContaining("无上限环");
+    }
+
+    @Test
+    @DisplayName("非回边带 max_iterations → 拒绝")
+    void nonLoopWithMaxIterationsRejected() {
+        assertThatThrownBy(() -> parseAndValidate("""
+                nodes:
+                  - { id: A, agent: a }
+                  - { id: B, agent: b }
+                edges:
+                  - { from: A, to: B, max_iterations: 3 }
+                """))
+                .isInstanceOf(WorkflowValidationException.class)
+                .hasMessageContaining("非回边");
+    }
+
+    @Test
+    @DisplayName("合法回边（when + max_iterations）+ 静态图无环 → 通过")
+    void validLoopAccepted() {
+        assertThatCode(() -> parseAndValidate("""
+                nodes:
+                  - { id: draft, agent: a }
+                  - { id: critique, agent: b }
+                  - { id: finalize, agent: c }
+                edges:
+                  - { from: draft, to: critique }
+                  - { from: critique, to: draft, when: "output.score < 0.8", loop: true, max_iterations: 3 }
+                  - { from: critique, to: finalize }
+                """)).doesNotThrowAnyException();
+    }
+
+    @Test
+    @DisplayName("前向 loop 边（目标非源节点祖先，未形成环）→ 拒绝")
+    void forwardLoopEdgeRejected() {
+        assertThatThrownBy(() -> parseAndValidate("""
+                nodes:
+                  - { id: A, agent: a }
+                  - { id: B, agent: b }
+                edges:
+                  - { from: A, to: B, when: "output.x == 1", loop: true, max_iterations: 3 }
+                """))
+                .isInstanceOf(WorkflowValidationException.class)
+                .hasMessageContaining("前向 loop 边");
+    }
+
+    @Test
+    @DisplayName("回边节点 channel 声明 CONCAT reducer → 拒绝（喂回语义防污染）")
+    void loopNodeNonOverwriteChannelRejected() {
+        assertThatThrownBy(() -> parseAndValidate("""
+                channels:
+                  critique: { reducer: concat }
+                nodes:
+                  - { id: draft, agent: a }
+                  - { id: critique, agent: b }
+                  - { id: finalize, agent: c }
+                edges:
+                  - { from: draft, to: critique }
+                  - { from: critique, to: draft, when: "output.score < 0.8", loop: true, max_iterations: 3 }
+                  - { from: critique, to: finalize }
+                """))
+                .isInstanceOf(WorkflowValidationException.class)
+                .hasMessageContaining("非 OVERWRITE");
+    }
 }

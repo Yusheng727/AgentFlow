@@ -89,7 +89,28 @@ public class SemanticValidator {
             }
         }
 
-        // DAG 无环（Kahn，含 on_error 隐式边）
+        // v2 循环回边校验：回边（loop=true）必须带 when + 正数 max_iterations；非回边不得带 max_iterations
+        for (EdgeDefinition e : edges) {
+            if (e.loop()) {
+                if (e.when() == null || e.when().isBlank()) {
+                    throw new WorkflowValidationException(
+                            "无条件回边: " + e.from() + " → " + e.to() + "（回边必须带 when 退出条件）");
+                }
+                if (e.maxIterations() == null || e.maxIterations() <= 0) {
+                    throw new WorkflowValidationException(
+                            "无上限环: " + e.from() + " → " + e.to() + "（回边必须声明正数 max_iterations）");
+                }
+            } else if (e.maxIterations() != null) {
+                throw new WorkflowValidationException(
+                        "非回边声明 max_iterations: " + e.from() + " → " + e.to());
+            }
+        }
+        // 回边方向校验：回边目标须为源节点的静态图祖先（形成环），否则是前向 loop 边（误标，被分层豁免后静默错层）
+        validateBackedgeDirection(ids, edges);
+        // 喂回 channel 校验：回边端点节点 id 对应的 channel 不得声明非 OVERWRITE reducer（跨轮累积污染喂回值）
+        validateFeedBackChannel(def, edges);
+
+        // DAG 无环（Kahn，含 on_error 隐式边，回边豁免）
         checkAcyclic(def.nodes().size(), ids, def.allEdges());
 
         // channels reducer 合法
@@ -125,6 +146,9 @@ public class SemanticValidator {
             successors.put(id, new ArrayList<>());
         }
         for (EdgeDefinition e : edges) {
+            if (e.loop()) {
+                continue; // 回边豁免环检测（静态图去回边须无环，回边成环由 validateBackedgeDirection 单独校验）
+            }
             successors.get(e.from()).add(e.to());
             inDegree.merge(e.to(), 1, Integer::sum);
         }
@@ -148,6 +172,68 @@ public class SemanticValidator {
         if (processed != totalNodes) {
             throw new WorkflowValidationException(
                     "DAG 检测到环路（已处理 " + processed + "/" + totalNodes + " 节点）");
+        }
+    }
+
+    /**
+     * v2 回边方向校验：回边（loop）目标须为源节点的静态图（去回边）祖先——即存在 to→from 的静态路径，
+     * 回边因此形成环。若 to 无法在静态图到达 from，则该边是「前向 loop 边」（误标），会被分层豁免导致
+     * 目标被误推迟一轮，属静默错层，须拒绝。
+     */
+    private void validateBackedgeDirection(Set<String> ids, List<EdgeDefinition> edges) {
+        Map<String, List<String>> successors = new HashMap<>();
+        for (String id : ids) {
+            successors.put(id, new ArrayList<>());
+        }
+        for (EdgeDefinition e : edges) {
+            if (!e.loop()) {
+                successors.get(e.from()).add(e.to());
+            }
+        }
+        for (EdgeDefinition e : edges) {
+            if (e.loop() && !reachable(e.to(), e.from(), successors)) {
+                throw new WorkflowValidationException(
+                        "前向 loop 边（目标非源节点祖先，未形成环）: " + e.from() + " → " + e.to());
+            }
+        }
+    }
+
+    /** 静态图（去回边）可达性：from 能否经有向边到达 target。 */
+    private boolean reachable(String from, String target, Map<String, List<String>> successors) {
+        Deque<String> queue = new ArrayDeque<>();
+        Set<String> visited = new HashSet<>();
+        queue.add(from);
+        while (!queue.isEmpty()) {
+            String cur = queue.poll();
+            if (cur.equals(target)) {
+                return true;
+            }
+            if (!visited.add(cur)) {
+                continue;
+            }
+            queue.addAll(successors.getOrDefault(cur, List.of()));
+        }
+        return false;
+    }
+
+    /** v2 喂回 channel 校验：回边端点节点 id 对应的 channel 声明非 OVERWRITE reducer 时拒绝（跨轮累积污染喂回值）。 */
+    private void validateFeedBackChannel(WorkflowDefinition def, List<EdgeDefinition> edges) {
+        if (def.channels() == null) {
+            return;
+        }
+        Set<String> loopEndpoints = new HashSet<>();
+        for (EdgeDefinition e : edges) {
+            if (e.loop()) {
+                loopEndpoints.add(e.from());
+                loopEndpoints.add(e.to());
+            }
+        }
+        for (String id : loopEndpoints) {
+            ChannelDefinition cd = def.channels().get(id);
+            if (cd != null && cd.reducer() != Reducer.OVERWRITE) {
+                throw new WorkflowValidationException(
+                        "回边节点 channel 声明非 OVERWRITE reducer: " + id + "（循环喂回需 OVERWRITE 每轮覆盖）");
+            }
         }
     }
 }
