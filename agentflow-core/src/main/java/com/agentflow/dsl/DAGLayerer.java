@@ -28,6 +28,9 @@ public class DAGLayerer {
         }
         List<EdgeDefinition> edges = def.allEdges();
         for (EdgeDefinition e : edges) {
+            if (e.loop()) {
+                continue; // 回边豁免分层（静态图去回边仍可最长路径分层，回边目标靠非回边入边获得层号）
+            }
             successors.get(e.from()).add(e.to());
             inDegree.merge(e.to(), 1, Integer::sum);
         }
