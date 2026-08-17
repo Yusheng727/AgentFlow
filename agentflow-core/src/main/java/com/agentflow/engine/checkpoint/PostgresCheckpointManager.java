@@ -118,6 +118,11 @@ public final class PostgresCheckpointManager implements CheckpointManager {
 
     @Override
     public void saveNodeOutput(String workflowId, int superStep, String nodeId, AgentOutput output) {
+        saveNodeOutput(workflowId, 0, superStep, nodeId, output);
+    }
+
+    @Override
+    public void saveNodeOutput(String workflowId, int round, int superStep, String nodeId, AgentOutput output) {
         Integer tokens = extractTokens(output);
         String jsonOutput = toJson(output);
         Instant now = Instant.now();
@@ -128,16 +133,16 @@ public final class PostgresCheckpointManager implements CheckpointManager {
             jdbc.update(
                     """
                     INSERT INTO workflow_node_outputs
-                        (workflow_id, super_step, node_id, output, status, tokens_consumed, completed_at)
-                    VALUES (?, ?, ?, ?::jsonb, 'COMPLETED', ?, ?)
-                    ON CONFLICT (workflow_id, super_step, node_id)
+                        (workflow_id, round, super_step, node_id, output, status, tokens_consumed, completed_at)
+                    VALUES (?, ?, ?, ?, ?::jsonb, 'COMPLETED', ?, ?)
+                    ON CONFLICT (workflow_id, round, super_step, node_id)
                     DO UPDATE SET status = EXCLUDED.status,
                                   output = EXCLUDED.output,
                                   tokens_consumed = EXCLUDED.tokens_consumed,
                                   completed_at = EXCLUDED.completed_at
                     WHERE workflow_node_outputs.status <> 'COMPLETED'
                     """,
-                    workflowId, superStep, nodeId, jsonOutput, tokens, Timestamp.from(now));
+                    workflowId, round, superStep, nodeId, jsonOutput, tokens, Timestamp.from(now));
         } finally {
             writeSemaphore.release();
         }
@@ -145,6 +150,11 @@ public final class PostgresCheckpointManager implements CheckpointManager {
 
     @Override
     public void saveBarrier(String workflowId, int superStep, WorkflowContext context) {
+        saveBarrier(workflowId, 0, superStep, context);
+    }
+
+    @Override
+    public void saveBarrier(String workflowId, int round, int superStep, WorkflowContext context) {
         // 从 WorkflowContext 提取 channel 原始值（ChannelValue → value）
         Map<String, Object> channelValues = context.values().entrySet().stream()
                 .filter(e -> e.getValue() != null)
@@ -156,11 +166,11 @@ public final class PostgresCheckpointManager implements CheckpointManager {
             jdbc.update(
                     """
                     INSERT INTO workflow_checkpoints
-                        (workflow_id, super_step, channel_values)
-                    VALUES (?, ?, ?::jsonb)
-                    ON CONFLICT (workflow_id, super_step) DO NOTHING
+                        (workflow_id, round, super_step, channel_values)
+                    VALUES (?, ?, ?, ?::jsonb)
+                    ON CONFLICT (workflow_id, round, super_step) DO NOTHING
                     """,
-                    workflowId, superStep, jsonChannels);
+                    workflowId, round, superStep, jsonChannels);
         } finally {
             writeSemaphore.release();
         }
@@ -168,19 +178,24 @@ public final class PostgresCheckpointManager implements CheckpointManager {
 
     @Override
     public void saveRoutingDecisions(String workflowId, int superStep, List<String> decisions) {
+        saveRoutingDecisions(workflowId, 0, superStep, decisions);
+    }
+
+    @Override
+    public void saveRoutingDecisions(String workflowId, int round, int superStep, List<String> decisions) {
         String json = toJson(decisions);
         acquireSemaphore();
         try {
             jdbc.update(
                     """
-                    INSERT INTO workflow_routing_decisions (workflow_id, super_step, decisions)
-                    VALUES (?, ?, ?::jsonb)
-                    ON CONFLICT (workflow_id)
+                    INSERT INTO workflow_routing_decisions (workflow_id, round, super_step, decisions)
+                    VALUES (?, ?, ?, ?::jsonb)
+                    ON CONFLICT (workflow_id, round)
                     DO UPDATE SET super_step = EXCLUDED.super_step,
                                   decisions = EXCLUDED.decisions,
                                   updated_at = now()
                     """,
-                    workflowId, superStep, json);
+                    workflowId, round, superStep, json);
         } finally {
             writeSemaphore.release();
         }
@@ -192,10 +207,10 @@ public final class PostgresCheckpointManager implements CheckpointManager {
     public Optional<BarrierCheckpoint> findLatestBarrier(String workflowId) {
         List<BarrierCheckpoint> results = jdbc.query(
                 """
-                SELECT workflow_id, super_step, channel_values, completed_at
+                SELECT workflow_id, round, super_step, channel_values, completed_at
                 FROM workflow_checkpoints
                 WHERE workflow_id = ?
-                ORDER BY super_step DESC
+                ORDER BY round DESC, super_step DESC
                 LIMIT 1
                 """,
                 (rs, rowNum) -> {
@@ -204,6 +219,7 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                             new TypeReference<Map<String, Object>>() {});
                     return new BarrierCheckpoint(
                             rs.getString("workflow_id"),
+                            rs.getInt("round"),
                             rs.getInt("super_step"),
                             channels,
                             rs.getTimestamp("completed_at").toInstant());
@@ -214,11 +230,17 @@ public final class PostgresCheckpointManager implements CheckpointManager {
 
     @Override
     public List<NodeOutputStore> findCompletedNodes(String workflowId, int superStep) {
+        return findCompletedNodes(workflowId, 0, superStep);
+    }
+
+    @Override
+    public List<NodeOutputStore> findCompletedNodes(String workflowId, int round, int superStep) {
         return jdbc.query(
                 """
-                SELECT workflow_id, super_step, node_id, output, status, tokens_consumed, completed_at
+                SELECT workflow_id, round, super_step, node_id, output, status, tokens_consumed, completed_at
                 FROM workflow_node_outputs
                 WHERE workflow_id = ?
+                  AND round = ?
                   AND super_step = ?
                   AND status = 'COMPLETED'
                   AND output IS NOT NULL
@@ -229,7 +251,7 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                     Timestamp ts = rs.getTimestamp("completed_at");
                     return new NodeOutputStore(
                             rs.getString("workflow_id"),
-                            0, // round：U5 补 round 列持久化（当前恒 0 向后兼容）
+                            rs.getInt("round"),
                             rs.getInt("super_step"),
                             rs.getString("node_id"),
                             output,
@@ -237,17 +259,22 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                             rs.getObject("tokens_consumed", Integer.class),
                             ts != null ? ts.toInstant() : null);
                 },
-                workflowId, superStep);
+                workflowId, round, superStep);
     }
 
     @Override
     public List<String> findRoutingDecisions(String workflowId) {
+        return findRoutingDecisions(workflowId, 0);
+    }
+
+    @Override
+    public List<String> findRoutingDecisions(String workflowId, int round) {
         List<String> rows = jdbc.query(
                 """
-                SELECT decisions FROM workflow_routing_decisions WHERE workflow_id = ?
+                SELECT decisions FROM workflow_routing_decisions WHERE workflow_id = ? AND round = ?
                 """,
                 (rs, rowNum) -> rs.getString("decisions"),
-                workflowId);
+                workflowId, round);
         if (rows.isEmpty() || rows.getFirst() == null) {
             return List.of();
         }

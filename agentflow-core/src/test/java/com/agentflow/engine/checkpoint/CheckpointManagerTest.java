@@ -136,6 +136,44 @@ class CheckpointManagerTest {
             assertThat(latest).isEmpty();
         }
 
+        // ── v2 循环 round 维度 ──
+
+        @Test
+        @DisplayName("round 0 与 round 1 同一 (superStep, nodeId) 不冲突，findCompletedNodes 按 round 过滤")
+        void roundScopedNodeOutput() {
+            cm.saveNodeOutput("wf-1", 0, 0, "nodeA", AgentOutput.of("round0"));
+            cm.saveNodeOutput("wf-1", 1, 0, "nodeA", AgentOutput.of("round1"));
+
+            List<NodeOutputStore> round0 = cm.findCompletedNodes("wf-1", 0, 0);
+            List<NodeOutputStore> round1 = cm.findCompletedNodes("wf-1", 1, 0);
+            assertThat(round0).hasSize(1);
+            assertThat(round0.getFirst().output().content()).isEqualTo("round0");
+            assertThat(round1).hasSize(1);
+            assertThat(round1.getFirst().output().content()).isEqualTo("round1");
+        }
+
+        @Test
+        @DisplayName("findLatestBarrier 按 (round, superStep) 复合排序取最新")
+        void findLatestBarrierAcrossRounds() {
+            cm.saveBarrier("wf-1", 0, 2, new WorkflowContext(Map.of("k", "r0s2")));
+            cm.saveBarrier("wf-1", 1, 0, new WorkflowContext(Map.of("k", "r1s0")));
+
+            Optional<BarrierCheckpoint> latest = cm.findLatestBarrier("wf-1");
+            assertThat(latest).isPresent();
+            assertThat(latest.get().round()).isEqualTo(1);
+            assertThat(latest.get().superStep()).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("findRoutingDecisions 按 round 返回每轮已走边")
+        void routingDecisionsScopedByRound() {
+            cm.saveRoutingDecisions("wf-1", 0, 0, List.of("draft->critique", "critique->draft"));
+            cm.saveRoutingDecisions("wf-1", 1, 0, List.of("draft->critique", "critique->finalize"));
+
+            assertThat(cm.findRoutingDecisions("wf-1", 0)).containsExactly("draft->critique", "critique->draft");
+            assertThat(cm.findRoutingDecisions("wf-1", 1)).containsExactly("draft->critique", "critique->finalize");
+        }
+
         // ── 工作流生命周期 ──
 
         @Test

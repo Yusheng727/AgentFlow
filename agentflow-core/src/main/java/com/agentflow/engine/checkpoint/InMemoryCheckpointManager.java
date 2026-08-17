@@ -48,11 +48,16 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
 
     @Override
     public void saveNodeOutput(String workflowId, int superStep, String nodeId, AgentOutput output) {
+        saveNodeOutput(workflowId, 0, superStep, nodeId, output);
+    }
+
+    @Override
+    public void saveNodeOutput(String workflowId, int round, int superStep, String nodeId, AgentOutput output) {
         // 从 AgentOutput.metadata 提取 token 消耗（若存在）
         Integer tokens = extractTokens(output);
         NodeOutputStore record = NodeOutputStore.completed(
-                workflowId, superStep, nodeId, output, tokens, Instant.now());
-        String key = nodeKey(workflowId, superStep, nodeId);
+                workflowId, round, superStep, nodeId, output, tokens, Instant.now());
+        String key = nodeKey(workflowId, round, superStep, nodeId);
         // 幂等：COMPLETED 终态不可覆盖（plan v4.2 修正：避免 retry 成功后 DO NOTHING 丢弃）
         nodeOutputs.merge(key, record, (old, incoming) ->
                 old.status() == NodeStatus.COMPLETED ? old : incoming);
@@ -60,12 +65,17 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
 
     @Override
     public void saveBarrier(String workflowId, int superStep, WorkflowContext context) {
+        saveBarrier(workflowId, 0, superStep, context);
+    }
+
+    @Override
+    public void saveBarrier(String workflowId, int round, int superStep, WorkflowContext context) {
         // 从 WorkflowContext 提取 channel 原始值（ChannelValue → value）
         Map<String, Object> channelValues = context.values().entrySet().stream()
                 .filter(e -> e.getValue() != null)
                 .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().value()));
         BarrierCheckpoint cp = new BarrierCheckpoint(
-                workflowId, superStep, Map.copyOf(channelValues), Instant.now());
+                workflowId, round, superStep, Map.copyOf(channelValues), Instant.now());
         barriers.computeIfAbsent(workflowId, k -> new CopyOnWriteArrayList<>()).add(cp);
     }
 
@@ -77,13 +87,21 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
         if (list == null || list.isEmpty()) {
             return Optional.empty();
         }
-        return list.stream().max(Comparator.comparingInt(BarrierCheckpoint::superStep));
+        return list.stream().max(Comparator
+                .comparingInt(BarrierCheckpoint::round)
+                .thenComparingInt(BarrierCheckpoint::superStep));
     }
 
     @Override
     public List<NodeOutputStore> findCompletedNodes(String workflowId, int superStep) {
+        return findCompletedNodes(workflowId, 0, superStep);
+    }
+
+    @Override
+    public List<NodeOutputStore> findCompletedNodes(String workflowId, int round, int superStep) {
         return nodeOutputs.values().stream()
                 .filter(n -> n.workflowId().equals(workflowId))
+                .filter(n -> n.round() == round)
                 .filter(n -> n.superStep() == superStep)
                 .filter(n -> n.status() == NodeStatus.COMPLETED)
                 .filter(n -> n.output() != null) // 双重保护：output 非空
@@ -147,18 +165,32 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
 
     @Override
     public void saveRoutingDecisions(String workflowId, int superStep, List<String> decisions) {
-        routingDecisions.put(workflowId, List.copyOf(decisions));
+        saveRoutingDecisions(workflowId, 0, superStep, decisions);
+    }
+
+    @Override
+    public void saveRoutingDecisions(String workflowId, int round, int superStep, List<String> decisions) {
+        routingDecisions.put(routingKey(workflowId, round), List.copyOf(decisions));
     }
 
     @Override
     public List<String> findRoutingDecisions(String workflowId) {
-        return routingDecisions.getOrDefault(workflowId, List.of());
+        return findRoutingDecisions(workflowId, 0);
+    }
+
+    @Override
+    public List<String> findRoutingDecisions(String workflowId, int round) {
+        return routingDecisions.getOrDefault(routingKey(workflowId, round), List.of());
     }
 
     // ──────────────────────── 辅助方法 ────────────────────────
 
-    private static String nodeKey(String workflowId, int superStep, String nodeId) {
-        return workflowId + ":" + superStep + ":" + nodeId;
+    private static String nodeKey(String workflowId, int round, int superStep, String nodeId) {
+        return workflowId + ":" + round + ":" + superStep + ":" + nodeId;
+    }
+
+    private static String routingKey(String workflowId, int round) {
+        return workflowId + ":" + round;
     }
 
     private static Integer extractTokens(AgentOutput output) {
