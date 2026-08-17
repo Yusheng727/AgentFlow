@@ -281,6 +281,44 @@ class WorkflowDSLParserTest {
         assertThat(def.edges().get(1).when()).isNull();
     }
 
+    // ========== v2 循环回边字段 ==========
+
+    @Test
+    @DisplayName("解析 loop 回边 + max_iterations → 字段映射正确（snake_case）")
+    void parseLoopBackedge() {
+        WorkflowDefinition def = parser.parse("""
+                nodes:
+                  - { id: draft, agent: writer }
+                  - { id: critique, agent: reviewer }
+                  - { id: finalize, agent: editor }
+                edges:
+                  - { from: draft, to: critique }
+                  - { from: critique, to: draft, when: "output.score < 0.8", loop: true, max_iterations: 3 }
+                  - { from: critique, to: finalize }
+                """);
+        EdgeDefinition backedge = def.edges().get(1);
+        assertThat(backedge.loop()).isTrue();
+        assertThat(backedge.maxIterations()).isEqualTo(3);
+        assertThat(backedge.when()).isEqualTo("output.score < 0.8");
+        // 普通边 loop=false、maxIterations=null
+        assertThat(def.edges().get(0).loop()).isFalse();
+        assertThat(def.edges().get(0).maxIterations()).isNull();
+    }
+
+    @Test
+    @DisplayName("不带 loop/max_iterations 的旧 YAML → loop=false、maxIterations=null（向后兼容）")
+    void loopFieldsDefaultToOff() {
+        WorkflowDefinition def = parser.parse("""
+                nodes:
+                  - { id: A, agent: a }
+                  - { id: B, agent: b }
+                edges:
+                  - { from: A, to: B, when: "output.x == 1" }
+                """);
+        assertThat(def.edges().get(0).loop()).isFalse();
+        assertThat(def.edges().get(0).maxIterations()).isNull();
+    }
+
     // ========== R10 per-workflow 预算字段 ==========
 
     @Test
