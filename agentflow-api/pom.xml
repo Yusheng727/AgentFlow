@@ -29,5 +29,11 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- JdbcToolGrantRepository SQL 语义测试：H2 建兼容 caller_tool_grants 表（同 core PostgresCheckpointManagerTest 先例） -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 </project>

@@ -49,3 +49,52 @@
 "我简历三个项目分别打不同维度：ToyRush 展示高并发基础，InterviewCoach 展示 AI Agent+RAG 应用能力，AgentFlow 展示后端工程化 + Agent 工程化。AgentFlow 是我从0用 Java 实现的 Multi-Agent 编排引擎——业界有 LangGraph4j、Spring AI Alibaba 等方案，但我选择从0复现 BSP 执行模型 + 两级 Checkpoint + 状态机 + DSL，借此展示并发模型设计、崩溃恢复、容错链路、可观测性这些后端工程深度。它和 InterviewCoach 形成'AI 能力 + 后端工程能力'的互补。项目 10 周内完成，15 个实现单元（U0-U14），Week 5 Go/No-Go Gate 后专注 Demo 和文档。"
 
 ← 返回 [`00-overview.md`](./00-overview.md)
+
+---
+
+## 档 C 面试口径（30s / 5min 自述稿，2026-08-18 定稿）
+
+> 目的：把 2026-06-28 review 的 13 条叙事/口径 Open Question（buy-vs-build、七三开折算、BSP vs Actor/CSP、@Tool 与 InterviewCoach 边界、Spring AI 差异化、cancel noop、mock 90%、Reducer 无 demo、API Key registry、InMemory ownership、DAG size 上界、budget 阈值、R20 archetypes）收口成可直接背的口径。**主线 = "静态 DAG → 动态路由 → 迭代收敛 → 分布式解耦"**，层层抛追问点、给落地答案。
+
+### 30 秒自述（电梯版）
+
+> "我简历三个项目各打一个维度：ToyRush 是高并发基础，InterviewCoach 是 AI Agent + RAG 应用，AgentFlow 是**后端工程化 + Agent 工程化**。AgentFlow 是我从 0 用 Java 21 写的 Multi-Agent 编排引擎——业界有 LangGraph4j、Spring AI Alibaba，但我选从 0 复现，因为我的目标是展示后端工程深度不是补生态空白。整条主线：先做静态 DAG 的 BSP 执行模型 + 两级 Checkpoint 崩溃恢复防 LLM 重复计费，再扩 v2 的动态路由和迭代循环，最后 v1.1 用 Kafka 把提交和执行解耦。10 周 15 个实现单元全绿，12 模块 Maven 多模块、JaCoCo 80% 门禁。"
+
+### 5 分钟自述（深度版）
+
+按一条主线走，每层主动交代设计取舍，把面试官要追问的点先讲掉：
+
+**① 为什么从 0 而不扩 LangGraph4j（buy-vs-build）**
+"我承认 Java 生态有 LangGraph4j 和 Spring AI Alibaba，我没有填补空白的野心。我的诉求是**用这个项目证明后端工程能力**——多线程并发模型、崩溃恢复、容错链路、可观测性、分布式解耦这些是面试想看的，不是某个框架 API 用的熟不熟。从 0 复现 BSP + Checkpoint 才有机会把我对这些问题的思考讲清楚；如果只是接 LangGraph4j，我学到的是这个框架怎么用，不是这些机制为什么这么设计。"
+
+**② 七三开怎么折算（后端 70% + Agent 30%）**
+"后端 70% 集中在引擎本体：BSP 并行执行（U2）、两级 Checkpoint + Recovery（U5）、容错链路（U4）、可观测性（U7）、Starter 封装（U13）、API 安全（U14）——这些是纯后端工程。Agent 30% 收敛在适配器窄表面上：Spring AI 和 LangChain4j 两个框架都收敛在同一个 Adapter 接口后面（KTD-7），LLM 输出 schema 校验、token 成本追踪、mock 模式。**Agent 的部分是『工程化』不是『调 prompt』**——这是和 InterviewCoach（应用级 AI）的分工点。"
+
+**③ 为什么 BSP 而不是 Actor/CSP（KTD-1）**
+"BSP 的核心是把并行计算切成同步的 barrier 超步：一层内节点并行，层间 barrier 同步合并。选它有三个理由：一是**天然消除竞态**——节点只写自己的 channel，层末 barrier 才确定性合并，不需要 Actor 那样的消息队列来管并发；二是**路劲确定**——静态 DAG 预分层后每层跑什么在运行前可算，配合 checkpoint 的路由决策重放能买回确定性；三是 Virtual Threads 友好——层内节点用 VT 并行，barrier 用 CompletableFuture.allOf 同步。Actor/CSP 在无界消息流下更强，但我们是**有界 DAG 编排**，BSP 更简单直接。代价是并行度被 barrier 限制，但对 Multi-Agent 工作流（节点数几十）这个并行度足够。"
+
+**④ 两级 Checkpoint 为什么能防 LLM 重复计费（KTD-3）**
+"崩溃恢复最怕两件事：丢进度、或者重复执行导致 LLM 重复计费。我做**节点级 checkpoint**——每个节点执行完立刻把 channel 输出落库（COMPLETED 状态 + token 计数），恢复时只重跑崩溃当层还没完成的那几个节点，已完成的直接复用输出，不重新调 LLM；再配合 **barrier 级 checkpoint** 记录层间合并结果。RecoveryProtocol 查崩溃层本身的 COMPLETED 节点，天然避免 off-by-one 重跑整层。这是最重的后端工程点——一个崩溃恢复的路径，要同时保进度、防双计费、防 stray 恢复。"
+
+**⑤ v1.1 Kafka 提交/执行解耦（分布式语义）**
+"v1 是本地 VT 异步执行，v1.1 我把提交和执行经 Kafka 解耦——REST submit 只往 topic 派发消息，消费者拉取后执行。关键设计是**幂等**：消费者收到消息先查 checkpoint 终态，已 SUCCESS/FAILED 的跳过——这样 at-least-once 重放不会重复计费。我这次 review 还被抓到一个真 bug：retry 走 Kafka 时 FAILED 是终态，被幂等跳过吞掉了，重试永远不生效——本地 dispatcher 直跑 run() 所以单测全绿，是典型的『测试绿 ≠ 生产生效』。"
+
+**⑥ v2 动态路由 + 循环（把静态 DAG 讲活）**
+"v1 只做静态 DAG，面试官最sharp 的问题就是『动态路由怎么办？』。v2 我扩成**运行时条件路由**：`when` 谓词选边、`on_error` 失败兜底；执行模型上不用放弃 BSP，而是**静态分层 + 每层可达性剪枝**——被路由切断的下游标 SKIPPED，checkpoint 只持久化路由决策。再往上扩**循环/回边**：迭代轮次 + 双 active 集合，收敛或超限都会终止。这两步的回答都是同一个：『动态路由牺牲执行路径确定性，我用 checkpoint 路由决策重放把它买回来』。"
+
+**⑦ @Tool 与 InterviewCoach 的边界**
+"InterviewCoach 是应用级 Agent——它用工具解决面试问答这个具体场景；AgentFlow 是**框架级工具布线**——@Tool 怎么从 bean 反射注册进 ToolSpecification、怎么在 YAML 解析期按 caller 做工具级授权、工具调用循环怎么防死循环（≤5 轮）。层不一样：一个是『用工具达到业务目的』，一个是『把工具调用的机制做对』。这叫互补不重复。"
+
+**⑧ 安全（R21/R22）**
+"三位一体：X-API-Key 鉴权（SHA-256 存 hash）+ 所有权校验防 IDOR + 工具级授权——`CallerToolAllowlist` 按 caller 白名单校验 YAML 里能引用哪些 @Tool，防止有人提交 YAML 引用特权工具。凭证只从 env 读、禁止硬编码；prompt/trace 走脱敏。R21 我下一步会升级成 DB 表 + 管理 API（现在是配置硬编码）。"
+
+**⑨ mock 模式怎么控制成本（R13）**
+"90% 开发期用零成本 mock——`MockAgentFunction` 从 YAML 的 `mock_response` 读预设响应、支持 `${channel}` 占位符引用上游，语义上等价但不发真实 LLM。只有档 1 端到端才接真实 DeepSeek（OpenAI 兼容，env 读 key）。这让我每轮 CI 都能绿、开发迭代快，Demo 时才烧真钱。"
+
+**⑩ 可观测性**
+"ExecutionTrace 树记每节点结果 + Micrometer 5 类指标（执行/延迟/token/成本/预算超限）+ Grafana 面板 + 成本核算表。崩溃了能查 trace，跑贵了能看成本面板。"
+
+**收尾（简短总结）**
+"一句话收：AgentFlow 证明的是『我能把一个分布式系统面对的那些后端难题——并发、崩溃恢复、容错、安全、可观测、分布式解耦——在真实工程里做对做完』。"
+
+← 返回 [`00-overview.md`](./00-overview.md)

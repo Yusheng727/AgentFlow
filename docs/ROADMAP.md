@@ -36,9 +36,9 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 | **per-workflow 预算字段** `budget_tokens`/`budget_cost` | R10 | ✅ **已交付**（2026-08-10，`4072b3e`）——`AgentflowMeta` 加预算字段 + `WorkflowBudget`（observability，edge-triggered 累加器）+ BspEngine 穿线 AgentInput → mock 逐节点记账触发 `budget_exceeded`；无预算时回落全局阈值向后兼容 |
 | **Reducer 冲突路径刻意演练**（overwrite/concat/max/custom 触发测试） | 06 OQ `Reducer 冲突无 demo` | ⛔ **明确不做**（2026-08-10 决策）——抽象已有单测覆盖各策略语义，冲突演示性价比低，v1 砍单 |
 
-### 档 C — 叙事 / 面试口径（演示前定即可，非代码）
-- 06 OQ `From 2026-06-28 review` 13 条叙事/范围项，如：从0 vs 扩 LangGraph4j 的 buy-vs-build 论证、七三开(后端70%+Agent30%)折算、KTD-1 BSP vs Actor/CSP、@Tool 与 InterviewCoach 边界、Spring AI 差异化口径。
-- API Key 完整签发/轮换 registry：现为 demo key + env `AGENTFLOW_API_KEYS` 追加，完整签发/轮换属 ops。
+### 档 C — 叙事 / 面试口径 ✅ 已定稿（2026-08-18）
+- **30s/5min 自述稿已附** `07-sources-revision-interview.md`（主线「静态 DAG → 动态路由 → 迭代收敛 → 分布式解耦」，收口 13 条叙事追问：buy-vs-build / 七三开折算 / KTD-1 BSP vs Actor/CSP / @Tool 与 InterviewCoach 边界 / Spring AI 差异化 / KTD-3 防重复计费 / v1.1 Kafka 解耦）。
+- API Key 完整签发/轮换 registry：现为 demo key + env `AGENTFLOW_API_API_KEYS` 追加，完整签发/轮换属 ops。
 
 ---
 
@@ -52,7 +52,7 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
     3. 轮询终态：`curl -s localhost:8080/api/workflows/<id>/status -H 'X-API-Key: demo-key-1234567890abcdef'` → 直至 `"status":"SUCCESS"`（经 Kafka topic `agentflow.workflow.executions` 派发）
     4. 指标：`curl -s localhost:8080/actuator/prometheus | grep agentflow_workflow` → `agentflow_workflow_executed_total{status="success"}` 计数 +1
   - **验证证据**：`KafkaDispatchE2eIT` 真 Kafka 实跑绿（Skipped: 0）；无 Kafka 时整类跳过不红（AE2）
-- **工具级授权 DB 表 + 管理 API**（R21，v1 为 config/env 硬编码 `CallerToolAllowlist`）
+- **工具级授权 DB 表 + 管理 API**（R21）→ ✅ **已交付**（2026-08-18，`feat/review-residual-r21`）——`CallerToolAllowlist` 升级为 config ∪ DB（`ToolGrantRepository` InMemory/Jdbc + V6 迁移 `caller_tool_grants`）+ `ToolGrantController` 管理 API（`/api/tools/grants`，admin-key 门控变更）；提交强制点不变。live 验证授权即时生效（grant 后 202 / 未授权 403）
 - **checkpoint 敏感数据列级加密**（R22 注明的升级点，v1 文档标注"明文存储 + R21 鉴权保护"）
 
 ---
@@ -76,4 +76,4 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 1. **WorkflowSubmissionGuard**（档 B，真安全缺口）—— ✅ 已交付（2026-08-10，`a37d9dc`，见档 B 表）。
 2. Grafana / 真 PG 部署验证（档 A）—— ✅ 均已交付：Grafana（2026-08-14，`54e5415`）；真 PG `verify` 实跑绿（2026-08-17，本地 PG 容器，IT 真跑非跳过）。
 3. ~~R20 archetypes、Reducer 冲突演练~~（档 B，2026-08-10 决策明确不做）→ **档 B 已全部闭环**。
-4. 档 C 面试口径 → 定稿一份 30s/5min 自述稿附到 `07-sources-revision-interview.md` 或本仓库面试文档（待定）。
+4. 档 C 面试口径 → ✅ **已定稿**（2026-08-18，30s/5min 自述稿已附 `07-sources-revision-interview.md`）——v1 收尾档 A/B/C 全闭环。

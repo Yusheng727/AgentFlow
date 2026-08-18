@@ -1,6 +1,6 @@
 # AgentFlow — 接手指南（给 Claude Code）
 
-> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-14（v2 条件分支全闭环：静态 DAG 扩成「无环 + 运行时路由」，见下方进度；档 A 可观测/分布式环境落地 + v1.1 residual 全闭环 + 档 1 真实 DeepSeek 端到端已跑通，`mvn verify` 11 模块绿 + JaCoCo 达标）。
+> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-18（档 C 面试口径定稿 + Kafka review 残留闭环 + R21 工具级授权 DB 表 + 管理 API 落地；`mvn verify` 12 模块绿 + JaCoCo 达标）。
 >
 > **状态/路线文档**：`docs/ROADMAP.md`（v1 交付盘点 · 剩余工作 · v2 路线图）+ `docs/GRAFANA.md`（可观测/Grafana 部署与验证）——接手或规划下一步先看这两份。
 
@@ -15,6 +15,13 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 ## 当前进度
 
 **计划文档**：`docs/plans/agentflow/`（8 个分片，`00-overview.md` 是索引+导航）。两轮 ce-doc-review 闭环 + 5 条动工前卡点拍板，**0 动工阻塞**。
+
+> **当前状态（2026-08-18）——档 C 面试口径 + Kafka review 残留闭环 + R21 工具级授权（feat/review-residual-r21，已合 main）**：
+> - **档 C 面试口径 ✅**：`07-sources-revision-interview.md` 附 30s/5min 自述稿（主线「静态 DAG → 动态路由 → 迭代收敛 → 分布式解耦」），收口 13 条叙事追问（buy-vs-build / 七三开 / BSP vs Actor / @Tool 边界 / Spring AI 差异化 / KTD-3 防重复计费 / v1.1 Kafka 解耦）。ROADMAP 档 C ✅
+> - **Kafka review 残留闭环（三段）**：① `KafkaCompatContextLoadTest`（KTD-E 无 broker 冒烟——U2 计划要求但此前未交付：context 起 + 自持 mapper 往返含 null version/中文/java.time + auto.offset 默认 earliest）② `tryClaim` 原子幂等（CheckpointManager 接口 default + InMemory `compute` + Postgres 条件 UPDATE `WHERE status='PENDING'`，消费者从 check-then-act 升级为原子条件转移，防并发重复投递双跑双计费；并发恰一胜出测试）③ mapper 补 JavaTimeModule + 禁用 WRITE_DATES_AS_TIMESTAMPS（裸 mapper 遇 java.time inputs 序列化失败/写成数组）
+> - **R21 工具级授权 DB 表 + 管理 API（v1.1 档）**：`CallerToolAllowlist` 从 config 硬编码升级为 config ∪ DB 相加、总空才 allow-all 保 v1。新增 `ToolGrantRepository`（InMemory/Jdbc 两实现 + V6 迁移 `caller_tool_grants`）+ `ToolGrantController`（`/api/tools/grants`：GET 自读/admin 查任意、POST grant/DELETE revoke **admin-only**——env `AGENTFLOW_ADMIN_API_KEYS` 门控，防自授特权工具）。提交强制点仍在 `WorkflowController.submit` 的 `toolAllowList.isAllowed(caller, tool)`。**live 验证**：admin grant risk-calculator → 提交已授权 202 / 未授权 finance-db-query → **403 FORBIDDEN**
+- 测试：core +16（tryClaim）· api +18（R21 repo/allowlist/controller + 提交强制集成）· kafka-starter +2（compat）；全仓 `mvn verify` 12 模块绿 + JaCoCo 达标
+- **env 名坑（记此）**：`agentflow.api.api-keys` 的宽松绑定 env 是 **`AGENTFLOW_API_API_KEYS`**（不是 `AGENTFLOW_API_KEYS`）；`agentflow.admin.api-keys` → `AGENTFLOW_ADMIN_API_KEYS`——live 起服配置授权 key 时用错名会静默 401
 
 > **当前状态（2026-08-10）——WorkflowSubmissionGuard 提交守卫（ROADMAP 档 B 真安全缺口 #2，feat/submission-guard）**：
 > - 新增 `WorkflowSubmissionGuard`（api/security）：提交时预防性校验（06 OQ `POST /workflows 无 DAG/token 预算上界`）——节点数 > maxNodes 或预估成本 > maxCostUsd → **422 SUBMISSION_LIMIT**（跑完才报的 post-hoc `budget_exceeded` 之外加了提交前拦截，防恶意/失控提交起无界 VT + 烧成本）。reprised：model/maxNodes/maxCostUsd 任一 null 即禁用对应检查；成本估算复用 CostCalculator 单价表，prompt 长度估 token（4 字符/token）+ 每节点基准 500 in/out。

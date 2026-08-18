@@ -6,6 +6,7 @@ import com.agentflow.agent.AgentOutput;
 import com.agentflow.agent.NodeRegistry;
 import com.agentflow.api.security.ApiKeyAuthFilter;
 import com.agentflow.api.security.CallerToolAllowlist;
+import com.agentflow.api.security.InMemoryToolGrantRepository;
 import com.agentflow.api.security.WorkflowOwnershipChecker;
 import com.agentflow.api.security.WorkflowSubmissionGuard;
 import com.agentflow.dsl.WorkflowDSLParser;
@@ -132,6 +133,34 @@ class WorkflowControllerTest {
 
         assertThat(response.getStatusCode().value()).isEqualTo(403);
         assertThat(response.getBody().status()).isEqualTo("FORBIDDEN");
+    }
+
+    @Test
+    @DisplayName("R21：DB 授权仓储驱动提交校验——未授权 403，admin 授予后 202")
+    void r21DbGrantsEnforceAtSubmit() {
+        InMemoryToolGrantRepository repo = new InMemoryToolGrantRepository();
+        repo.grant("caller-B", "toolA", "admin"); // 只有 caller-B 被授予 toolA
+        CallerToolAllowlist dbAllowlist = new CallerToolAllowlist(Map.of(), repo);
+        controller = new WorkflowController(parser, engine, checkpointManager,
+                ownershipChecker, dbAllowlist, nodeRegistry, versionManager);
+        String yamlWithToolA = """
+                agentflow: { version: "1.0" }
+                nodes:
+                  - { id: A, agent: a, tools: [toolA] }
+                edges: []
+                """;
+
+        // caller-A 未授权 → 403
+        WorkflowController.SubmitRequest denied = new WorkflowController.SubmitRequest(
+                "wf", "1.0", yamlWithToolA, Map.of());
+        var resp403 = controller.submit(denied, requestWithCaller("caller-A"));
+        assertThat(resp403.getStatusCode().value()).isEqualTo(403);
+        assertThat(resp403.getBody().status()).isEqualTo("FORBIDDEN");
+
+        // 管理 API 授予 caller-A toolA 后 → 202（授权即时生效）
+        repo.grant("caller-A", "toolA", "admin");
+        var resp202 = controller.submit(denied, requestWithCaller("caller-A"));
+        assertThat(resp202.getStatusCode().value()).isEqualTo(202);
     }
 
     @Test

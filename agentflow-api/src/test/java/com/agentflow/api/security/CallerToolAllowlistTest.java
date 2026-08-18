@@ -90,4 +90,51 @@ class CallerToolAllowlistTest {
         assertThat(allowlist.allowedTools(CALLER_A)).containsExactlyInAnyOrder("t1", "t2");
         assertThat(allowlist.allowedTools(CALLER_B)).isEmpty();
     }
+
+    // ─────────────────── v1.1 R21：DB 授权仓储叠加 ───────────────────
+
+    @Test
+    @DisplayName("R21：config ∪ DB 相加授权；任一源命中即放行")
+    void repoGrantsExtendConfig() {
+        InMemoryToolGrantRepository repo = new InMemoryToolGrantRepository();
+        repo.grant(CALLER_B, "db-tool", "admin");
+        // 空 config + 非空 DB → DB 侧启用校验
+        CallerToolAllowlist allowlist = new CallerToolAllowlist(Map.of(), repo);
+
+        assertThat(allowlist.isAllowed(CALLER_B, "db-tool")).isTrue();   // DB 命中
+        assertThat(allowlist.isAllowed(CALLER_A, "db-tool")).isFalse();  // 未授权
+        assertThat(allowlist.isAllowed(CALLER_A, "other")).isFalse();
+    }
+
+    @Test
+    @DisplayName("R1：config 命中即使 DB 未接入也放行（向后兼容）；allowedTools 合并两源")
+    void configStillWorksAndMerges() {
+        InMemoryToolGrantRepository repo = new InMemoryToolGrantRepository();
+        repo.grant(CALLER_B, "db-tool", "admin");
+        CallerToolAllowlist allowlist = new CallerToolAllowlist(Map.of(CALLER_A, Set.of("cfg-tool")), repo);
+
+        assertThat(allowlist.isAllowed(CALLER_A, "cfg-tool")).isTrue();   // config 源
+        assertThat(allowlist.isAllowed(CALLER_B, "db-tool")).isTrue();    // DB 源
+        assertThat(allowlist.isAllowed(CALLER_A, "db-tool")).isFalse();   // 两源都没有
+        assertThat(allowlist.allowedTools(CALLER_A)).containsExactlyInAnyOrder("cfg-tool");
+        assertThat(allowlist.allowedTools(CALLER_B)).containsExactlyInAnyOrder("db-tool");
+    }
+
+    @Test
+    @DisplayName("R1：config 与 DB 均空 → 全局允许（v1 兼容）")
+    void repoEmptyStillAllowsAll() {
+        CallerToolAllowlist allowlist = new CallerToolAllowlist(Map.of(), new InMemoryToolGrantRepository());
+        assertThat(allowlist.isAllowed(CALLER_A, "anything")).isTrue();
+    }
+
+    @Test
+    @DisplayName("R1：DB 有记录后即使 config 空，未授权 caller 拒绝")
+    void repoEnabledDeniesUnknown() {
+        InMemoryToolGrantRepository repo = new InMemoryToolGrantRepository();
+        repo.grant(CALLER_A, "t1", "admin");
+        CallerToolAllowlist allowlist = new CallerToolAllowlist(Map.of(), repo);
+        assertThat(allowlist.isAllowed(CALLER_A, "t1")).isTrue();     // 有授权
+        assertThat(allowlist.isAllowed(CALLER_A, "t2")).isFalse();    // 同 caller 另一 tool 未授权
+        assertThat(allowlist.isAllowed(CALLER_B, "t1")).isFalse();    // 别的 caller 未授权
+    }
 }

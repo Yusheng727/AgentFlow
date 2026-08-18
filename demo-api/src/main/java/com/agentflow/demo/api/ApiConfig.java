@@ -8,6 +8,8 @@ import com.agentflow.api.WorkflowDispatcher;
 import com.agentflow.api.WorkflowExecutionService;
 import com.agentflow.api.security.ApiKeyAuthFilter;
 import com.agentflow.api.security.CallerToolAllowlist;
+import com.agentflow.api.security.InMemoryToolGrantRepository;
+import com.agentflow.api.security.ToolGrantRepository;
 import com.agentflow.api.security.WorkflowOwnershipChecker;
 import com.agentflow.api.security.WorkflowSubmissionGuard;
 import com.agentflow.dsl.DAGLayerer;
@@ -171,8 +173,16 @@ public class ApiConfig {
     }
 
     @Bean
-    public CallerToolAllowlist callerToolAllowlist() {
-        return new CallerToolAllowlist(Map.of());
+    public CallerToolAllowlist callerToolAllowlist(ToolGrantRepository toolGrantRepository) {
+        // v1.1 R21：config 静态授权（此处空=不启用 config 侧）之上叠加 DB 授权仓储——
+        // 管理 API（ToolGrantController，AGENTFLOW_ADMIN_API_KEY 门控）动态增删授权即时生效。
+        return new CallerToolAllowlist(Map.of(), toolGrantRepository);
+    }
+
+    /** R21 工具授权仓储：demo/mock 用内存实现（重启丢失），生产换 JdbcToolGrantRepository + V6 表。 */
+    @Bean
+    public ToolGrantRepository toolGrantRepository() {
+        return new InMemoryToolGrantRepository();
     }
 
     // ─── 提交守卫（安全）：DAG 节点数 / 预估成本上界，超限 422 拒绝（防无界 VT + 烧成本） ───

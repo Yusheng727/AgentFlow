@@ -299,3 +299,23 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - demo-api 加 kafka-starter 后即使 disabled，Boot KafkaAutoConfiguration 仍因 classpath 惰性装配额外 bean（correctness/adversarial P3）——懒连接不炸启动，默认路径测试验证过无碍。
 
 **面试讲法**：「这轮 10-persona 审查最有价值的是两个『测试绿但生产不生效』：一是 Kafka 模式的 retry——`WorkflowController.retry` 派发消息但 FAILED 是终态，消费者幂等跳过把重试消息吞了，返回 202 但永远不重跑，3 个 reviewer 独立置信 100 命中同一处，而本地 dispatcher 直跑 run() 所以单测全绿；二是 `auto.offset.reset` 默认 latest 的新消费组冷启动会丢订阅前 produce 的提交——E2E 靠显式 earliest 覆盖才绿，生产默认路径没人测。两个都是『配置/装配层的生产默认 vs 测试显式覆盖』的落差，和项目里反复出现的 mock 绿 ≠ 部署生效是同一族教训。」
+
+---
+
+## Kafka U3 review 残留闭环（2026-08-18，feat/review-residual-r21）
+
+**背景**：U3 ce-code-review 记录的 3 个残留（KTD-E 冒烟未交付 / tryClaim check-then-act / mapper 无 JavaTimeModule）本轮全部闭环 + 新增 R21 DB 授权。
+
+**已交付**：
+- **KTD-E `KafkaCompatContextLoadTest`（project-standards P2，U2 计划要求但此前未交付）**：无 broker @SpringBootTest 冒烟——context 能起、自持 `agentflowKafkaObjectMapper` bean 存在、wire 消息往返一致（null version / 中文 / java.time）、消费端 auto.offset 默认 earliest。与 E2E 分工：E2E 证真 broker 链路，本测试证无 broker 时装配与 serde 不炸。
+- **`tryClaim` 原子幂等（security P2）**：`CheckpointManager` 接口新增 `default boolean tryClaim(workflowId)`（默认恒 true 保旧实现）；InMemory 用 `ConcurrentHashMap.compute`（PENDING→RUNNING 恰一次，10 线程恰一胜出测试）；Postgres 用条件 UPDATE `WHERE status='PENDING'`（影响行数判定，SQL 常量单一真相源 + H2 兼容表断言）。`KafkaWorkflowConsumer` 从 check-then-act 升级为「tryClaim 失败即跳过」——并发重复投递不再双跑双计费。
+- **mapper 补 JavaTimeModule + 禁用 WRITE_DATES_AS_TIMESTAMPS**：裸 `new ObjectMapper()` 遇 java.time inputs 序列化失败；且默认会把 LocalDate 写成 `[2026,8,18]` 数组而非 ISO 字符串（读回 Object 变 List）。
+- **R21 工具级授权 DB 表 + 管理 API**：见 CLAUDE.md / ROADMAP §3。
+
+**记坑**：
+- **H2 不支持 PG `ON CONFLICT DO NOTHING`**——JdbcToolGrantRepository 幂等 INSERT 改 `INSERT ... SELECT ... WHERE NOT EXISTS`（PG/H2 双兼容）。若遇 H2 报 BadSqlGrammar 优先怀疑 SQL 方言。
+- **`queryForObject` 0 行抛 `EmptyResultDataAccess`**——`isGranted` 用 `queryForList` 判空而非 queryForObject。
+- **`Set.copyOf` 打乱顺序**——`findGrantedTools` 保留 SQL ORDER BY 需 `LinkedHashSet`，否则管理 API 列表/测试顺序不确定。
+- **Spring 宽松绑定 env 名**（live 起服踩坑）：`agentflow.api.api-keys` 的 env 是 **`AGENTFLOW_API_API_KEYS`**（非 `AGENTFLOW_API_KEYS`）；`agentflow.admin.api-keys` → `AGENTFLOW_ADMIN_API_KEYS`。用错名静默 401（filter 白名单没加进 key）。
+
+**面试讲法**：「Kafka 消费者幂等从 check-then-act 升级成原子 claim——`tryClaim` 用条件 UPDATE 在 DB 层做 PENDING→RUNNING 独占转移，10 线程并发只有 1 个成功；R21 把工具级授权从配置硬编码升级成 DB 表 + 管理 API，admin key 门控变更，提交时强制即时生效——这是把安全从『静态配置』推进到『可运营的运行时授权』。」
