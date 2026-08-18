@@ -109,4 +109,62 @@ class RecoveryLoopTest {
         assertThat(draftCalls.get()).isEqualTo(2);
         assertThat(critiqueCalls.get()).isEqualTo(2);
     }
+
+    @Test
+    @DisplayName("mid-round 崩溃（回边命中但末层 barrier 未写）→ 恢复进入下一轮，finalize 最终执行")
+    void midRoundCrashEntersNextRound() {
+        WorkflowDefinition def = reflectionLoop();
+
+        // 模拟：round 0 的 draft(L0)+critique(L1) 完成（critique 回边命中），L2 finalize barrier 未写（崩溃在 L2 前）。
+        // recovery: latest barrier=(0,1) → crashLayerStep=2 < 3（不越界）；修复后按「该轮回边命中」触发轮次转换进 round 1。
+        InMemoryCheckpointManager cp = new InMemoryCheckpointManager();
+        cp.initWorkflow("wf", "test", "1.0", null);
+        cp.saveBarrier("wf", 0, 0, new WorkflowContext(Map.of("draft", "v1")));
+        cp.saveBarrier("wf", 0, 1, new WorkflowContext(Map.of("draft", "v1", "critique", "score=0.5")));
+        cp.saveRoutingDecisions("wf", 0, 1, List.of("draft->critique", "critique->draft"));
+        cp.updateStatus("wf", WorkflowStatus.RUNNING);
+
+        AtomicInteger finalizeCalls = new AtomicInteger();
+        Map<String, AgentFunction> agents = Map.of(
+                "d", input -> AgentOutput.of("v2"),
+                "c", input -> new AgentOutput("score=0.9", Map.of(), Map.of("score", 0.9), Map.of()),
+                "f", input -> { finalizeCalls.incrementAndGet(); return AgentOutput.of("final"); });
+
+        RecoveryProtocol recovery = new RecoveryProtocol(cp);
+        engine.recoverAndExecute(recovery, def, agents::get, new ChannelReducer(), "wf");
+
+        // 修复前：不触发轮次转换 → resume 丢 pending 迭代、SUCCESS 缺 finalize。
+        // 修复后：round 1 续跑 draft+critique+finalize → finalize 执行。
+        assertThat(finalizeCalls.get()).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("final-barrier 后崩溃（静态 DAG 全层完成）→ 收尾 SUCCESS，已完成节点不重跑")
+    void finalBarrierCrashDoesNotReRun() {
+        WorkflowDefinition def = new WorkflowDefinition(null, null,
+                List.of(node("A", "a"), node("B", "b"), node("C", "c")),
+                List.of(edge("A", "B"), edge("B", "C")));
+
+        // 模拟：3 层全 barrier 完（crashLayerStep=3=size），工作流已收敛。
+        InMemoryCheckpointManager cp = new InMemoryCheckpointManager();
+        cp.initWorkflow("wf", "test", "1.0", null);
+        cp.saveBarrier("wf", 0, 0, new WorkflowContext(Map.of("A", "a")));
+        cp.saveBarrier("wf", 0, 1, new WorkflowContext(Map.of("A", "a", "B", "b")));
+        cp.saveBarrier("wf", 0, 2, new WorkflowContext(Map.of("A", "a", "B", "b", "C", "c")));
+        cp.saveRoutingDecisions("wf", 0, 2, List.of("A->B", "B->C"));
+        cp.updateStatus("wf", WorkflowStatus.RUNNING);
+
+        AtomicInteger calls = new AtomicInteger();
+        Map<String, AgentFunction> agents = Map.of(
+                "a", input -> { calls.incrementAndGet(); return AgentOutput.of("a"); },
+                "b", input -> { calls.incrementAndGet(); return AgentOutput.of("b"); },
+                "c", input -> { calls.incrementAndGet(); return AgentOutput.of("c"); });
+
+        RecoveryProtocol recovery = new RecoveryProtocol(cp);
+        engine.recoverAndExecute(recovery, def, agents::get, new ChannelReducer(), "wf");
+
+        // 修复前：else 分支 crashLayerStep=0 → 整个静态 DAG 从层 0 重跑（calls==3，双计费）。
+        // 修复后：crashLayerStep 保持 3 → for 循环跑零层 → SUCCESS，节点不重跑（calls==0）。
+        assertThat(calls.get()).isEqualTo(0);
+    }
 }

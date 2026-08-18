@@ -189,14 +189,33 @@ class SemanticValidatorTest {
     }
 
     @Test
+    @DisplayName("回边源节点缺退出边 → 拒绝（解析期而非运行时 Fatal）")
+    void loopSourceWithoutExitEdgeRejected() {
+        assertThatThrownBy(() -> parseAndValidate("""
+                nodes:
+                  - { id: draft, agent: a }
+                  - { id: critique, agent: b }
+                edges:
+                  - { from: draft, to: critique }
+                  - { from: critique, to: draft, when: "output.score < 0.8", loop: true, max_iterations: 3 }
+                """))
+                .isInstanceOf(WorkflowValidationException.class)
+                .hasMessageContaining("缺退出边");
+    }
+
+    @Test
     @DisplayName("前向 loop 边（目标非源节点祖先，未形成环）→ 拒绝")
     void forwardLoopEdgeRejected() {
+        // A→B 是 loop 边但 B 不能静态到达 A（去 loop 边后 A 仅有 A→C）→ 前向 loop 边；
+        // A 有非 loop 出边 A→C 使「缺退出边」校验不先触发，聚焦验证方向校验。
         assertThatThrownBy(() -> parseAndValidate("""
                 nodes:
                   - { id: A, agent: a }
                   - { id: B, agent: b }
+                  - { id: C, agent: c }
                 edges:
                   - { from: A, to: B, when: "output.x == 1", loop: true, max_iterations: 3 }
+                  - { from: A, to: C }
                 """))
                 .isInstanceOf(WorkflowValidationException.class)
                 .hasMessageContaining("前向 loop 边");

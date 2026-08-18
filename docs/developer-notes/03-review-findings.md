@@ -252,3 +252,25 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 **面试讲法**：「这轮审出最有价值的两个 P1 都是『测试全绿但生产不生效』：一是 Postgres 路由持久化是接口 default no-op、只有内存实现，生产崩溃恢复直接丢路由——这正是我项目里反复出现的那类『mock 绿 ≠ 部署生效』坑，这次 4 个 reviewer 独立命中同一处；二是 execute 和 recoverAndExecute 两条 BSP 主循环复制粘贴后开始漂移，恢复路径漏了 on_error 三终态，5 个 reviewer 都抓到——教训是**核心循环要抽共享方法，复制必然漂移**。还有一个纯逻辑 bug：恢复期 BFS 判定节点是 fan-out 还是路由只看『有无 when 边』，漏了『已走 on_error』这一维，把失败节点当成并行 fan-out、复活了本应跳过的下游——单测全过因为恢复+on_error 组合路径根本没覆盖到。」
 
 **待人工/后续**：`execute`/`recoverAndExecute` 循环仍有 ~15 行重复（本次只修行为、未抽共享方法，见 maintainability P1）；`"from->to"` 边键字符串 4 处手写无单一真相源；`STATUS_FALLBACK` 指标 tag 无 metrics-registry 断言（当前 on_error 测试均 metrics=null）。
+
+---
+
+## v2 循环/回边 ce-code-review（2026-08-17，10 评审）
+
+**背景**：对 `feat/v2-loop-backedge` 全量 diff（U1–U7，27 文件 ~2750 行，BASE `3fa3f2c`）做 10-persona 代码审查。执行路径（迭代轮次、双 active 集合、checkpoint round 维度）逻辑正确、测试覆盖充分（RecoveryLoopTest / BspEngineLoopTest / CheckpointManagerTest round 往返）；抓到的 **2 个 P1 全在恢复路径**——第三次印证「execute / recoverAndExecute 双路径漂移」历史模式。
+
+**已应用修复（`fix(review)`：2 个 P1 + 补 2 个 P1 回归测试）**：
+- **轮次转换检测不完整（correctness + reliability + testing 3 票，conf 100）**：mid-round 崩溃（回边命中但末层 barrier 未写）不触发轮次转换 → resume 丢 pending 迭代、SUCCESS 缺 finalize；且 final-barrier 后崩溃 else 分支 `crashLayerStep=0` 被从层 0 整体重跑（R11 破坏 + 双计费）。修复：轮次转换判据改按「该轮路由含回边」（`hasLoopDecision`）→ 无条件 round++ 进下一轮；无回边命中时保持 `crashLayerStep=size` → for 循环跑零层 → 收尾 SUCCESS。
+- **backedge 目标非 layer-0 源时恢复复活上游（adversarial，conf 85）**：active 重建用 `computeReachable(layer-0 源)` BFS 而非回边目标，backedge 非源时复活已完成轮内上游 → 双计费。修复：轮次转换后 `active = backedgeTargets(上一轮决策)`（复刻 execute 的 nextActive）。
+- 补 2 个 P1 回归测试：`midRoundCrashEntersNextRound`（mid-round 崩溃 finalize 最终执行）+ `finalBarrierCrashDoesNotReRun`（静态/收敛 DAG 末层后崩溃节点不重跑）。
+
+**记录为已知残留/后续（P2/P3）**：
+- `execute` / `recoverAndExecute` 外层轮次 while 循环整体重复（maintainability P1 conf 100，第三轮同款——v2 条件分支 review 已提「抽共享」未做，本次再次确认）→ 抽 `runRounds` 共享方法。
+- `maxIterationsOf` 只取第一条 loop 边上限（adversarial + reliability，P2）——validator 不拒绝多回边，与「单回边 scope」不符，多回边静默只按首个上限约束。
+- V5 migration 只进不退（drop 3 constraints，data-migration P2）——标注不可逆、非滚动部署；否则旧节点 ON CONFLICT 报错 → checkpoint 丢 → LLM 双计费。
+- `DiagnosisService` 字符串字面量识别「迭代超限」（maintainability P2）+ 新分支零测试（testing P2）——建议 `FatalException` 子类或 workflowErrorKind 枚举替代 message 子串。
+- `saveBarrier` / `saveRoutingDecisions` 未捕获（reliability P2，pre-existing，循环放大）——transient PG 故障中止为 raw RuntimeException 无 FAILED 状态，破坏 recovery stray 防护。
+- Postgres round 维度 SQL（V5 + ON CONFLICT/SELECT round 过滤）零集成测试（multi-reviewer testing_gaps）——历史 PG 零测试缺口延续，需补 Failsafe IT。
+- backedge 源节点缺退出边校验（correctness P3）——忘记退出边时运行时 Fatal 而非解析期拒绝。
+
+**面试讲法**：「这轮 10-persona 审查抓到 2 个 P1，都在恢复路径，第三次印证『execute 和 recoverAndExecute 两条主循环复制粘贴必然漂移』——这次是轮次转换检测：mid-round 崩溃（回边命中但末层 barrier 未写）不触发转换，恢复报 SUCCESS 但退出节点从未执行；final-barrier 后被从层 0 整体重跑导致 LLM 双计费。修复方向是判断『该轮实质完成』要按该轮路由是否含回边，而不是看崩溃层号——恢复的 round 模型是 execute 的简化副本，边界情况处理不完整。测试全绿是因为这些崩溃窗口在 mock/恢复路径根本没覆盖到。」

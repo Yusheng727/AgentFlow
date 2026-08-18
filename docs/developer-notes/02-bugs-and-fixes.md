@@ -418,3 +418,13 @@ v1 多出边 = 并行 fan-out；v2 一个节点一旦有 `when` 边，其无条�
 - **根因**：测试注释自认"created_at 用默认 now()，靠插入先后自然形成倒序"——假设插入顺序 = 时间顺序。H2 `now()` 毫秒精度，快速连续插入同时间戳 → `ORDER BY created_at DESC` 遇相等值顺序不确定。
 - **修复**：`insert()` 显式传 `secondsAgo`，`created_at = DATEADD('SECOND', ?, CURRENT_TIMESTAMP)` 确定性错开时间戳，倒序断言不再碰运气。
 - **教训**：断言依赖 DB 自动时间戳排序 = 埋 flaky。要么显式控制排序键，要么断言用 `containsExactlyInAnyOrder`（但后者就测不到排序语义了）。
+
+## v2 循环/回边（2026-08-17，ce-code-review 10 评审抓到）
+
+### 坑（P1）：recoverAndExecute 轮次转换检测不完整——mid-round 崩溃丢 pending 迭代
+
+做循环/回边的恢复 round 维度时，第一版轮次转换检测只按 `crashLayerStep >= allSteps.size()`（崩溃在末层 barrier 后）触发。实测发现：崩溃在 round 中途（回边已命中、末层 barrier 未写）时 `nextSuperStep` 不越界，不触发转换，resume 跑空层后 SUCCESS——但 pending 的迭代 + 退出节点从未执行。**根因**：该轮「实质完成」的判据不是「末层 barrier 已写」，而是「回边已命中」（剩余仅空层 barrier）。修复：`hasLoopDecision(该轮路由决策)` 即触发 round++ 进下一轮；同时 active 重建改从「回边目标」而非 layer-0 源 BFS（否则 backedge 目标非源时复活已完成轮内上游 → 双计费）。**教训**：恢复的 round 模型是 execute 的简化副本，复制必然漂移（历史 P0 复发模式）；轮次边界判据要按「该轮路由含回边」而非「崩溃层号」。
+
+### 坑（P1）：final-barrier 后崩溃被从层 0 整体重跑（R11 破坏 + 双计费）
+
+recoverAndExecute 的轮次转换 else 分支（末 barrier 在最后一层 + 无回边）原本 `crashLayerStep=0` 保守重跑——对静态 DAG/已收敛循环，这等于把整个工作流从层 0 重执行，旧 v2 代码 `subList(nextSuperStep==size, size)` 为空优雅收尾。违背 R11「无回边行为不变」+ 每轮 LLM 双计费。修复：无回边命中时保持 `crashLayerStep=size` → for 循环跑零层 → SUCCESS。**教训**：恢复路径的「收敛收尾」要镜像 execute 的完成语义，不能为了「理论不应发生」的防御性分支破坏正常路径——**测试绿 ≠ 生产生效**，mock/recovery 路径都要回归测（RecoveryLoopTest 补了 `finalBarrierCrashDoesNotReRun` + `midRoundCrashEntersNextRound` 两个 P1 回归测试）。

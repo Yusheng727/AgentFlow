@@ -100,6 +100,13 @@ public class SemanticValidator {
                     throw new WorkflowValidationException(
                             "无上限环: " + e.from() + " → " + e.to() + "（回边必须声明正数 max_iterations）");
                 }
+                // 回边源节点必须至少一条非 loop 出边（退出边），否则回边恒命中直到 max_iterations
+                // ——运行时「无分支命中」Fatal 应在解析期拒绝（correctness P3）
+                boolean hasExitEdge = edges.stream().anyMatch(x -> x.from().equals(e.from()) && !x.loop());
+                if (!hasExitEdge) {
+                    throw new WorkflowValidationException(
+                            "回边源节点缺退出边: " + e.from() + "（回边命中后无默认/条件边离开循环）");
+                }
             } else if (e.maxIterations() != null) {
                 throw new WorkflowValidationException(
                         "非回边声明 max_iterations: " + e.from() + " → " + e.to());

@@ -323,6 +323,21 @@ public final class BspEngine {
         return false;
     }
 
+    /** v2 循环：取「已走回边」的目标集合——恢复期进入下一轮的起点（复刻 execute 的 nextActive）。
+     *  用于修复 backedge-target：新轮起点是回边目标而非 layer-0 源，避免复活已完成轮内上游节点。 */
+    private static Set<String> backedgeTargets(WorkflowDefinition def, List<String> takenEdges) {
+        Set<String> targets = new HashSet<>();
+        if (def.edges() == null) {
+            return targets;
+        }
+        for (EdgeDefinition e : def.edges()) {
+            if (e.loop() && takenEdges.contains(EdgeDefinition.edgeKey(e.from(), e.to()))) {
+                targets.add(e.to());
+            }
+        }
+        return targets;
+    }
+
     /** v2 循环：迭代轮次超限检查（per-loop max_iterations + 引擎 maxTotalRounds 双保险，execute/recover 共享）。 */
     private static void checkIterationCap(int round, int maxIterations) {
         if (maxIterations >= 0 && round >= maxIterations) {
@@ -399,21 +414,24 @@ public final class BspEngine {
 
         int round = state.round();
         int crashLayerStep = state.nextSuperStep();
-        // 轮次转换检测：最新 barrier 是「最后一层」且该轮回边命中 → 崩溃在轮边界，进入下一轮从层 0 续跑
-        if (crashLayerStep >= allSteps.size()) {
-            if (hasLoopDecision(cp.findRoutingDecisions(workflowId, round), def)) {
-                round++;
-                crashLayerStep = 0;
-                log.info("恢复 wf={}: 轮边界回边命中，进入下一轮 round={} 从层 0 续跑", workflowId, round);
-            } else {
-                crashLayerStep = 0; // 无回边且越界（理论不应发生），保守从层 0 续跑
-            }
+        List<String> crashedRoundDecisions = cp.findRoutingDecisions(workflowId, round);
+        // 轮次转换检测：该轮回边已命中（critique->draft 在路由决策）→ 该轮实质完成（剩余仅空层 barrier），
+        // 无论崩溃在末层 barrier 前/后都应进入下一轮从层 0 续跑。
+        // 修复 mid-round crash：回边命中但末层 barrier 未写时此前不触发转换 → resume 丢 pending 迭代、SUCCESS 缺 finalize。
+        boolean thisRoundHasBackedge = hasLoopDecision(crashedRoundDecisions, def);
+        if (thisRoundHasBackedge) {
+            round++;
+            crashLayerStep = 0;
+            log.info("恢复 wf={}: 该轮回边命中，进入下一轮 round={} 从层 0 续跑", workflowId, round);
         }
+        // 无回边命中且 crashLayerStep >= size：latest barrier 已在最后一层、工作流已收敛——
+        // crashLayerStep 保持 size → 下方 for 循环跑零层 → 收尾 SUCCESS。
+        // 修复 final-barrier：此前 else 分支 crashLayerStep=0 把整个已收敛 DAG 从层 0 重跑（旧 v2 remaining 为空优雅收尾）。
         Set<String> excluded = (round == state.round()) ? state.completedNodeIds() : Set.of();
 
-        // v2 条件分支/循环：重建可达集 = 源节点 ∪ {已走边目标}。已走边 = 当前 round 持久化路由决策
-        // + 崩溃层已完成节点的路由重算（其输出在 node 级 checkpoint，路由是输出的确定性函数）。
-        List<String> takenEdges = new ArrayList<>(cp.findRoutingDecisions(workflowId, round));
+        // v2 条件分支/循环：重建可达集。已走边 = 当前 round 持久化路由决策 + 崩溃层已完成节点的路由重算。
+        List<String> takenEdges = new ArrayList<>(round == state.round()
+                ? crashedRoundDecisions : cp.findRoutingDecisions(workflowId, round));
         for (NodeOutputStore n : cp.findCompletedNodes(workflowId, round, crashLayerStep)) {
             try {
                 // 恢复期 inputs 不可得（原入参未持久化），传空 Map；context 用重建后的 channel 快照
@@ -424,7 +442,14 @@ public final class BspEngine {
                 log.warn("恢复 wf={}: 崩溃层已完成节点 {} 路由重算失败: {}", workflowId, n.nodeId(), fe.getMessage());
             }
         }
-        Set<String> active = computeReachable(allSteps.get(0).nodeIds(), dag, def, takenEdges);
+        Set<String> active;
+        if (round != state.round()) {
+            // 新轮起点 = 回边目标（复刻 execute 的 nextActive），不从 layer-0 源 BFS——
+            // 否则 backedge 目标非源时会复活已完成轮内上游节点（修复 backedge-target，双计费）。
+            active = backedgeTargets(def, crashedRoundDecisions);
+        } else {
+            active = computeReachable(allSteps.get(0).nodeIds(), dag, def, takenEdges);
+        }
         Set<String> onErrorActivated = rebuildOnErrorActivated(def, takenEdges);
 
         int maxIterations = maxIterationsOf(def);
