@@ -73,6 +73,11 @@
                 <artifactId>agentflow-adapters-langchain4j</artifactId>
                 <version>${agentflow.version}</version>
             </dependency>
+            <dependency>
+                <groupId>com.agentflow</groupId>
+                <artifactId>agentflow-kafka-starter</artifactId>
+                <version>${agentflow.version}</version>
+            </dependency>
             <!-- LangChain4j 1.0.0 GA：ChatModel + @Tool + TokenUsage（KTD-7 第二适配器窄表面） -->
             <dependency>
                 <groupId>dev.langchain4j</groupId>

@@ -45,7 +45,13 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 ## 3. v1.1 路线图（介于 v1 / v2）
 
 - ~~**`LangChain4jAgentAdapter`**（R5）~~ → ✅ **已交付**（2026-08-10，`f4651b2`，本地未推送）——新模块 `agentflow-adapters/langchain4j`（1.0.0 GA），依赖面仅 core + langchain4j 无 Spring AI，窄表面对齐（SpEL/ChatModel/@Tool 循环/TokenUsage/ErrorClassifier/trace/cancel）；KTD-7 可移植性约束实证
-- **分布式模式**：Redis + Kafka（R18③ / R19，v1 用内存 @Async + DB 任务表轻量替代）——Kafka 环境已落地（2026-08-14，`54e5415`：`apache/kafka:3.9.2` KRaft 免 Zookeeper，`--profile distributed`），引擎侧 R18③/R19 仍未动
+- **分布式模式**：Redis + Kafka（R18③ / R19，v1 用内存 @Async + DB 任务表轻量替代）——**Kafka 提交/执行解耦（v1.1 U1–U3）✅ 代码已交付**（2026-08-18，`feat/v11-kafka-e2e`，⚠️ 本地未 commit/push，待 ce-code-review；下表 live 命令同）：`agentflow-kafka-starter`（producer `KafkaWorkflowDispatcher` + consumer `KafkaWorkflowConsumer` + `KafkaAgentFlowAutoConfiguration` 属性门控）+ `KafkaDispatchE2eIT`（真 Kafka `localhost:9092` 端到端：dispatch→consumer→BspEngine→SUCCESS + 重放幂等）。demo-api 已接 kafka-starter（`agentflow.kafka.enabled` opt-in，默认本地 dispatcher 不变）。**单 JVM 语义**：producer/consumer 同应用；真跨节点 read-after-write 延后，Kafka 部署强化（topic ACL/SASL_SSL）与 R18③/R19 引擎侧分布式仍待后续。
+  - **live 运行**（真 Kafka 起 `docker compose --profile distributed up -d`）：
+    1. 起 demo-api（Kafka 派发）：`mvn -s settings.xml -pl demo-api spring-boot:run -Dspring-boot.run.arguments="--agentflow.kafka.enabled=true --spring.kafka.bootstrap-servers=localhost:9092"`
+    2. 提交 2 节点串行工作流：`curl -X POST localhost:8080/api/workflows -H 'X-API-Key: demo-key-1234567890abcdef' -H 'Content-Type: application/json' -d '{"workflowName":"kafka-live","version":"1.0","yamlContent":"agentflow: {version: \"1.0\"}\nnodes:\n  - {id: step1, agent: mock, prompt_template: \"t1\", mock_response: \"a\"}\n  - {id: step2, agent: mock, prompt_template: \"t2\", mock_response: \"b\"}\nedges:\n  - {from: step1, to: step2}\n","inputs":{}}'` → 得 `workflowId`
+    3. 轮询终态：`curl -s localhost:8080/api/workflows/<id>/status -H 'X-API-Key: demo-key-1234567890abcdef'` → 直至 `"status":"SUCCESS"`（经 Kafka topic `agentflow.workflow.executions` 派发）
+    4. 指标：`curl -s localhost:8080/actuator/prometheus | grep agentflow_workflow` → `agentflow_workflow_executed_total{status="success"}` 计数 +1
+  - **验证证据**：`KafkaDispatchE2eIT` 真 Kafka 实跑绿（Skipped: 0）；无 Kafka 时整类跳过不红（AE2）
 - **工具级授权 DB 表 + 管理 API**（R21，v1 为 config/env 硬编码 `CallerToolAllowlist`）
 - **checkpoint 敏感数据列级加密**（R22 注明的升级点，v1 文档标注"明文存储 + R21 鉴权保护"）
 

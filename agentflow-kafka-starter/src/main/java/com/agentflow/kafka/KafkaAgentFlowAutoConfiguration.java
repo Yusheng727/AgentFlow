@@ -68,10 +68,12 @@ public class KafkaAgentFlowAutoConfiguration {
     @ConditionalOnMissingBean(name = "agentflowKafkaConsumerFactory")
     public ConsumerFactory<String, String> agentflowKafkaConsumerFactory(
             @Value("${spring.kafka.bootstrap-servers:localhost:9092}") String bootstrapServers,
-            @Value("${spring.kafka.consumer.group-id:agentflow-workers}") String groupId) {
+            @Value("${spring.kafka.consumer.group-id:agentflow-workers}") String groupId,
+            @Value("${spring.kafka.consumer.auto-offset-reset:earliest}") String autoOffsetReset) {
         Map<String, Object> props = new HashMap<>();
         props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ConsumerConfig.GROUP_ID_CONFIG, groupId);
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetReset);
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
         return new DefaultKafkaConsumerFactory<>(props);
@@ -90,14 +92,30 @@ public class KafkaAgentFlowAutoConfiguration {
 
     @Bean
     public KafkaWorkflowDispatcher kafkaWorkflowDispatcher(
-            KafkaTemplate<String, String> agentflowKafkaTemplate, ObjectMapper mapper) {
-        return new KafkaWorkflowDispatcher(agentflowKafkaTemplate, mapper);
+            KafkaTemplate<String, String> agentflowKafkaTemplate, ObjectMapper agentflowKafkaObjectMapper) {
+        return new KafkaWorkflowDispatcher(agentflowKafkaTemplate, agentflowKafkaObjectMapper);
     }
 
     @Bean
     public KafkaWorkflowConsumer kafkaWorkflowConsumer(
             WorkflowExecutionService workflowExecutionService, CheckpointManager checkpointManager,
-            ObjectMapper mapper) {
-        return new KafkaWorkflowConsumer(workflowExecutionService, checkpointManager, mapper);
+            ObjectMapper agentflowKafkaObjectMapper) {
+        return new KafkaWorkflowConsumer(workflowExecutionService, checkpointManager, agentflowKafkaObjectMapper);
+    }
+
+    /**
+     * wire 格式专用 Jackson 2 ObjectMapper（KTD-D）：String 承载 JSON 的序列化/反序列化归属 starter 自持，
+     * 不依赖应用容器提供——Boot 4.1 容器的 ObjectMapper 是 Jackson 3（{@code tools.jackson}），与
+     * kafka-starter 的 {@code com.fasterxml.jackson} 类型不同，注入外部 bean 会因类型缺失启动失败。
+     *
+     * <p>消费端 {@code auto.offset.reset} 默认 {@code earliest}（reliability review P1）：新消费组无已提交
+     * offset 时，{@code latest} 会从分区末端起读、静默丢掉「订阅前已 produce」的提交（工作流永 PENDING、
+     * 无重调和兜底）。本消费者幂等（终态跳过，KTD-F），earliest 只是把旧消息重扫一遍并跳过，无双计费——
+     * 对任务队列语义 strictly safer。
+     */
+    @Bean
+    @ConditionalOnMissingBean(name = "agentflowKafkaObjectMapper")
+    public ObjectMapper agentflowKafkaObjectMapper() {
+        return new ObjectMapper();
     }
 }

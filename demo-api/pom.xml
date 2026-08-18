@@ -30,6 +30,13 @@
             <groupId>com.agentflow</groupId>
             <artifactId>agentflow-adapters-langchain4j</artifactId>
         </dependency>
+        <!-- v1.1 Kafka 异步分发（KTD-8）：demo-api 生产接线点——kafka-starter 在 classpath 时经
+             agentflow.kafka.enabled 门控把 WorkflowController 的本地 dispatcher 替换为 Kafka 派发
+             （ApiConfig 已按 havingValue=false 条件留默认本地 bean；默认不启用，路径不变向后兼容）。 -->
+        <dependency>
+            <groupId>com.agentflow</groupId>
+            <artifactId>agentflow-kafka-starter</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
