@@ -48,16 +48,18 @@ public class KafkaWorkflowConsumer {
             return;
         }
 
-        Optional<WorkflowStatus> status = checkpointManager.findStatus(message.workflowId());
-        // 只执行「已 staged」的工作流（initWorkflow 写 PENDING，仅受信 REST submit 产生）：
-        // 从未 initWorkflow 的任意 id 不执行——防 ledger 污染 + 越 trust boundary 的成本放大
-        // （security review P2：生产必须 topic ACL+SASL_SSL，见 KTD-F）。
-        if (status.isEmpty()) {
-            log.error("丢弃未 staged 的工作流消息（无 initWorkflow 记录）wf={}", message.workflowId());
-            return;
-        }
-        if (isTerminal(status.get())) {
-            log.info("跳过已终态工作流（重放防护）wf={} status={}", message.workflowId(), status.get());
+        // 原子 claim（KTD-F 升级）：仅 PENDING→RUNNING 成功才执行——一次消费只跑一遍。
+        // 未 staged（null）/ 已被并发消费者 claim（RUNNING）/ 已终态（SUCCESS|FAILED）均 claim 失败跳过，
+        // 把 check-then-act 的去重升级为原子条件转移（security review P2：防并发重复投递双跑双计费）。
+        if (!checkpointManager.tryClaim(message.workflowId())) {
+            Optional<WorkflowStatus> current = checkpointManager.findStatus(message.workflowId());
+            if (current.isEmpty()) {
+                // 从未 initWorkflow 的任意 id：防 ledger 污染 + 越 trust boundary 的成本放大
+                log.error("丢弃未 staged 的工作流消息（无 initWorkflow 记录）wf={}", message.workflowId());
+            } else {
+                log.info("跳过未 claim 的工作流（重放防护/并发去重）wf={} status={}",
+                        message.workflowId(), current.get());
+            }
             return;
         }
         try {
@@ -68,9 +70,5 @@ public class KafkaWorkflowConsumer {
             log.error("Kafka 消费者执行失败 wf={} name={}", message.workflowId(), message.workflowName(), e);
             checkpointManager.updateStatus(message.workflowId(), WorkflowStatus.FAILED);
         }
-    }
-
-    private static boolean isTerminal(WorkflowStatus s) {
-        return s == WorkflowStatus.SUCCESS || s == WorkflowStatus.FAILED;
     }
 }

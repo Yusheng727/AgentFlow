@@ -201,6 +201,35 @@ class CheckpointManagerTest {
         }
 
         @Test
+        @DisplayName("tryClaim：PENDING→RUNNING 原子 claim；二次/未 staged/终态均拒绝")
+        void tryClaimAtomic() {
+            cm.initWorkflow("wf-claim", "wf", "1.0", "caller");
+            assertThat(cm.tryClaim("wf-claim")).isTrue(); // PENDING → RUNNING
+            assertThat(cm.findStatus("wf-claim")).contains(WorkflowStatus.RUNNING);
+            assertThat(cm.tryClaim("wf-claim")).isFalse(); // 已 RUNNING → 拒绝（并发去重）
+            assertThat(cm.tryClaim("never-staged")).isFalse(); // 未 staged → 拒绝
+
+            cm.initWorkflow("wf-done", "wf", "1.0", "caller");
+            cm.updateStatus("wf-done", WorkflowStatus.SUCCESS);
+            assertThat(cm.tryClaim("wf-done")).isFalse(); // 终态 → 拒绝
+        }
+
+        @Test
+        @DisplayName("tryClaim 并发：10 线程 claim 同一工作流，恰一个成功（防双跑双计费）")
+        void tryClaimConcurrentExactlyOneWins() {
+            cm.initWorkflow("wf-race", "wf", "1.0", "caller");
+            CompletableFuture<Boolean>[] futures = new CompletableFuture[10];
+            for (int i = 0; i < futures.length; i++) {
+                futures[i] = CompletableFuture.supplyAsync(() -> cm.tryClaim("wf-race"));
+            }
+            CompletableFuture.allOf(futures).join();
+            long winners = java.util.Arrays.stream(futures)
+                    .map(CompletableFuture::join).filter(Boolean.TRUE::equals).count();
+            assertThat(winners).isEqualTo(1);
+            assertThat(cm.findStatus("wf-race")).contains(WorkflowStatus.RUNNING);
+        }
+
+        @Test
         @DisplayName("明细排序：清单按单调插入序号倒序（后提交在前，不依赖 created_at 时钟精度）")
         void listByCreatedByOrderingIsDeterministic() {
             // 紧挨提交（与同一测试内连续提交的 demo 场景一致），created_at 可能精确相等

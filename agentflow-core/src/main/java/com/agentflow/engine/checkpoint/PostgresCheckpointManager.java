@@ -306,6 +306,20 @@ public final class PostgresCheckpointManager implements CheckpointManager {
     }
 
     @Override
+    public boolean tryClaim(String workflowId) {
+        // 单条条件 UPDATE：仅 PENDING→RUNNING 命中，返回影响行数判定是否取得执行权（原子，防并发双跑）
+        return jdbc.update(TRY_CLAIM_SQL, workflowId) == 1;
+    }
+
+    /** tryClaim 的条件转移 SQL（package-private 单一真相源，PostgresCheckpointManagerTest 用 H2 兼容表断言）。 */
+    static final String TRY_CLAIM_SQL =
+            """
+            UPDATE workflow_executions
+            SET status = 'RUNNING', updated_at = now()
+            WHERE id = ? AND status = 'PENDING'
+            """;
+
+    @Override
     public Optional<WorkflowStatus> findStatus(String workflowId) {
         List<WorkflowStatus> results = jdbc.query(
                 """

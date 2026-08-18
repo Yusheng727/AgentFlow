@@ -87,6 +87,22 @@ class PostgresCheckpointManagerTest {
     }
 
     @Test
+    @DisplayName("tryClaim 条件 UPDATE：仅 PENDING→RUNNING 命中一行，再次/终态/不存在均零行")
+    void tryClaimOnlyTransitionsPendingToRunning() {
+        insert("wf-claim", "w1", "creator-A", "PENDING", 1);
+        insert("wf-done", "w2", "creator-A", "SUCCESS", 0);
+
+        assertThat(jdbc.update(PostgresCheckpointManager.TRY_CLAIM_SQL, "wf-claim")).isEqualTo(1);
+        assertThat(jdbc.update(PostgresCheckpointManager.TRY_CLAIM_SQL, "wf-claim")).isEqualTo(0); // 已 RUNNING
+        assertThat(jdbc.update(PostgresCheckpointManager.TRY_CLAIM_SQL, "wf-done")).isEqualTo(0);  // 终态不 claim
+        assertThat(jdbc.update(PostgresCheckpointManager.TRY_CLAIM_SQL, "wf-nope")).isEqualTo(0);  // 不存在
+
+        String status = jdbc.queryForObject(
+                "SELECT status FROM workflow_executions WHERE id='wf-claim'", String.class);
+        assertThat(status).isEqualTo("RUNNING");
+    }
+
+    @Test
     @DisplayName("无匹配创建者 → 返回空列表")
     void listWithUnknownCreatedByReturnsEmpty() {
         insert("wf-a", "w1", "creator-A", "PENDING", 0);

@@ -106,6 +106,20 @@ public interface CheckpointManager {
     void updateStatus(String workflowId, WorkflowStatus status);
 
     /**
+     * 原子 claim（KTD-F 幂等升级，security review P2）：仅当工作流当前为 PENDING 时置 RUNNING 并返回 true。
+     *
+     * <p>用于把 Kafka 消费者 / 并发重复投递的「check-then-act」去重升级为原子条件转移——
+     * 两个并发消费者读同一未执行工作流时，只有一个能 claim 成功，其余返回 false 跳过（防双跑双计费）。
+     * 未 staged（null）/ 已被 claim（RUNNING）/ 已终态（SUCCESS|FAILED）均返回 false。
+     * 默认实现恒返回 true（不 claim，保持旧实现行为）；InMemory/Postgres 覆盖为原子语义。
+     *
+     * @return 本调用是否取得该工作流的执行权
+     */
+    default boolean tryClaim(String workflowId) {
+        return true;
+    }
+
+    /**
      * 查找工作流当前执行状态（U5 P0 修复新增）。
      *
      * <p>Recovery 据此鉴别 timeout abort 后的 stray COMPLETED 记录：若工作流已被引擎标记为

@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
@@ -150,6 +151,20 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
     @Override
     public Optional<WorkflowStatus> findStatus(String workflowId) {
         return Optional.ofNullable(workflowStatuses.get(workflowId));
+    }
+
+    @Override
+    public boolean tryClaim(String workflowId) {
+        AtomicBoolean claimed = new AtomicBoolean(false);
+        // ConcurrentHashMap.compute：per-key 原子，PENDING→RUNNING 只发生一次（并发重复投递去重）
+        workflowStatuses.compute(workflowId, (id, old) -> {
+            if (old == WorkflowStatus.PENDING) {
+                claimed.set(true);
+                return WorkflowStatus.RUNNING;
+            }
+            return old; // null（未 staged）/ RUNNING / 终态 → 不 claim
+        });
+        return claimed.get();
     }
 
     @Override

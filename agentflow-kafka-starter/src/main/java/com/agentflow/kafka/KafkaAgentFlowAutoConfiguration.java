@@ -4,6 +4,8 @@ import com.agentflow.api.WorkflowExecutionService;
 import com.agentflow.engine.checkpoint.CheckpointManager;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -116,6 +118,11 @@ public class KafkaAgentFlowAutoConfiguration {
     @Bean
     @ConditionalOnMissingBean(name = "agentflowKafkaObjectMapper")
     public ObjectMapper agentflowKafkaObjectMapper() {
-        return new ObjectMapper();
+        // JavaTimeModule：wire 里 java.time（LocalDate/Instant 等）inputs 才能序列化/反序列化
+        // （review 残留——此前裸 mapper，java.time 值会失败；jsr310 随项目 classpath 提供）。
+        // 禁用 WRITE_DATES_AS_TIMESTAMPS：否则 LocalDate 写成 [2026,8,18] 数组而非 ISO 字符串，读回 Object 变 List。
+        return new ObjectMapper()
+                .registerModule(new JavaTimeModule())
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
     }
 }
