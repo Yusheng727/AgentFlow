@@ -33,6 +33,7 @@
         <module>agentflow-adapters/spring-ai</module>
         <module>agentflow-adapters/langchain4j</module>
         <module>agentflow-api</module>
+        <module>agentflow-kafka-starter</module>
         <module>agentflow-starter</module>
         <module>demo-supplier-risk</module>
         <module>demo-contract-review</module>

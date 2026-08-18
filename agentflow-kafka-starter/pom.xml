@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>com.agentflow</groupId>
+        <artifactId>agentflow-parent</artifactId>
+        <version>1.0.0-SNAPSHOT</version>
+    </parent>
+
+    <artifactId>agentflow-kafka-starter</artifactId>
+    <name>AgentFlow Kafka Starter</name>
+    <description>v1.1 Kafka 异步分发（KTD-8）：submit → Kafka topic → consumer 跑 BspEngine，提交/执行解耦</description>
+
+    <!-- wiring/auto-config 为主，覆盖率门禁跳过（对齐 demo 模块先例）；行为逻辑由 U2/U3 单测/IT 覆盖 -->
+    <properties>
+        <jacoco.skip>true</jacoco.skip>
+    </properties>
+
+    <dependencies>
+        <dependency>
+            <groupId>com.agentflow</groupId>
+            <artifactId>agentflow-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.agentflow</groupId>
+            <artifactId>agentflow-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.kafka</groupId>
+            <artifactId>spring-kafka</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-autoconfigure</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-test</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>
