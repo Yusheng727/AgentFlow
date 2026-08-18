@@ -3,6 +3,9 @@ package com.agentflow.demo.api;
 import com.agentflow.adapters.langchain4j.LangChain4jAgentAdapter;
 import com.agentflow.adapters.mock.MockAgentFunction;
 import com.agentflow.agent.NodeRegistry;
+import com.agentflow.api.LocalVirtualThreadDispatcher;
+import com.agentflow.api.WorkflowDispatcher;
+import com.agentflow.api.WorkflowExecutionService;
 import com.agentflow.api.security.ApiKeyAuthFilter;
 import com.agentflow.api.security.CallerToolAllowlist;
 import com.agentflow.api.security.WorkflowOwnershipChecker;
@@ -28,6 +31,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -200,6 +204,23 @@ public class ApiConfig {
     @Bean
     public WorkflowVersionManager workflowVersionManager(WorkflowDefinitionStore workflowDefinitionStore) {
         return new WorkflowVersionManager(workflowDefinitionStore);
+    }
+
+    // ─── 异步派发（v1.1，KTD-8/KTD-B）：默认本地 VT 调度，kafka-starter 装配时经
+    //      agentflow.kafka.enabled 门控替换为 Kafka 派发（KTD-C） ───
+
+    @Bean
+    public WorkflowExecutionService workflowExecutionService(
+            BspEngine bspEngine, NodeRegistry nodeRegistry, CheckpointManager checkpointManager,
+            WorkflowVersionManager workflowVersionManager) {
+        return new WorkflowExecutionService(bspEngine, nodeRegistry, checkpointManager,
+                new ChannelReducer(), workflowVersionManager);
+    }
+
+    @Bean
+    @ConditionalOnProperty(name = "agentflow.kafka.enabled", havingValue = "false", matchIfMissing = true)
+    public WorkflowDispatcher workflowDispatcher(WorkflowExecutionService workflowExecutionService) {
+        return new LocalVirtualThreadDispatcher(workflowExecutionService);
     }
 
     /** 鉴权过滤：{@code /api/*} 需 {@code X-API-Key}（含 UI 默认 demo key，另有 env {@code AGENTFLOW_API_KEYS} 追加）。 */

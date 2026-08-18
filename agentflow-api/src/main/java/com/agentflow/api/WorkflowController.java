@@ -11,7 +11,6 @@ import com.agentflow.dsl.WorkflowDSLParser;
 import com.agentflow.dsl.WorkflowValidationException;
 import com.agentflow.engine.BspEngine;
 import com.agentflow.engine.ChannelReducer;
-import com.agentflow.engine.WorkflowExecutionException;
 import com.agentflow.engine.checkpoint.CheckpointManager;
 import com.agentflow.engine.checkpoint.WorkflowExecutionRecord;
 import com.agentflow.engine.checkpoint.WorkflowStatus;
@@ -39,8 +38,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 /**
  * Workflow REST Controller（U14）。
@@ -74,7 +71,7 @@ public class WorkflowController {
     private final WorkflowSubmissionGuard submissionGuard;
     private final NodeRegistry nodeRegistry;
     private final com.agentflow.version.WorkflowVersionManager versionManager;
-    private final ExecutorService executor;
+    private final WorkflowDispatcher dispatcher;
 
     public WorkflowController(WorkflowDSLParser parser,
                               BspEngine engine,
@@ -87,7 +84,21 @@ public class WorkflowController {
                 versionManager,
                 // 默认守卫：仅启用节点数上界（防无界 VT），成本检查需 model+预算由 wiring 显式配置
                 new WorkflowSubmissionGuard(new CostCalculator(), null,
-                        WorkflowSubmissionGuard.DEFAULT_MAX_NODES, null));
+                        WorkflowSubmissionGuard.DEFAULT_MAX_NODES, null),
+                defaultDispatcher(engine, nodeRegistry, checkpointManager, versionManager));
+    }
+
+    public WorkflowController(WorkflowDSLParser parser,
+                              BspEngine engine,
+                              CheckpointManager checkpointManager,
+                              WorkflowOwnershipChecker ownershipChecker,
+                              CallerToolAllowlist toolAllowlist,
+                              NodeRegistry nodeRegistry,
+                              com.agentflow.version.WorkflowVersionManager versionManager,
+                              WorkflowSubmissionGuard submissionGuard) {
+        this(parser, engine, checkpointManager, ownershipChecker, toolAllowlist, nodeRegistry,
+                versionManager, submissionGuard,
+                defaultDispatcher(engine, nodeRegistry, checkpointManager, versionManager));
     }
 
     @Autowired
@@ -98,7 +109,8 @@ public class WorkflowController {
                               CallerToolAllowlist toolAllowlist,
                               NodeRegistry nodeRegistry,
                               com.agentflow.version.WorkflowVersionManager versionManager,
-                              WorkflowSubmissionGuard submissionGuard) {
+                              WorkflowSubmissionGuard submissionGuard,
+                              WorkflowDispatcher dispatcher) {
         this.parser = Objects.requireNonNull(parser, "parser");
         this.engine = Objects.requireNonNull(engine, "engine");
         this.checkpointManager = Objects.requireNonNull(checkpointManager, "checkpointManager");
@@ -107,7 +119,17 @@ public class WorkflowController {
         this.submissionGuard = Objects.requireNonNull(submissionGuard, "submissionGuard");
         this.nodeRegistry = Objects.requireNonNull(nodeRegistry, "nodeRegistry");
         this.versionManager = Objects.requireNonNull(versionManager, "versionManager");
-        this.executor = Executors.newVirtualThreadPerTaskExecutor();
+        this.dispatcher = Objects.requireNonNull(dispatcher, "dispatcher");
+    }
+
+    /** 未注入 dispatcher 时默认本地虚拟线程派发（等价 v1 {@code executor.submit} 行为，向后兼容）。 */
+    private static WorkflowDispatcher defaultDispatcher(BspEngine engine,
+                                                        NodeRegistry nodeRegistry,
+                                                        CheckpointManager checkpointManager,
+                                                        com.agentflow.version.WorkflowVersionManager versionManager) {
+        WorkflowExecutionService service = new WorkflowExecutionService(
+                engine, nodeRegistry, checkpointManager, new ChannelReducer(), versionManager);
+        return new LocalVirtualThreadDispatcher(service);
     }
 
     // ──────────────────────────── POST /workflows ────────────────────────────
@@ -183,24 +205,10 @@ public class WorkflowController {
         versionManager.detectConflict(request.workflowName(), version).ifPresent(c ->
                 log.warn(c.message()));
 
-        // 4. 派发异步执行
+        // 4. 派发异步执行（KTD-B：执行语义收敛在 WorkflowExecutionService.run，本地/ Kafka 复用）
         Map<String, Object> inputs = request.inputs() != null ? request.inputs() : Map.of();
-        executor.submit(() -> {
-            try {
-                log.info("开始执行 wf={} name={}", workflowId, request.workflowName());
-                checkpointManager.updateStatus(workflowId, WorkflowStatus.RUNNING);
-                engine.execute(def, nodeRegistry, inputs, checkpointManager,
-                        new ChannelReducer(), workflowId);
-                checkpointManager.updateStatus(workflowId, WorkflowStatus.SUCCESS);
-                log.info("工作流执行成功 wf={}", workflowId);
-            } catch (WorkflowExecutionException e) {
-                log.error("工作流执行失败 wf={} step={}", workflowId, e.superStep(), e);
-                checkpointManager.updateStatus(workflowId, WorkflowStatus.FAILED);
-            } catch (Exception e) {
-                log.error("工作流执行异常 wf={}", workflowId, e);
-                checkpointManager.updateStatus(workflowId, WorkflowStatus.FAILED);
-            }
-        });
+        dispatcher.dispatch(new WorkflowDispatchRequest(
+                workflowId, request.workflowName(), version, inputs));
 
         SubmitResponse response = new SubmitResponse(
                 workflowId, "PENDING", null,
@@ -310,18 +318,10 @@ public class WorkflowController {
         }
 
         log.info("重试工作流 wf={}", workflowId);
-        // v1 简化：retry 从头执行（U5 RecoveryProtocol 提供 recover-and-execute 后改为增量恢复）
-        executor.submit(() -> {
-            try {
-                checkpointManager.updateStatus(workflowId, WorkflowStatus.RUNNING);
-                // retry 时 YAML/agents 从提交时的持久化获取——v1 不重新解析
-                // TODO U5: 调 RecoveryProtocol.recover() 恢复执行状态
-                checkpointManager.updateStatus(workflowId, WorkflowStatus.SUCCESS);
-            } catch (Exception e) {
-                log.error("重试异常 wf={}", workflowId, e);
-                checkpointManager.updateStatus(workflowId, WorkflowStatus.FAILED);
-            }
-        });
+        // 走 dispatcher 重跑（KTD-B 对称：submit/retry 都经统一执行语义；本地或 Kafka 取决于装配）
+        String wfName = checkpointManager.findWorkflowName(workflowId).orElse("unknown");
+        String wfVersion = checkpointManager.findVersion(workflowId).orElse("1.0");
+        dispatcher.dispatch(new WorkflowDispatchRequest(workflowId, wfName, wfVersion, Map.of()));
 
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(
                 new SubmitResponse(workflowId, "PENDING", "Retry submitted",
