@@ -59,6 +59,16 @@ public final class ExecutionTrace {
         }
     }
 
+    /** v2 循环：记录节点所属迭代轮次（供 trace 区分跨轮重复执行的同 nodeId，agent-native）。节点未追加则 no-op。 */
+    public void recordNodeRound(String nodeId, int round) {
+        for (NodeTrace n : nodes) {
+            if (n.nodeId().equals(nodeId)) {
+                n.round(round);
+                return;
+            }
+        }
+    }
+
     /** 标记工作流终结。 */
     public void markCompleted(Status status) {
         this.endTime = Instant.now();

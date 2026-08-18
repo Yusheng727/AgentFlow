@@ -32,6 +32,8 @@ public final class NodeTrace {
     private volatile String error;
     /** super-step 层号（U10 后续 #10）：由 BspEngine 在超步骤执行后写入，供 UI 按真实拓扑分组（默认 0）。 */
     private volatile int step;
+    /** 迭代轮次（v2 循环，默认 0）。由 BspEngine 记录，供 trace 区分跨轮重复执行的同 nodeId（agent-native）。 */
+    private volatile int round;
 
     public NodeTrace(String nodeId, String agentName) {
         this(nodeId, agentName, System.nanoTime());
@@ -63,7 +65,8 @@ public final class NodeTrace {
             @JsonProperty("completionTokens") long completionTokens,
             @JsonProperty("outputSummary") String outputSummary,
             @JsonProperty("error") String error,
-            @JsonProperty("step") int step) {
+            @JsonProperty("step") int step,
+            @JsonProperty("round") int round) {
         NodeTrace n = new NodeTrace(nodeId, agentName, 0L);
         n.status = status != null ? status : Status.RUNNING;
         n.promptTokens = promptTokens;
@@ -71,6 +74,7 @@ public final class NodeTrace {
         n.outputSummary = outputSummary;
         n.error = error;
         n.step = step;
+        n.round = round;
         return n;
     }
 
@@ -120,6 +124,17 @@ public final class NodeTrace {
     /** 引擎写入所属 super-step 层号（包级；U10 后续 #10）。 */
     void step(int step) {
         this.step = step;
+    }
+
+    /** 所属迭代轮次（默认 0，无回边工作流恒 0）。由 BspEngine 记录（v2 循环）。 */
+    @JsonProperty("round")
+    public int round() {
+        return round;
+    }
+
+    /** 引擎写入所属迭代轮次（包级；v2 循环）。 */
+    void round(int round) {
+        this.round = round;
     }
 
     @JsonProperty("promptTokens")

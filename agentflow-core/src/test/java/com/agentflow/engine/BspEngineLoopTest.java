@@ -3,9 +3,13 @@ package com.agentflow.engine;
 import com.agentflow.agent.AgentFunction;
 import com.agentflow.agent.AgentOutput;
 import com.agentflow.agent.FatalException;
+import com.agentflow.dsl.DAGLayerer;
 import com.agentflow.dsl.EdgeDefinition;
 import com.agentflow.dsl.NodeDefinition;
 import com.agentflow.dsl.WorkflowDefinition;
+import com.agentflow.engine.checkpoint.InMemoryCheckpointManager;
+import com.agentflow.observability.ExecutionTraceRegistry;
+import com.agentflow.observability.NodeTrace;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -142,5 +146,51 @@ class BspEngineLoopTest {
         Map<String, AgentFunction> agents = Map.of("a", input -> AgentOutput.of("done"));
 
         engine.execute(def, agents, Map.of()); // 单节点无出边 → nextActive 空 → 收敛，正常完成
+    }
+
+    @Test
+    @DisplayName("agent-native：节点经 AgentInput.round() 感知当前迭代轮次（round 0 → 1）")
+    void nodeObservesRound() {
+        List<Integer> draftRounds = new CopyOnWriteArrayList<>();
+        AtomicInteger critiqueCalls = new AtomicInteger();
+        Map<String, AgentFunction> agents = Map.of(
+                "d", input -> { draftRounds.add(input.round()); return AgentOutput.of("draft"); },
+                "c", convergingCritique(critiqueCalls),
+                "f", input -> AgentOutput.of("final"));
+
+        engine.execute(reflectionLoop(), agents, Map.of());
+
+        // draft 第 1 轮 round=0、第 2 轮 round=1——节点能感知自己在第几轮（无需 stateful counter 注入）
+        assertThat(draftRounds).containsExactly(0, 1);
+    }
+
+    @Test
+    @DisplayName("agent-native：trace 区分跨轮重复执行的同 nodeId（draft 的 NodeTrace.round 0 和 1）")
+    void traceDistinguishesRounds() {
+        ExecutionTraceRegistry registry = new ExecutionTraceRegistry();
+        BspEngine engineWithTrace = new BspEngine(new DAGLayerer(), null, null, null, registry);
+        AtomicInteger critiqueCalls = new AtomicInteger();
+        Map<String, AgentFunction> agents = Map.of(
+                "d", input -> {
+                    // 自定义 AgentFunction 需手动写 NodeTrace（MockAgentFunction 在 adapter 模块会写）
+                    if (input.trace() != null) {
+                        NodeTrace nt = new NodeTrace("draft", "d");
+                        input.trace().addNode(nt);
+                        nt.succeed("draft", 0, 0);
+                    }
+                    return AgentOutput.of("draft");
+                },
+                "c", convergingCritique(critiqueCalls),
+                "f", input -> AgentOutput.of("final"));
+
+        engineWithTrace.execute(reflectionLoop(), agents, Map.of(),
+                new InMemoryCheckpointManager(), new ChannelReducer(), "wf-trace");
+
+        List<NodeTrace> draftTraces = registry.get("wf-trace").snapshot().nodes().stream()
+                .filter(n -> n.nodeId().equals("draft"))
+                .toList();
+        // draft 执行 2 次：round 0 + round 1——trace 能区分跨轮重复，诊断「为何迭代 N 次」可重建
+        assertThat(draftTraces).hasSize(2);
+        assertThat(draftTraces).extracting(NodeTrace::round).containsExactlyInAnyOrder(0, 1);
     }
 }

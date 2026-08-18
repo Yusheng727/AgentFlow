@@ -41,6 +41,7 @@ import java.util.Map;
  * @param mockResponse   节点声明的 mock 响应（透传自 NodeDefinition.mockResponse，可空——mock 模式下缺失抛 MissingMockResponseException）
  * @param trace          当前 workflow 的 ExecutionTrace（U7 引入，可空——非空时 MockAgentFunction/Adapter 写 NodeTrace）
  * @param budget         当前 workflow 的 WorkflowBudget（R10 引入，可空——非空时 mock 记账触发 budget_exceeded）
+ * @param round          当前迭代轮次（v2 循环 U4 引入，默认 0——无回边工作流恒 0；节点可从 {@code input.round()} 感知「我在第几轮」）
  */
 public record AgentInput(
         String nodeId,
@@ -52,21 +53,30 @@ public record AgentInput(
         Map<String, Object> outputSchema,
         String mockResponse,
         ExecutionTrace trace,
-        WorkflowBudget budget
+        WorkflowBudget budget,
+        int round
 ) {
 
-    /** 测试/便捷工厂：不带 tools/outputSchema/mockResponse/trace/budget（默认空）。 */
+    /** 测试/便捷工厂：不带 tools/outputSchema/mockResponse/trace/budget/round（默认空/0）。 */
     public static AgentInput of(String nodeId, String agentName, String promptTemplate,
                                 WorkflowContext context, Map<String, Object> inputs) {
-        return new AgentInput(nodeId, agentName, promptTemplate, context, inputs, List.of(), Map.of(), null, null, null);
+        return new AgentInput(nodeId, agentName, promptTemplate, context, inputs, List.of(), Map.of(), null, null, null, 0);
     }
 
-    /** 便捷构造：不带 budget（预算默认 null，向后兼容既有 9-arg 调用点）。 */
+    /** 便捷构造：不带 budget/round（预算默认 null、轮次默认 0，向后兼容既有 9-arg 调用点）。 */
     public AgentInput(String nodeId, String agentName, String promptTemplate,
                       WorkflowContext context, Map<String, Object> inputs,
                       List<String> tools, Map<String, Object> outputSchema,
                       String mockResponse, ExecutionTrace trace) {
-        this(nodeId, agentName, promptTemplate, context, inputs, tools, outputSchema, mockResponse, trace, null);
+        this(nodeId, agentName, promptTemplate, context, inputs, tools, outputSchema, mockResponse, trace, null, 0);
+    }
+
+    /** 便捷构造：不带 round（轮次默认 0，向后兼容既有 10-arg 调用点）。 */
+    public AgentInput(String nodeId, String agentName, String promptTemplate,
+                      WorkflowContext context, Map<String, Object> inputs,
+                      List<String> tools, Map<String, Object> outputSchema,
+                      String mockResponse, ExecutionTrace trace, WorkflowBudget budget) {
+        this(nodeId, agentName, promptTemplate, context, inputs, tools, outputSchema, mockResponse, trace, budget, 0);
     }
 
     /** 紧凑构造器：null 防御到不可变空集合，避免适配器侧 NPE。 */

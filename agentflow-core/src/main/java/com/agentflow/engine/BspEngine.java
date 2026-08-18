@@ -220,26 +220,10 @@ public final class BspEngine {
             Set<String> onErrorActivated = new HashSet<>();
             // v2 条件分支：已走边（from→to，累计），供 checkpoint 持久化路由决策（恢复期重算 SKIPPED）
             List<String> takenEdges = new ArrayList<>();
-            // v2 循环：外层迭代轮次循环。active = 本轮前向传播；nextActive = 回边目标累积（下一轮起点）。
+            // v2 循环：外层迭代轮次循环共享骨架。active = 本轮前向传播；nextActive = 回边目标累积（下一轮起点）。
             // 无回边工作流：首轮结束 nextActive 恒空 → 单轮收敛，行为与 v2 一致（R11）。
-            int round = 0;
-            int maxIterations = maxIterationsOf(def);
-            while (true) {
-                Set<String> nextActive = new HashSet<>();
-                for (SuperStep step : steps) {
-                    runStep(step, active, nextActive, Set.of(), -1, round, effInputs, context, dag, def, reducer, cp,
-                            workflowId, nodeExecutor, executor, workflowStart, trace, budget, onErrorActivated, takenEdges);
-                }
-                if (trace != null) {
-                    trace.recordRound(round);
-                }
-                if (nextActive.isEmpty()) {
-                    break; // 本轮无回边命中 → 收敛
-                }
-                round++;
-                checkIterationCap(round, maxIterations);
-                active = nextActive;
-            }
+            runRounds(steps, active, onErrorActivated, 0, 0, Set.of(), -1, effInputs, context, dag, def, reducer, cp,
+                    workflowId, nodeExecutor, executor, workflowStart, trace, budget, takenEdges, maxIterationsOf(def));
             if (trace != null) {
                 if (!onErrorActivated.isEmpty()) {
                     trace.markCompletedViaOnError();
@@ -336,6 +320,41 @@ public final class BspEngine {
             }
         }
         return targets;
+    }
+
+    /**
+     * v2 循环：外层迭代轮次循环共享骨架（execute 与 recoverAndExecute 共用，消除「复制必然漂移」历史 P0 模式）。
+     * 首轮从 startLayer 起跑（execute 从层 0；恢复轮从崩溃层起、剔除已完成节点）；后续轮从层 0 完整遍历。
+     * 每轮结束 nextActive 非空 → round++ 继续迭代；空 → 收敛结束；达上限 → checkIterationCap 抛「迭代超限」。
+     */
+    private void runRounds(List<SuperStep> steps, Set<String> active, Set<String> onErrorActivated,
+                           int startRound, int startLayer, Set<String> firstExcluded, int firstCrashLayer,
+                           Map<String, Object> inputs, WorkflowContext context, DAGraph dag, WorkflowDefinition def,
+                           ChannelReducer reducer, CheckpointManager cp, String workflowId, NodeExecutor nodeExecutor,
+                           ExecutorService executor, Instant workflowStart, ExecutionTrace trace, WorkflowBudget budget,
+                           List<String> takenEdges, int maxIterations) {
+        int round = startRound;
+        while (true) {
+            Set<String> nextActive = new HashSet<>();
+            int layer0 = (round == startRound) ? startLayer : 0;
+            Set<String> excludeThisRound = (round == startRound) ? firstExcluded : Set.of();
+            int crashLayer = (round == startRound) ? firstCrashLayer : -1;
+            for (int i = layer0; i < steps.size(); i++) {
+                SuperStep step = steps.get(i);
+                runStep(step, active, nextActive, excludeThisRound, crashLayer, round,
+                        inputs, context, dag, def, reducer, cp, workflowId, nodeExecutor, executor,
+                        workflowStart, trace, budget, onErrorActivated, takenEdges);
+            }
+            if (trace != null) {
+                trace.recordRound(round);
+            }
+            if (nextActive.isEmpty()) {
+                break; // 本轮无回边命中 → 收敛
+            }
+            round++;
+            checkIterationCap(round, maxIterations);
+            active = nextActive;
+        }
     }
 
     /** v2 循环：迭代轮次超限检查（per-loop max_iterations + 引擎 maxTotalRounds 双保险，execute/recover 共享）。 */
@@ -459,30 +478,10 @@ public final class BspEngine {
         boolean outcomeRecorded = false; // U7 指标：兜底防漏记/防双记
         try {
             cp.updateStatus(workflowId, WorkflowStatus.RUNNING);
-            // v2 循环：恢复轮（currentRound == round）从 crashLayerStep 起跑（剔除已完成节点），
-            // 后续轮从层 0 完整遍历；每轮结束 nextActive 非空则 round++ 继续迭代。
-            int currentRound = round;
-            while (true) {
-                Set<String> nextActive = new HashSet<>();
-                int startLayer = (currentRound == round) ? crashLayerStep : 0;
-                Set<String> excludeThisRound = (currentRound == round) ? excluded : Set.of();
-                int crashLayer = (currentRound == round) ? crashLayerStep : -1;
-                for (int i = startLayer; i < allSteps.size(); i++) {
-                    SuperStep step = allSteps.get(i);
-                    runStep(step, active, nextActive, excludeThisRound, crashLayer, currentRound,
-                            Map.of(), context, dag, def, reducer, cp, workflowId, nodeExecutor, executor,
-                            workflowStart, trace, budget, onErrorActivated, takenEdges);
-                }
-                if (trace != null) {
-                    trace.recordRound(currentRound);
-                }
-                if (nextActive.isEmpty()) {
-                    break;
-                }
-                currentRound++;
-                checkIterationCap(currentRound, maxIterations);
-                active = nextActive;
-            }
+            // v2 循环：恢复轮（round == startRound）从 crashLayerStep 起跑（剔除已完成节点），后续轮从层 0 完整遍历。
+            runRounds(allSteps, active, onErrorActivated, round, crashLayerStep, excluded, crashLayerStep, Map.of(),
+                    context, dag, def, reducer, cp, workflowId, nodeExecutor, executor, workflowStart, trace, budget,
+                    takenEdges, maxIterations);
             cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
             if (trace != null) {
                 if (!onErrorActivated.isEmpty()) {
@@ -526,6 +525,16 @@ public final class BspEngine {
         }
     }
 
+    /** v2 循环：记录本 super-step 节点所属迭代轮次（供 trace 区分跨轮重复执行的同 nodeId，agent-native）。 */
+    private void recordNodeRounds(ExecutionTrace trace, SuperStep step, int round) {
+        if (trace == null) {
+            return;
+        }
+        for (String nodeId : step.nodeIds()) {
+            trace.recordNodeRound(nodeId, round);
+        }
+    }
+
     /** 重放崩溃层已完成节点的输出进 context（走 Reducer，与 applyOutput 同语义）。 */
     private void applyReplayOutput(WorkflowContext context, AgentOutput output,
                                    WorkflowDefinition def, ChannelReducer reducer) {        if (output == null || output.channelWrites() == null || output.channelWrites().isEmpty()) {
@@ -547,7 +556,7 @@ public final class BspEngine {
         for (String id : step.nodeIds()) {
             NodeDefinition node = dag.node(id);
             AgentInput input = new AgentInput(id, node.agent(), node.promptTemplate(), snapshot, inputs,
-                    node.tools(), node.outputSchema(), node.mockResponse(), trace, budget);
+                    node.tools(), node.outputSchema(), node.mockResponse(), trace, budget, round);
             // 并行执行 + 节点级 checkpoint（完成当下即持久化，R3）
             futures.add(CompletableFuture.supplyAsync(() -> {
                 long startNs = System.nanoTime(); // U7 指标：节点从提交到终结的耗时（含重试）
@@ -637,6 +646,8 @@ public final class BspEngine {
                 executor, inputs, workflowStart, trace, budget);
         // U10 后续 #10：记录本 super-step 各节点所属层号（含被剪枝节点，供 UI 真实拓扑分组）
         recordSuperStepTrace(trace, step);
+        // v2 循环：记录节点所属迭代轮次（供 trace 区分跨轮重复执行的同 nodeId）
+        recordNodeRounds(trace, step, round);
         List<String> onErrorTargets = applyBarrier(step, results, context, dag, def, reducer, cp, workflowId,
                 onErrorActivated, trace, takenEdges);
         active.addAll(onErrorTargets);
