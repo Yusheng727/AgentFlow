@@ -27,7 +27,9 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -223,6 +225,28 @@ class WorkflowControllerTest {
         var response = controller.retry(wfId, requestWithCaller("caller-A"));
         assertThat(response.getStatusCode().value()).isEqualTo(400);
         assertThat(response.getBody().message()).contains("仅 FAILED");
+    }
+
+    @Test
+    @DisplayName("Kafka 模式 retry：派发前复位 PENDING（防终态跳过致 retry 静默失效——review P1）")
+    void retryResetsToPendingBeforeDispatch() {
+        WorkflowDispatcher mockDispatcher = mock(WorkflowDispatcher.class);
+        // 9-arg 构造注入 dispatcher：模拟 Kafka 装配下 retry 的派发契约
+        WorkflowController kafkaAware = new WorkflowController(parser, engine, checkpointManager,
+                ownershipChecker, toolAllowlist, nodeRegistry, versionManager,
+                new WorkflowSubmissionGuard(new CostCalculator(), null,
+                        WorkflowSubmissionGuard.DEFAULT_MAX_NODES, null),
+                mockDispatcher);
+        checkpointManager.initWorkflow("wf-retry", "retry-wf", "1.0", "caller-A");
+        checkpointManager.updateStatus("wf-retry", WorkflowStatus.FAILED);
+
+        var resp = kafkaAware.retry("wf-retry", requestWithCaller("caller-A"));
+
+        assertThat(resp.getStatusCode().value()).isEqualTo(202);
+        // P1 修复契约：派发前已复位 PENDING——Kafka 消费者见非终态才会执行派发的重试消息
+        assertThat(checkpointManager.findStatus("wf-retry")).contains(WorkflowStatus.PENDING);
+        verify(mockDispatcher).dispatch(org.mockito.ArgumentMatchers.argThat(req ->
+                req.workflowId().equals("wf-retry") && req.workflowName().equals("retry-wf")));
     }
 
     // ─────────────────── GET /workflows/{id}/version-check（U8） ───────────────────

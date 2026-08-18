@@ -76,4 +76,13 @@ class KafkaWorkflowConsumerTest {
         consumer.onMessage("not-json");
         verifyNoInteractions(service);
     }
+
+    @Test
+    @DisplayName("未 initWorkflow 的任意 id → 丢弃不执行（防 ledger 污染 + 越 trust boundary）")
+    void unstagedIdDropped() throws Exception {
+        // 从未 initWorkflow 的消息：findStatus 空 → 不调 run、不写任何状态
+        consumer.onMessage(payload("never-staged", "wf", "1.0"));
+        verifyNoInteractions(service);
+        assertThat(cm.findStatus("never-staged")).isEmpty();
+    }
 }

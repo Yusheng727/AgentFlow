@@ -274,3 +274,28 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - backedge 源节点缺退出边校验（correctness P3）——忘记退出边时运行时 Fatal 而非解析期拒绝。
 
 **面试讲法**：「这轮 10-persona 审查抓到 2 个 P1，都在恢复路径，第三次印证『execute 和 recoverAndExecute 两条主循环复制粘贴必然漂移』——这次是轮次转换检测：mid-round 崩溃（回边命中但末层 barrier 未写）不触发转换，恢复报 SUCCESS 但退出节点从未执行；final-barrier 后被从层 0 整体重跑导致 LLM 双计费。修复方向是判断『该轮实质完成』要按该轮路由是否含回边，而不是看崩溃层号——恢复的 round 模型是 execute 的简化副本，边界情况处理不完整。测试全绿是因为这些崩溃窗口在 mock/恢复路径根本没覆盖到。」
+
+---
+
+## v1.1 Kafka U3 ce-code-review（2026-08-18，10 评审）
+
+**背景**：对 `feat/v11-kafka-e2e`（U3）全量 diff（BASE `a086cb4`：KafkaDispatchE2eIT + auto.offset.reset 装配 + 自持 Jackson-2 ObjectMapper + demo-api 接 kafka-starter + ROADMAP/CLAUDE docs）做 10-persona 审查（correctness/testing/maintainability/project-standards/security/reliability/api-contract/adversarial + agent-native/learnings）。Kafka 传输链 + E2E 逻辑正确；抓到 **1 个 P1（3 独立 reviewer 置信 100）+ 2 个 P1（validator 验证后 1 个降 P2）+ 若干 P2/P3**。3 个 P1 均经独立 validator 验证确认。
+
+**已应用修复（未 commit，plan「不 commit/push」约束；validator 确证后应用）**：
+- **Kafka 模式 retry 静默失效（security+reliability+adversarial 3 票 conf 100，validator 确证 P1）**：`WorkflowController.retry` 派发前不改状态，FAILED 是终态 → 消费者「终态跳过」把 retry 派发的消息直接丢弃，`POST /retry` 返回 202/PENDING 但状态永远 FAILED；本地 dispatcher 直接 `service.run` 无此问题 → 双路径漂移。修复：`retry()` 在 dispatch 前置 `updateStatus(PENDING)`（本地 run() 立即置 RUNNING 语义不变）+ 回归测试 `retryResetsToPendingBeforeDispatch`（9-arg 构造注入 mock dispatcher 断言复位 + 派发参数）。
+- **未 staged 任意 id 也执行（security P1 → validator 降 P2）**：`KafkaWorkflowConsumer.onMessage` findStatus 空时也 `run()`，绕过 REST 的 API-Key/ownership/submission-guard 执行任意 workflowId 并写 checkpoint（ledger 污染 + 成本放大；文档化单 JVM 信任边界内为防御加固，分布式未保护才 P1）。修复：findStatus 空 → log+丢弃不执行（合法 submit 总是先 initWorkflow）；补 `unstagedIdDropped` 单测。
+- **默认 `auto.offset.reset=latest` 冷启动丢消息（reliability P1，validator 确证）**：新消费组无已提交 offset 时 latest 从分区末端起读，订阅前 produce 的提交静默丢失、工作流永 PENDING 无兜底；E2E 仅靠覆盖 earliest 通过。修复：默认改 `earliest`（消费者幂等终态跳过，重扫旧消息无双计费——对任务队列 strictly safer）+ javadoc 记录取舍。
+- **E2E replay 固定 sleep(1500) 弱断言（testing+reliability+adversarial+correctness 多票）**：重放消息未在窗口内被消费时 counter 未变会假通过。修复：barrier 工作流模式——单分区 FIFO 下 barrier SUCCESS 即证明重放已被消费，断言 `counter == before+2`（barrier 恰好 2 节点），确定性替代固定 sleep。
+- **机械 P3**：IT 类 javadoc 已陈旧（`@Import` vs 实际 `@EnableAutoConfiguration`）；`WorkflowExecutionMessage` javadoc 仍称 JsonSerializer+类型头（与实际 String+自持 mapper 不符）；`BspEngine(new DAGLayerer(),null,null,null,null)` → 1-arg 构造；ROADMAP 标注「本地未 commit/push 待评审」；E2E 场景 1 加 `dispatcher instanceof KafkaWorkflowDispatcher`（防误走本地回退仍全绿）。
+
+**记录为已知残留/后续（P2/P3）**：
+- consumer 幂等是 check-then-act 非原子（security P2）——并发重复投递可双跑双计费；需 `tryClaim`（条件 PENDING→RUNNING）闭合，延后（multi-node 计划范围外）。
+- `auto.offset.reset` 默认 earliest 对「真新部署消费旧 topic 重扫历史」无碍（幂等跳过），但文档化的未来 multi-node 场景需复核（reliability residual）。
+- 畸形消息被 ack-drop 且注释称「重放会重投」与实际（默认 enable.auto.commit）不符（reliability P2, pre-existing）——已仅修注释，DLT/手动 ack 属后续。
+- `KafkaWorkflowDispatcher.dispatch` fire-and-forget：broker 挂 → submit 202/PENDING 但消息丢、无 FAILED 兜底（adversarial P2, pre-existing，U2 遗留，at-most-once 已文档化）。
+- auto-config 手揉半套 `spring.kafka.*`（maintainability P2）——注入 `KafkaProperties` 收编更优，但改装配面有回归 E2E 风险，延后。
+- KTD-E 计划要求的无 broker `KafkaCompatContextLoadTest` 未交付（project-standards P2, pre-existing，U2 缺口）——auto-config 已自持 mapper/offset 装配，补 context-load 冒烟是合理下一步。
+- `agentflowKafkaObjectMapper` 是裸 `new ObjectMapper()` 无 JavaTimeModule——java.time inputs 序列化会失败（multi-reviewer residual，E2E 只用 Map.of() 未覆盖）。
+- demo-api 加 kafka-starter 后即使 disabled，Boot KafkaAutoConfiguration 仍因 classpath 惰性装配额外 bean（correctness/adversarial P3）——懒连接不炸启动，默认路径测试验证过无碍。
+
+**面试讲法**：「这轮 10-persona 审查最有价值的是两个『测试绿但生产不生效』：一是 Kafka 模式的 retry——`WorkflowController.retry` 派发消息但 FAILED 是终态，消费者幂等跳过把重试消息吞了，返回 202 但永远不重跑，3 个 reviewer 独立置信 100 命中同一处，而本地 dispatcher 直跑 run() 所以单测全绿；二是 `auto.offset.reset` 默认 latest 的新消费组冷启动会丢订阅前 produce 的提交——E2E 靠显式 earliest 覆盖才绿，生产默认路径没人测。两个都是『配置/装配层的生产默认 vs 测试显式覆盖』的落差，和项目里反复出现的 mock 绿 ≠ 部署生效是同一族教训。」

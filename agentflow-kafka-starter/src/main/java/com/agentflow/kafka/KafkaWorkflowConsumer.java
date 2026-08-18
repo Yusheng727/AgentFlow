@@ -49,7 +49,14 @@ public class KafkaWorkflowConsumer {
         }
 
         Optional<WorkflowStatus> status = checkpointManager.findStatus(message.workflowId());
-        if (status.isPresent() && isTerminal(status.get())) {
+        // 只执行「已 staged」的工作流（initWorkflow 写 PENDING，仅受信 REST submit 产生）：
+        // 从未 initWorkflow 的任意 id 不执行——防 ledger 污染 + 越 trust boundary 的成本放大
+        // （security review P2：生产必须 topic ACL+SASL_SSL，见 KTD-F）。
+        if (status.isEmpty()) {
+            log.error("丢弃未 staged 的工作流消息（无 initWorkflow 记录）wf={}", message.workflowId());
+            return;
+        }
+        if (isTerminal(status.get())) {
             log.info("跳过已终态工作流（重放防护）wf={} status={}", message.workflowId(), status.get());
             return;
         }

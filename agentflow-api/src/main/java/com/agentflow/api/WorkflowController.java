@@ -318,6 +318,10 @@ public class WorkflowController {
         }
 
         log.info("重试工作流 wf={}", workflowId);
+        // Kafka 模式消费者以「终态跳过」作重放防护（KTD-F），FAILED 是终态——若派发前不复位，
+        // 消费者会跳过 retry 派发的消息，retry 静默失效（Kafka 模式 no-op）。先复位 PENDING，
+        // 消费者见非终态即执行；本地 dispatcher 下 run() 立即置 RUNNING，语义不变。
+        checkpointManager.updateStatus(workflowId, WorkflowStatus.PENDING);
         // 走 dispatcher 重跑（KTD-B 对称：submit/retry 都经统一执行语义；本地或 Kafka 取决于装配）
         String wfName = checkpointManager.findWorkflowName(workflowId).orElse("unknown");
         String wfVersion = checkpointManager.findVersion(workflowId).orElse("1.0");
