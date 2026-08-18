@@ -428,3 +428,13 @@ v1 多出边 = 并行 fan-out；v2 一个节点一旦有 `when` 边，其无条�
 ### 坑（P1）：final-barrier 后崩溃被从层 0 整体重跑（R11 破坏 + 双计费）
 
 recoverAndExecute 的轮次转换 else 分支（末 barrier 在最后一层 + 无回边）原本 `crashLayerStep=0` 保守重跑——对静态 DAG/已收敛循环，这等于把整个工作流从层 0 重执行，旧 v2 代码 `subList(nextSuperStep==size, size)` 为空优雅收尾。违背 R11「无回边行为不变」+ 每轮 LLM 双计费。修复：无回边命中时保持 `crashLayerStep=size` → for 循环跑零层 → SUCCESS。**教训**：恢复路径的「收敛收尾」要镜像 execute 的完成语义，不能为了「理论不应发生」的防御性分支破坏正常路径——**测试绿 ≠ 生产生效**，mock/recovery 路径都要回归测（RecoveryLoopTest 补了 `finalBarrierCrashDoesNotReRun` + `midRoundCrashEntersNextRound` 两个 P1 回归测试）。
+
+## 2026-08-18 — 拉取 v2 循环远程后 demo-api flaky：InMemory 清单排序时钟碰撞
+
+### Bug：`listByCreatedBy` 同 created_at 排序不确定（InMemory 版，demo-api verify 偶发红）
+
+- **现象**：拉取远程（v2 循环/回边已合 main）后跑全量 `mvn verify`，`demo-api` 的 `AgentFlowApiApplicationTest.listWorkflowsEndpoint` 偶发断言失败：`expected: "2e4566d7…" but was: "cc7dac87…"`——期望后提交的 `wfB` 在清单首位，实得第一个是别的 workflow。单测重跑变绿，确认 flaky 非确定性失败。
+- **根因**：`InMemoryCheckpointManager.listByCreatedBy` 只按 `workflowCreatedAt`（`Instant`）倒序。demo 测试紧挨连续提交两个 workflow，Windows 上 `Instant.now()` 时钟粒度粗，两者 `created_at` 偶发**精确相等** → 排序退化为不稳定的 `ConcurrentHashMap` 哈希序。更关键：workflowId 是 `UUID.randomUUID()` 每次随机，所以给排序加「workflowId 次键」也不有效——碰撞时 outcome 随随机 UUID 而定，不确定性来自「随机 id 是否恰好让后提交的排前」。
+- **修复**：不依赖系统时钟精度，引入**单调递增插入序号** `workflowCreatedSeq`（`AtomicLong`），`listByCreatedBy` 按序号倒序。这是「最近优先」看板语义的诚实实现——序号严格反映创建先后，任何时钟粒度下都确定「后提交在前」。`createdAt` 保留仅作展示。
+- **教训**：用随机值（UUID）当排序决胜键无法消除 flaky——确定性排序必须用单调键（序号），不能把「两个相邻写入时间戳必然不同」当假设。这正是 2026-08-17 那次「H2 排序 flaky」教训在 **InMemory 实现**上的镜像：当时只修了 `PostgresCheckpointManagerTest`（`DATEADD` 错误开时间戳），InMemory 的对应隐患一直没堵，本次拉取后的 verify 才现形——**同一类缺陷可能藏在同样代码路径的另一实现里**，修复要排查同构实现。
+- **回归测试**：`CheckpointManagerTest.listByCreatedByOrderingIsDeterministic`——紧挨 initWorkflow 三条（含跨创建者），断言后提交在前 + 只见自己 + 空 createdBy 返回全部，锁定不确定时间下的确定性。

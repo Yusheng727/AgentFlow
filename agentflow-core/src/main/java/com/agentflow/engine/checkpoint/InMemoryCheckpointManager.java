@@ -11,6 +11,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 /**
@@ -41,7 +42,9 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
     private final ConcurrentHashMap<String, WorkflowStatus> workflowStatuses = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, String[]> workflowMeta = new ConcurrentHashMap<>(); // [name, version]
     private final ConcurrentHashMap<String, String> workflowCreatedBy = new ConcurrentHashMap<>(); // U14 所有权校验
-    private final ConcurrentHashMap<String, Instant> workflowCreatedAt = new ConcurrentHashMap<>(); // U10 后续 #12 列表排序
+    private final ConcurrentHashMap<String, Instant> workflowCreatedAt = new ConcurrentHashMap<>(); // U10 后续 #12 列表排序（createdAt 展示）
+    private final ConcurrentHashMap<String, Long> workflowCreatedSeq = new ConcurrentHashMap<>();   // 单调插入序号（防同 created_at 时钟碰撞 flaky）
+    private final AtomicLong seq = new AtomicLong();
     private final ConcurrentHashMap<String, List<String>> routingDecisions = new ConcurrentHashMap<>(); // v2 路由决策（累计）
 
     // ──────────────────────────── 写入 ────────────────────────────
@@ -115,6 +118,7 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
         workflowMeta.put(workflowId, new String[]{workflowName, version});
         workflowStatuses.put(workflowId, WorkflowStatus.PENDING);
         workflowCreatedAt.put(workflowId, Instant.now()); // U10 后续 #12 列表排序（就近创建优先）
+        workflowCreatedSeq.put(workflowId, seq.incrementAndGet());
         if (createdBy != null) {
             workflowCreatedBy.put(workflowId, createdBy);
         }
@@ -125,7 +129,9 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
         // 按创建时间倒序（最近优先），供看板「最近执行」；createdBy 为空则返回全部（兼容 U5 未设 createdBy）
         return workflowCreatedAt.entrySet().stream()
                 .filter(e -> createdBy == null || createdBy.equals(workflowCreatedBy.get(e.getKey())))
-                .sorted(Map.Entry.<String, Instant>comparingByValue().reversed())
+                // 主键：单调插入序号倒序（后提交在前，不一定依赖 created_at 时钟精度）
+                .sorted(Comparator.<Map.Entry<String, Instant>>comparingLong(
+                        e -> workflowCreatedSeq.getOrDefault(e.getKey(), 0L)).reversed()) // 单调插入序号倒序，后提交在前，不依赖 created_at 时钟精度
                 .map(e -> {
                     String[] meta = workflowMeta.get(e.getKey());
                     WorkflowStatus status = workflowStatuses.getOrDefault(e.getKey(), WorkflowStatus.PENDING);

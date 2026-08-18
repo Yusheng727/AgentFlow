@@ -199,6 +199,29 @@ class CheckpointManagerTest {
             List<NodeOutputStore> completed = cm.findCompletedNodes("wf-1", 0);
             assertThat(completed).hasSize(count);
         }
+
+        @Test
+        @DisplayName("明细排序：清单按单调插入序号倒序（后提交在前，不依赖 created_at 时钟精度）")
+        void listByCreatedByOrderingIsDeterministic() {
+            // 紧挨提交（与同一测试内连续提交的 demo 场景一致），created_at 可能精确相等
+            cm.initWorkflow("a", "wf-a", "1.0", "creator");
+            cm.initWorkflow("b", "wf-b", "1.0", "creator");
+            cm.initWorkflow("other", "wf-other", "1.0", "someone-else");
+
+            List<WorkflowExecutionRecord> mine = cm.listByCreatedBy("creator");
+            assertThat(mine).extracting(WorkflowExecutionRecord::workflowId)
+                    .containsExactly("b", "a"); // 后提交在前，确定性，无论 created_at 是否碰撞
+            assertThat(mine).extracting(WorkflowExecutionRecord::workflowName)
+                    .containsExactly("wf-b", "wf-a");
+
+            // createdBy 为空返回全部（兼容 U5 未设 createdBy）
+            assertThat(cm.listByCreatedBy(null)).extracting(WorkflowExecutionRecord::workflowId)
+                    .hasSize(3);
+            // 非本创建者看不到
+            assertThat(cm.listByCreatedBy("someone-else"))
+                    .extracting(WorkflowExecutionRecord::workflowId)
+                    .containsExactly("other");
+        }
     }
 
     // ─────────────────── JSONB 序列化往返测试 ───────────────────
