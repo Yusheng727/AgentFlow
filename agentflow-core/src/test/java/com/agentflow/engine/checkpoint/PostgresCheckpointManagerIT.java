@@ -12,6 +12,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.Statement;
 import java.util.List;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -59,6 +60,7 @@ class PostgresCheckpointManagerIT {
         try (Connection c = DriverManager.getConnection(URL, USER, PASS);
              Statement s = c.createStatement()) {
             s.executeUpdate("DELETE FROM workflow_routing_decisions WHERE workflow_id LIKE 'it-%'");
+            s.executeUpdate("DELETE FROM workflow_approvals WHERE workflow_id LIKE 'it-%'");
             s.executeUpdate("DELETE FROM workflow_checkpoints WHERE workflow_id LIKE 'it-%'");
             s.executeUpdate("DELETE FROM workflow_node_outputs WHERE workflow_id LIKE 'it-%'");
             s.executeUpdate("DELETE FROM workflow_executions WHERE id LIKE 'it-%'");
@@ -110,6 +112,27 @@ class PostgresCheckpointManagerIT {
         assertThat(cm.findVersion("it-cp")).hasValue("1.0");
         assertThat(cm.findStatus("it-cp")).hasValue(WorkflowStatus.PENDING);
         assertThat(cm.findCreatedBy("it-cp")).hasValue("it-creator");
+    }
+
+    @Test
+    @DisplayName("真 PG：HITL 审批往返 + confirm 原子决策（Flyway V7 workflow_approvals + AWAITING_APPROVAL）")
+    void approvalRoundTripOnRealPostgres() {
+        cm.initWorkflow("it-appr", "approval-demo", "1.0", "it-creator");
+        ApprovalRequest req = ApprovalRequest.pending(
+                "it-appr", "pay-gate", 0, 1, "审批付款", Map.of("amount", 1000), Map.of("ctx", "v"));
+        cm.saveApprovalRequest("it-appr", req);
+
+        assertThat(cm.findPendingApprovals("it-appr"))
+                .singleElement().satisfies(r -> assertThat(r.status()).isEqualTo(ApprovalStatus.PENDING));
+
+        // 原子决策
+        assertThat(cm.confirmApproval(req.approvalId(), ApprovalDecision.APPROVE, "it-approver")).isTrue();
+        assertThat(cm.findApprovalById(req.approvalId()).orElseThrow().status())
+                .isEqualTo(ApprovalStatus.APPROVED);
+        // 二次决策 no-op
+        assertThat(cm.confirmApproval(req.approvalId(), ApprovalDecision.REJECT, "it-2")).isFalse();
+        // 已决策不再出现在待办
+        assertThat(cm.findPendingApprovals("it-appr")).isEmpty();
     }
 
     // ──────────────────────── 测试辅助 ────────────────────────
