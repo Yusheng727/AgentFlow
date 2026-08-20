@@ -4,6 +4,7 @@ import com.agentflow.agent.NodeRegistry;
 import com.agentflow.dsl.WorkflowDefinition;
 import com.agentflow.engine.BspEngine;
 import com.agentflow.engine.ChannelReducer;
+import com.agentflow.engine.checkpoint.ApprovalDecision;
 import com.agentflow.engine.checkpoint.CheckpointManager;
 import com.agentflow.engine.checkpoint.WorkflowStatus;
 import com.agentflow.version.WorkflowVersionManager;
@@ -60,17 +61,43 @@ public class WorkflowExecutionService {
 
     /**
      * 同步执行一个工作流（由调用方决定在哪个线程跑）。定义先取、取不到不进 RUNNING（保持 PENDING）。
+     *
+     * <p>U6 HITL：引擎若因审批而暂停（status 已为 {@code AWAITING_APPROVAL}），<b>不标 SUCCESS</b>——
+     * 工作流停在待批态，由外部经 {@link #resumeAfterApproval} 恢复。审批节点一旦被批准恢复，
+     * {@code approveAndResume} 内部会续跑至终态。无审批的工作流行为不变（恢复即 SUCCESS）。
      */
     public void run(String workflowId, String workflowName, String version, Map<String, Object> inputs) {
         WorkflowDefinition def = loadDefinitionWithRetry(workflowName, version);
         checkpointManager.updateStatus(workflowId, WorkflowStatus.RUNNING);
         try {
             engine.execute(def, nodeRegistry, inputs, checkpointManager, reducer, workflowId);
+            // U4 paused：engine 已置 AWAITING_APPROVAL；run() 不覆盖为 SUCCESS（留在待批态）
+            if (checkpointManager.findStatus(workflowId)
+                    .map(WorkflowStatus.AWAITING_APPROVAL::equals).orElse(false)) {
+                return;
+            }
             checkpointManager.updateStatus(workflowId, WorkflowStatus.SUCCESS);
         } catch (Exception e) {
             checkpointManager.updateStatus(workflowId, WorkflowStatus.FAILED);
             throw e;
         }
+    }
+
+    /**
+     * 审批恢复（U6）：对处于 AWAITING_APPROVAL 的工作流执行 approve/reject，续跑至终态。
+     *
+     * <p>读取该工作流定义（与 {@code run} 对称，KTD-A），调 {@link BspEngine#approveAndResume}
+     * 重跑待批节点并续跑下游；REJECT 内部置 FAILED、APPROVE 续跑至 SUCCESS。已决策审批单
+     * （幂等 no-op）时工作流状态保持不变。
+     *
+     * @return 恢复后工作流状态（SUCCESS / FAILED / AWAITING_APPROVAL / 原状态不变）
+     */
+    public WorkflowStatus resumeAfterApproval(String workflowId, String workflowName, String version,
+                                              String approvalId, ApprovalDecision decision, String decidedBy) {
+        WorkflowDefinition def = loadDefinitionWithRetry(workflowName, version);
+        engine.approveAndResume(def, nodeRegistry, reducer, checkpointManager, workflowId,
+                approvalId, decision, decidedBy);
+        return checkpointManager.findStatus(workflowId).orElse(WorkflowStatus.PENDING);
     }
 
     private WorkflowDefinition loadDefinitionWithRetry(String workflowName, String version) {
