@@ -12,7 +12,9 @@ import com.agentflow.dsl.NodeDefinition;
 import com.agentflow.dsl.Reducer;
 import com.agentflow.dsl.AgentflowMeta;
 import com.agentflow.dsl.WorkflowDefinition;
+import com.agentflow.engine.checkpoint.ApprovalDecision;
 import com.agentflow.engine.checkpoint.ApprovalRequest;
+import com.agentflow.engine.checkpoint.ApprovalStatus;
 import com.agentflow.engine.checkpoint.CheckpointManager;
 import com.agentflow.engine.checkpoint.ExecutionState;
 import com.agentflow.engine.checkpoint.NodeOutputStore;
@@ -538,6 +540,194 @@ public final class BspEngine {
             throw we;
         } finally {
             // U4：paused 是合法中间态（AWAITING_APPROVAL），不兜底记 FAILED
+            if (!outcomeRecorded && !paused) {
+                recordWorkflowOutcome(AgentFlowMetrics.STATUS_FAILED);
+            }
+            executor.shutdownNow();
+        }
+    }
+
+    /**
+     * HITL 审批恢复执行（U5）：批准/拒绝后，从审批单恢复并续跑工作流。
+     *
+     * <p>调用前提：工作流处于 {@code AWAITING_APPROVAL}（U4 暂停），待批审批单为 PENDING。
+     * 恢复不依赖 {@link RecoveryProtocol}（那是崩溃恢复）；审批单已持久化暂停点的
+     * {@code contextSnapshot}（含兄弟输出、不含审批节点）与 {@code round}/{@code superStep}/{@code nodeId}，
+     * 据此重建 context 后重跑待批节点（注入 {@code approvalDecision}）并续跑下游。
+     *
+     * <p><b>语义</b>：
+     * <ul>
+     *   <li>APPROVE → 重跑待批节点（注入决策）→ 真实输出 merge → 从审批层续跑下游直至 SUCCESS/FAILED</li>
+     *   <li>REJECT → 置 {@code FAILED} 提前返回（下游不跑）</li>
+     *   <li>已决策审批单（二次 approve/reject）→ 幂等 no-op（不重复执行引擎）</li>
+     *   <li>待批节点重跑仍抛 {@code ApprovalRequired} → 再次 AWAITING_APPROVAL（多级审批链）</li>
+     * </ul>
+     *
+     * <p>恢复续跑复用 {@code runRounds} re-entry：首轮 startLayer=审批层、firstExcluded=审批层节点全集
+     * （兄弟输出已在快照不重跑、审批节点已重跑 merge），takenEdges 从 checkpoint 预置（防 saveRoutingDecisions
+     * 覆盖丢边，review P2）；超时基线重定为 {@code Instant.now()}（AWAITING_APPROVAL 期间不计入工作流总超时，
+     * review 决议）。
+     *
+     * @param def          工作流定义
+     * @param agentResolver agent 来源
+     * @param reducer      channel Reducer
+     * @param cp           checkpoint（审批单加载 + 状态流转 + 路由决策）
+     * @param workflowId   工作流实例 id
+     * @param approvalId   待批审批单 id
+     * @param decision     审批决策（APPROVE/REJECT）
+     * @param decidedBy    审批人标识（U6 API 从 callerId 推导）
+     * @return 恢复后的 WorkflowContext（拒绝/幂等时为新 context）
+     */
+    public WorkflowContext approveAndResume(WorkflowDefinition def,
+                                            java.util.function.Function<String, AgentFunction> agentResolver,
+                                            ChannelReducer reducer,
+                                            CheckpointManager cp,
+                                            String workflowId,
+                                            String approvalId,
+                                            ApprovalDecision decision,
+                                            String decidedBy) {
+        Objects.requireNonNull(def, "def");
+        Objects.requireNonNull(agentResolver, "agentResolver");
+        Objects.requireNonNull(reducer, "reducer");
+        Objects.requireNonNull(cp, "cp");
+        Objects.requireNonNull(workflowId, "workflowId");
+        Objects.requireNonNull(approvalId, "approvalId");
+        Objects.requireNonNull(decision, "decision");
+
+        // 1. 加载审批单（无记录 → 明确报错，不静默）
+        ApprovalRequest req = cp.findApprovalById(approvalId)
+                .orElseThrow(() -> new IllegalStateException("审批单不存在: " + approvalId));
+        // 2. 幂等决策：confirmApproval 原子转移 PENDING→终态；已决策 → no-op 返回
+        if (!cp.confirmApproval(approvalId, decision, decidedBy)) {
+            log.info("approveAndResume 幂等跳过 wf={} approval={}: 审批单已决策", workflowId, approvalId);
+            return new WorkflowContext(req.contextSnapshot());
+        }
+
+        ExecutionTrace trace = traceRegistry == null ? null : traceRegistry.register(workflowId);
+        WorkflowBudget budget = budgetFrom(def);
+        boolean outcomeRecorded = false;
+
+        // 3. REJECT → 置 FAILED 提前返回（下游不跑）
+        if (decision != ApprovalDecision.APPROVE) {
+            if (metrics != null) {
+                metrics.recordApprovalEvent(AgentFlowMetrics.STATUS_APPROVAL_REJECTED);
+            }
+            cp.updateStatus(workflowId, WorkflowStatus.FAILED);
+            if (trace != null) {
+                trace.markCompleted(ExecutionTrace.Status.FAILED);
+                trace.recordWorkflowError("审批拒绝: " + approvalId);
+            }
+            recordWorkflowOutcome(AgentFlowMetrics.STATUS_FAILED);
+            outcomeRecorded = true;
+            return new WorkflowContext(req.contextSnapshot());
+        }
+        if (metrics != null) {
+            metrics.recordApprovalEvent(AgentFlowMetrics.STATUS_APPROVAL_APPROVED);
+        }
+
+        // ── APPROVE：重建 context → 重跑待批节点 → 从审批层续跑下游 ──
+        DAGraph dag = new DAGraph(def);
+        List<SuperStep> allSteps = buildSuperSteps(layerer.computeSuperSteps(def));
+        WorkflowContext context = new WorkflowContext(req.contextSnapshot());
+        // takenEdges 预置：审批暂停时该层之前的已走边已按 round 持久化，恢复续跑防覆盖丢边（review P2）
+        List<String> takenEdges = new ArrayList<>(cp.findRoutingDecisions(workflowId, req.round()));
+        ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
+        NodeExecutor nodeExecutor = new NodeExecutor(agentResolver, executor);
+        // 超时重定基线：AWAITING_APPROVAL 挂起期间不计入工作流总超时（review 决议）
+        Instant workflowStart = Instant.now();
+        boolean paused = false;
+        try {
+            cp.updateStatus(workflowId, WorkflowStatus.RUNNING);
+            // 4. 重跑待批节点（注入 APPROVE 决策；走 retryPolicy 与正常节点一致，ApprovalRequired 原样透传）
+            NodeDefinition node = dag.node(req.nodeId());
+            AgentInput input = new AgentInput(req.nodeId(), node.agent(), node.promptTemplate(),
+                    context.readOnlySnapshot(), Map.of(), node.tools(), node.outputSchema(),
+                    node.mockResponse(), trace, budget, req.round(), ApprovalDecision.APPROVE);
+            NodeResult r = retryPolicy != null
+                    ? retryPolicy.execute(nodeExecutor, node, input)
+                    : nodeExecutor.execute(node, input);
+            if (r instanceof NodeResult.ApprovalRequired ar) {
+                // 多级审批链：待批节点重跑仍请求审批 → 再次暂停
+                ApprovalRequest again = ApprovalRequest.pending(workflowId, ar.nodeId(), req.round(),
+                        req.superStep(), ar.description(), ar.requestPayload(), flattenContext(context));
+                cp.saveApprovalRequest(workflowId, again);
+                cp.updateStatus(workflowId, WorkflowStatus.AWAITING_APPROVAL);
+                if (metrics != null) {
+                    metrics.recordApprovalEvent(AgentFlowMetrics.STATUS_APPROVAL_PENDING);
+                }
+                if (trace != null) {
+                    trace.markCompleted(ExecutionTrace.Status.AWAITING_APPROVAL);
+                }
+                return context;
+            }
+            if (!(r instanceof NodeResult.Success s)) {
+                // 待批节点重跑失败 → 工作流 FAILED（恢复失败，非暂停）
+                Throwable cause = ((NodeResult.Failure) r).error();
+                if (trace != null) {
+                    trace.markCompleted(ExecutionTrace.Status.FAILED);
+                    trace.recordWorkflowError(cause.getMessage() != null ? cause.getMessage()
+                            : cause.getClass().getSimpleName());
+                }
+                recordWorkflowOutcome(AgentFlowMetrics.STATUS_FAILED);
+                outcomeRecorded = true;
+                cp.updateStatus(workflowId, WorkflowStatus.FAILED);
+                throw new WorkflowExecutionException(req.superStep(), List.of(cause));
+            }
+            // 审批节点真实输出 merge 进 context（U4 暂停时未 merge）
+            applyOutput(context, node, s.output(), def, reducer);
+            // 补记审批节点的路由决策（U4 暂停走 paused 分支，未走 updateReachability）
+            try {
+                for (EdgeDefinition e : resolveTakenEdges(node.id(), s.output(), context, Map.of(), def)) {
+                    takenEdges.add(EdgeDefinition.edgeKey(e.from(), e.to()));
+                }
+            } catch (FatalException fe) {
+                throw new WorkflowExecutionException(req.superStep(), List.of(fe));
+            }
+            // 5. 从审批层续跑：首轮 startLayer=审批层、firstExcluded=审批层节点全集
+            // （兄弟输出已在快照不重跑、审批节点已重跑 merge，故整层剔除不双跑）
+            Set<String> excluded = new HashSet<>(allSteps.get(req.superStep()).nodeIds());
+            Set<String> active = computeReachable(allSteps.get(0).nodeIds(), dag, def, takenEdges);
+            Set<String> onErrorActivated = rebuildOnErrorActivated(def, takenEdges);
+            paused = runRounds(allSteps, active, onErrorActivated, req.round(), req.superStep(), excluded,
+                    req.superStep(), Map.of(), context, dag, def, reducer, cp, workflowId, nodeExecutor, executor,
+                    workflowStart, trace, budget, takenEdges, maxIterationsOf(def));
+            if (paused) {
+                // 续跑中再次遇审批 → 保持 AWAITING_APPROVAL
+                if (trace != null) {
+                    trace.markCompleted(ExecutionTrace.Status.AWAITING_APPROVAL);
+                }
+                return context;
+            }
+            // 6. 收尾 SUCCESS/FAILED（复用 execute/recoverAndExecute 的 outcome 记录与 trace 语义）
+            cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
+            if (trace != null) {
+                if (!onErrorActivated.isEmpty()) {
+                    trace.markCompletedViaOnError();
+                }
+                trace.markCompleted(ExecutionTrace.Status.COMPLETED);
+            }
+            recordWorkflowOutcome(onErrorActivated.isEmpty()
+                    ? AgentFlowMetrics.STATUS_SUCCESS : AgentFlowMetrics.STATUS_FALLBACK);
+            outcomeRecorded = true;
+            return context;
+        } catch (WorkflowExecutionException we) {
+            if (trace != null) {
+                trace.markCompleted(ExecutionTrace.Status.FAILED);
+                trace.recordWorkflowError(describeFailure(we));
+            }
+            recordWorkflowOutcome(AgentFlowMetrics.STATUS_FAILED);
+            outcomeRecorded = true;
+            try {
+                cp.updateStatus(workflowId, WorkflowStatus.FAILED);
+            } catch (RuntimeException se) {
+                log.warn("approveAndResume abort 时 updateStatus(FAILED) 失败 wf={}: {}", workflowId, se.toString());
+            }
+            throw we;
+        } finally {
+            if (trace != null && trace.status() == ExecutionTrace.Status.RUNNING) {
+                trace.markCompleted(ExecutionTrace.Status.FAILED);
+            }
+            // U5：paused（再次 AWAITING）不兜底记 FAILED
             if (!outcomeRecorded && !paused) {
                 recordWorkflowOutcome(AgentFlowMetrics.STATUS_FAILED);
             }
