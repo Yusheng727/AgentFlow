@@ -53,7 +53,7 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
     4. 指标：`curl -s localhost:8080/actuator/prometheus | grep agentflow_workflow` → `agentflow_workflow_executed_total{status="success"}` 计数 +1
   - **验证证据**：`KafkaDispatchE2eIT` 真 Kafka 实跑绿（Skipped: 0）；无 Kafka 时整类跳过不红（AE2）
 - **工具级授权 DB 表 + 管理 API**（R21）→ ✅ **已交付**（2026-08-18，`feat/review-residual-r21`）——`CallerToolAllowlist` 升级为 config ∪ DB（`ToolGrantRepository` InMemory/Jdbc + V6 迁移 `caller_tool_grants`）+ `ToolGrantController` 管理 API（`/api/tools/grants`，admin-key 门控变更）；提交强制点不变。live 验证授权即时生效（grant 后 202 / 未授权 403）
-- **checkpoint 敏感数据列级加密**（R22 注明的升级点，v1 文档标注"明文存储 + R21 鉴权保护"）
+- **checkpoint 敏感数据列级加密**（R22 注明的升级点，v1 文档标注"明文存储 + R21 鉴权保护"）→ ✅ **已交付**（2026-08-20，`feat/hitl-r22-rag` U7）——`com.agentflow.security`：`ColumnEncryptor` 接口 + `NoopColumnEncryptor` + `AesGcmColumnEncryptor`（AES-256-GCM，12B 随机 IV，`AESGCM:` 自描述前缀，篡改检测）+ `ColumnEncryptors` 工厂（`fromEnv` 宽松 dev/demo / `fromEnvStrict` 生产 fail-closed）。`PostgresCheckpointManager` 注入可空加密器，`saveNodeOutput/saveBarrier/审批载荷` 写加密、读解密（非 `AESGCM:` 前缀 legacy 明文原样返回）；`AgentFlowAutoConfiguration` 生产装配 `fromEnvStrict()`。引擎/DSL/InMemory 零感知。**启用 key 需 key-before-first-write**；key 轮换记后续
 
 ---
 
@@ -62,7 +62,7 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 | v2 能力 | 说明 |
 |:---|:---|
 | **运行时条件分支 / 动态跳转** | ✅ **已交付**（2026-08-14，`feat/v2-conditional-branching`，U1–U8）——`when` 谓词条件边 + `on_error: goto` 兜底，BSP 可达性剪枝 + SKIPPED + checkpoint 路由决策持久化；见 `docs/plans/2026-08-14-001-feat-v2-conditional-branching-plan.md` |
-| **完整 Human-in-the-Loop 审批中间件** | 中断→外部审批→恢复执行 |
+| **完整 Human-in-the-Loop 审批中间件** | ✅ **已交付过半**（2026-08-20，`feat/hitl-r22-rag` U4–U7）：U4 引擎暂停（`AWAITING_APPROVAL` + 审批单快照落库）+ U5 `approveAndResume` 恢复 + U6 REST 审批端点（`ApprovalController` 待批投影/决策，decidedBy 服务端推导）+ U7 R22 列加密；**U8 demo-rag、U6/Kafka 跨节点恢复 Deferred** |
 | **Web 可视化工作流编辑器** | |
 | **多租户 SaaS 平台** | v2+ |
 | **RAG 演示加分项**（2026-08-10 拍板） | 自定义 `RagAgentFunction`（AgentFunction 内调向量检索），引擎层零改动——验证 KTD-6 扩展点设计成立。与 InterviewCoach（RAG 项目）分工不重复：AgentFlow 只做编排侧接入 |
