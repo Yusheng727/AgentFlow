@@ -8,6 +8,7 @@ import com.agentflow.engine.ChannelReducer;
 import com.agentflow.engine.checkpoint.CheckpointManager;
 import com.agentflow.engine.checkpoint.InMemoryCheckpointManager;
 import com.agentflow.engine.checkpoint.PostgresCheckpointManager;
+import com.agentflow.security.ColumnEncryptors;
 import com.agentflow.security.CredentialManager;
 import com.agentflow.agent.NodeRegistry;
 
@@ -97,6 +98,7 @@ public class AgentFlowAutoConfiguration {
             matchIfMissing = true)
     @ConditionalOnBean(DataSource.class)
     public CheckpointManager postgresCheckpointManager(DataSource dataSource) {
-        return new PostgresCheckpointManager(dataSource);
+        // U7 R22：生产装配确定接入列级静态加密（fail-closed）——缺 AGENTFLOW_ENCRYPTION_KEY 抛错，拒绝明文落库
+        return new PostgresCheckpointManager(dataSource, ColumnEncryptors.fromEnvStrict());
     }
 }
