@@ -1,5 +1,7 @@
 package com.agentflow.engine.checkpoint;
 
+import com.agentflow.security.ColumnEncryptor;
+import com.agentflow.security.NoopColumnEncryptor;
 import com.agentflow.agent.AgentOutput;
 import com.agentflow.engine.ChannelValue;
 import com.agentflow.engine.WorkflowContext;
@@ -54,6 +56,8 @@ public final class PostgresCheckpointManager implements CheckpointManager {
     private final JdbcTemplate jdbc;
     private final ObjectMapper jsonMapper;
     private final Semaphore writeSemaphore = new Semaphore(MAX_CONCURRENT_WRITES);
+    /** U7 R22：列级静态加密（可空=不加密，默认 Noop；生产经 AutoConfig 注入 fromEnvStrict）。 */
+    private final ColumnEncryptor encryptor;
 
     /**
      * 看板列表端点（#12）的 {@code workflow_executions} 查询 SQL + 行映射。
@@ -104,12 +108,27 @@ public final class PostgresCheckpointManager implements CheckpointManager {
     }
 
     /**
+     * 创建 PostgresCheckpointManager（指定列加密器）。生产由 AutoConfiguration 注入
+     * {@link com.agentflow.security.ColumnEncryptors#fromEnvStrict()}（fail-closed 强制加密）。
+     */
+    public PostgresCheckpointManager(DataSource dataSource, ColumnEncryptor encryptor) {
+        this(dataSource, defaultJsonMapper(), true, encryptor);
+    }
+
+    /**
      * 包私有：测试 seam——skipMigrations 时跳过 Flyway（H2 测试手建兼容表后驱动真实实例方法，
      * 覆盖 CHIT 审批方法行覆盖以达 JaCoCo；生产/IT 用上一构造跑迁移）。
      */
     PostgresCheckpointManager(DataSource dataSource, ObjectMapper jsonMapper, boolean runMigrations) {
+        this(dataSource, jsonMapper, runMigrations, NoopColumnEncryptor.INSTANCE);
+    }
+
+    /** 全参数构造（含加密器，测试/生产共用）。 */
+    PostgresCheckpointManager(DataSource dataSource, ObjectMapper jsonMapper, boolean runMigrations,
+                              ColumnEncryptor encryptor) {
         this.jdbc = new JdbcTemplate(dataSource);
         this.jsonMapper = jsonMapper;
+        this.encryptor = encryptor != null ? encryptor : NoopColumnEncryptor.INSTANCE;
 
         if (runMigrations) {
             // 运行 Flyway 迁移（幂等：仅执行待迁移的版本）
@@ -134,7 +153,7 @@ public final class PostgresCheckpointManager implements CheckpointManager {
     @Override
     public void saveNodeOutput(String workflowId, int round, int superStep, String nodeId, AgentOutput output) {
         Integer tokens = extractTokens(output);
-        String jsonOutput = toJson(output);
+        String jsonOutput = toEncryptedJson(output);
         Instant now = Instant.now();
 
         // Semaphore 限流：防 VT 并发耗尽 HikariCP
@@ -169,7 +188,7 @@ public final class PostgresCheckpointManager implements CheckpointManager {
         Map<String, Object> channelValues = context.values().entrySet().stream()
                 .filter(e -> e.getValue() != null)
                 .collect(Collectors.toMap(Map.Entry::getKey, e -> e.getValue().value()));
-        String jsonChannels = toJson(channelValues);
+        String jsonChannels = toEncryptedJson(channelValues);
 
         acquireSemaphore();
         try {
@@ -225,7 +244,7 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                 """,
                 (rs, rowNum) -> {
                     Map<String, Object> channels = fromJson(
-                            rs.getString("channel_values"),
+                            decryptRaw(rs.getString("channel_values")),
                             new TypeReference<Map<String, Object>>() {});
                     return new BarrierCheckpoint(
                             rs.getString("workflow_id"),
@@ -257,7 +276,7 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                 """,
                 (rs, rowNum) -> {
                     AgentOutput output = fromJson(
-                            rs.getString("output"), AgentOutput.class);
+                            decryptRaw(rs.getString("output")), AgentOutput.class);
                     Timestamp ts = rs.getTimestamp("completed_at");
                     return new NodeOutputStore(
                             rs.getString("workflow_id"),
@@ -300,8 +319,8 @@ public final class PostgresCheckpointManager implements CheckpointManager {
             jdbc.update(INSERT_APPROVAL_SQL,
                     request.approvalId(), workflowId, request.nodeId(), request.round(), request.superStep(),
                     request.description(),
-                    toJson(request.requestPayload()),
-                    toJson(request.contextSnapshot()),
+                    toEncryptedJson(request.requestPayload()),
+                    toEncryptedJson(request.contextSnapshot()),
                     Timestamp.from(request.createdAt() != null ? request.createdAt() : Instant.now()));
         } finally {
             writeSemaphore.release();
@@ -328,9 +347,9 @@ public final class PostgresCheckpointManager implements CheckpointManager {
 
     private ApprovalRequest approvalRowMapper(ResultSet rs, int rowNum) throws SQLException {
         Map<String, Object> payload = fromJson(
-                rs.getString("request_payload"), new TypeReference<Map<String, Object>>() {});
+                decryptRaw(rs.getString("request_payload")), new TypeReference<Map<String, Object>>() {});
         Map<String, Object> snapshot = fromJson(
-                rs.getString("context_snapshot"), new TypeReference<Map<String, Object>>() {});
+                decryptRaw(rs.getString("context_snapshot")), new TypeReference<Map<String, Object>>() {});
         Timestamp ts = rs.getTimestamp("created_at");
         return new ApprovalRequest(
                 rs.getString("approval_id"),
@@ -493,6 +512,16 @@ public final class PostgresCheckpointManager implements CheckpointManager {
         } catch (JsonProcessingException e) {
             throw new RuntimeException("Failed to serialize checkpoint data to JSON", e);
         }
+    }
+
+    /** U7 写路径：序列化后加密（Noop 恒等；AESGCM 前缀自描述，legacy 明文行读时原样返回）。 */
+    private String toEncryptedJson(Object obj) {
+        return encryptor.encrypt(toJson(obj));
+    }
+
+    /** U7 读路径：先解密（Noop 恒等 / AESGCM 对非前缀值原样返回）再反序列化。 */
+    private String decryptRaw(String raw) {
+        return encryptor.decrypt(raw);
     }
 
     private <T> T fromJson(String json, Class<T> clazz) {
