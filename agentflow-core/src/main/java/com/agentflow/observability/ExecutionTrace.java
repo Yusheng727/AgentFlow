@@ -166,7 +166,7 @@ public final class ExecutionTrace {
     }
 
     public enum Status {
-        RUNNING, COMPLETED, FAILED
+        RUNNING, COMPLETED, FAILED, AWAITING_APPROVAL
     }
 
     /** 不可变快照，供 REST/分析读取。 */

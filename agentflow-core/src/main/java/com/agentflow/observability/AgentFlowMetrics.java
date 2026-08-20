@@ -42,12 +42,18 @@ public final class AgentFlowMetrics {
     public static final String TOKENS_CONSUMED = "agentflow.tokens.consumed";
     public static final String WORKFLOW_COST_ESTIMATED = "agentflow.workflow.cost.estimated";
     public static final String WORKFLOW_COST_BUDGET_EXCEEDED = "agentflow.workflow.cost.budget_exceeded";
+    /** HITL 审批事件（U4 引擎暂停 / U6 API 决策）。 */
+    public static final String WORKFLOW_APPROVAL_EVENT = "agentflow.workflow.approval.event";
 
     /** 工作流执行状态 tag 值。 */
     public static final String STATUS_SUCCESS = "success";
     public static final String STATUS_FAILED = "failed";
     /** v2 on_error：经 on_error 兜底完成（区别于正常 success 的三终态之一）。 */
     public static final String STATUS_FALLBACK = "fallback";
+    /** HITL 审批事件 tag 值。 */
+    public static final String STATUS_APPROVAL_PENDING = "pending";
+    public static final String STATUS_APPROVAL_APPROVED = "approved";
+    public static final String STATUS_APPROVAL_REJECTED = "rejected";
 
     private final MeterRegistry meterRegistry;
     private final CostCalculator costCalculator;
@@ -74,6 +80,16 @@ public final class AgentFlowMetrics {
             return;
         }
         meterRegistry.counter(WORKFLOW_EXECUTED, Tags.of("status", status == null ? "unknown" : status)).increment();
+    }
+
+    // ──────────────────────────── HITL 审批事件 ────────────────────────────
+
+    /** 记一次审批事件（pending/approved/rejected）。status 用 {@link #STATUS_APPROVAL_PENDING} 等。 */
+    public void recordApprovalEvent(String status) {
+        if (meterRegistry == null) {
+            return;
+        }
+        meterRegistry.counter(WORKFLOW_APPROVAL_EVENT, Tags.of("status", status == null ? "unknown" : status)).increment();
     }
 
     // ──────────────────────────── 节点耗时 ────────────────────────────

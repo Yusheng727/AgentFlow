@@ -13,7 +13,7 @@
 | U1 HITL 核心类型 | ✅ 编码+测试 | `ApprovalHITLTypesTest` 7/7 绿；core 全量 330 tests 绿 |
 | U2 审批持久化 SPI + InMemory | ✅ 编码+测试 | `InMemoryCheckpointManagerApprovalTest` 7/7 绿 |
 | U3 V7 迁移 + Postgres 审批 + TEXT | 🟡 编码完成、**H2/真 PG 测试未写** | V7 SQL + Postgres 审批 4 方法 + 去 `::jsonb` 已改；**PostgresCheckpointManagerTest（H2）与 PostgresCheckpointManagerIT（真 PG）待补** |
-| U4 引擎暂停 | ⛔ 未开始 | — |
+| U4 引擎暂停 | ✅ 编码+测试 | `BspEngineApprovalPauseTest` 6/6 绿；core 全量 340 tests 绿 |
 | U5 引擎恢复 | ⛔ 未开始 | — |
 | U6 API + demo | ⛔ 未开始 | — |
 | U7 R22 加密 | ⛔ 未开始（V7 列型已就位） | — |
@@ -29,14 +29,14 @@
 - **`RetryPolicy` 第三 permit 透传**（修 unchecked cast CCE）：`ApprovalRequired` 不重试、原样返回。
 - **`AgentInput` 提前加 `approvalDecision`（ApprovalDecision，可空）**——本计划 U4 才需要，但为让 core 占位 `ApprovalGateAgent` 编译提前落地（纯增量，11-arg 便捷构造委托 null，零回归）。
 - **`WorkflowStatus` 加 `AWAITING_APPROVAL`**；**V7 迁移**把 `workflow_executions.status_check` 扩枚举 + 建 `workflow_approvals` 表 + checkpoint 敏感列 `JSONB→TEXT`（R22 静态加密先决）。
+- **U4 引擎暂停（2026-08-20 落地）**：`BspEngine.applyBarrier` 返回私有 record `BarrierResult(onErrorTargets, paused)`——识别 `NodeResult.ApprovalRequired` 即**审批优先暂停**（同层兄弟 Fail 也不 abort，兄弟 Success 输出已并入 context 作快照）→ `ApprovalRequest.pending(workflowId, nodeId, round, step.index, description, requestPayload, flattenContext(context))` 一次落库 + `updateStatus(AWAITING_APPROVAL)` + `metrics.recordApprovalEvent(pending)`，**不写路由决策/barrier**（该层未完成）。`runStep`/`runRounds` 透出 paused（runRounds 返回 boolean），`execute`/`recoverAndExecute` 暂停时 trace 记 `AWAITING_APPROVAL`、finally **不兜底 FAILED**（`!outcomeRecorded && !paused`）。`ExecutionTrace.Status` 加 `AWAITING_APPROVAL`；`AgentFlowMetrics` 加 `WORKFLOW_APPROVAL_EVENT` 指标族 + `recordApprovalEvent`（pending/approved/rejected，Grafana 面板留待 U9）。**防御**：`recoverAndExecute` 对 `AWAITING_APPROVAL` 抛 `IllegalStateException` 拒绝误恢复（U5 `approveAndResume` 才处理）。
 - **两层占位注意事项（记此）**：
   1. `F:\Java\JAVAcode\agent-flow\...\ApprovalRequest.java` 是**路径笔误**在仓库外（`F:\Java\JAVAcode\agent-flow` 是 main 的兄弟目录，非本仓库），不编译、不进 git；**手工删除**。
   2. `engine/ApprovalRequired.java` 是从 NodeResult 占位改造来的 `@Deprecated` 空类（原引用了非 permitted 实现会编译失败）。
 
 ## 划的 Decided Deferred（尚未实现、需新会话完成）
 
-- **U4 引擎暂停**：`applyBarrier` 识别 ApprovalRequired → 构造快照（**含兄弟输出、不含审批节点**，KTD-H2 正设计）随审批行落库 → `AWAITING_APPROVAL` → 返回 paused 提前退出（finally 兜底跳过 FAILED）。`AgentInput.approvalDecision` 已可用了。
-- **U5 恢复**：`approveAndResume` 复用 `runRounds` re-entry + `computeReachable` + `firstExcluded`（兄弟不重跑）+ takenEdges 预置 + 超时重定基线。
+- **U5 恢复**：`approveAndResume` 复用 `runRounds` re-entry + `computeReachable` + `firstExcluded`（兄弟不重跑）+ takenEdges 预置 + 超时重定基线。U4 已备好接入点：审批单 `contextSnapshot` 落库（含兄弟输出）、`approveAndResume` 重跑待批节点注入 `AgentInput.approvalDecision`（字段已在 U1 就位）。
 - **U7 R22**：`ColumnEncryptor`（AES-GCM）+ `fromEnv()/fromEnvStrict()` fail-closed + AESGCM 前缀 legacy 兼容 + AutoConfiguration strict 接线。
 - **U8 demo-rag**、**U6 API**、**U9 doc**。
 - **最后的 ce-code-review** + `mvn verify` 全仓绿 + push 远程 main。

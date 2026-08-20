@@ -12,6 +12,7 @@ import com.agentflow.dsl.NodeDefinition;
 import com.agentflow.dsl.Reducer;
 import com.agentflow.dsl.AgentflowMeta;
 import com.agentflow.dsl.WorkflowDefinition;
+import com.agentflow.engine.checkpoint.ApprovalRequest;
 import com.agentflow.engine.checkpoint.CheckpointManager;
 import com.agentflow.engine.checkpoint.ExecutionState;
 import com.agentflow.engine.checkpoint.NodeOutputStore;
@@ -213,6 +214,7 @@ public final class BspEngine {
         NodeExecutor nodeExecutor = new NodeExecutor(agentResolver, executor);
         Instant workflowStart = Instant.now();
         boolean outcomeRecorded = false; // U7 指标：兜底防漏记/防双记
+        boolean paused = false; // U4 审批暂停：合法中间态，finally 不兜底 FAILED
         try {
             // v2 条件分支：可达节点集（初始 = 源节点，随路由决策增量激活后继）；空工作流 → 空集
             Set<String> active = steps.isEmpty() ? new HashSet<>() : new HashSet<>(steps.get(0).nodeIds());
@@ -222,8 +224,16 @@ public final class BspEngine {
             List<String> takenEdges = new ArrayList<>();
             // v2 循环：外层迭代轮次循环共享骨架。active = 本轮前向传播；nextActive = 回边目标累积（下一轮起点）。
             // 无回边工作流：首轮结束 nextActive 恒空 → 单轮收敛，行为与 v2 一致（R11）。
-            runRounds(steps, active, onErrorActivated, 0, 0, Set.of(), -1, effInputs, context, dag, def, reducer, cp,
+            paused = runRounds(steps, active, onErrorActivated, 0, 0, Set.of(), -1, effInputs, context, dag, def, reducer, cp,
                     workflowId, nodeExecutor, executor, workflowStart, trace, budget, takenEdges, maxIterationsOf(def));
+            if (paused) {
+                // U4 审批暂停：不标 SUCCESS/FAILED、不写 workflow.executed{success|failed}；
+                // 审批 pending 指标已由 applyBarrier 记；trace 记 AWAITING_APPROVAL（合法中间态）
+                if (trace != null) {
+                    trace.markCompleted(ExecutionTrace.Status.AWAITING_APPROVAL);
+                }
+                return context;
+            }
             if (trace != null) {
                 if (!onErrorActivated.isEmpty()) {
                     trace.markCompletedViaOnError();
@@ -257,7 +267,8 @@ public final class BspEngine {
             if (trace != null && trace.status() == ExecutionTrace.Status.RUNNING) {
                 trace.markCompleted(ExecutionTrace.Status.FAILED);
             }
-            if (!outcomeRecorded) {
+            // U4：paused 是合法中间态（AWAITING_APPROVAL），不兜底记 FAILED
+            if (!outcomeRecorded && !paused) {
                 recordWorkflowOutcome(AgentFlowMetrics.STATUS_FAILED);
             }
             executor.shutdownNow();
@@ -327,12 +338,12 @@ public final class BspEngine {
      * 首轮从 startLayer 起跑（execute 从层 0；恢复轮从崩溃层起、剔除已完成节点）；后续轮从层 0 完整遍历。
      * 每轮结束 nextActive 非空 → round++ 继续迭代；空 → 收敛结束；达上限 → checkIterationCap 抛「迭代超限」。
      */
-    private void runRounds(List<SuperStep> steps, Set<String> active, Set<String> onErrorActivated,
-                           int startRound, int startLayer, Set<String> firstExcluded, int firstCrashLayer,
-                           Map<String, Object> inputs, WorkflowContext context, DAGraph dag, WorkflowDefinition def,
-                           ChannelReducer reducer, CheckpointManager cp, String workflowId, NodeExecutor nodeExecutor,
-                           ExecutorService executor, Instant workflowStart, ExecutionTrace trace, WorkflowBudget budget,
-                           List<String> takenEdges, int maxIterations) {
+    private boolean runRounds(List<SuperStep> steps, Set<String> active, Set<String> onErrorActivated,
+                              int startRound, int startLayer, Set<String> firstExcluded, int firstCrashLayer,
+                              Map<String, Object> inputs, WorkflowContext context, DAGraph dag, WorkflowDefinition def,
+                              ChannelReducer reducer, CheckpointManager cp, String workflowId, NodeExecutor nodeExecutor,
+                              ExecutorService executor, Instant workflowStart, ExecutionTrace trace, WorkflowBudget budget,
+                              List<String> takenEdges, int maxIterations) {
         int round = startRound;
         while (true) {
             Set<String> nextActive = new HashSet<>();
@@ -341,9 +352,11 @@ public final class BspEngine {
             int crashLayer = (round == startRound) ? firstCrashLayer : -1;
             for (int i = layer0; i < steps.size(); i++) {
                 SuperStep step = steps.get(i);
-                runStep(step, active, nextActive, excludeThisRound, crashLayer, round,
+                if (runStep(step, active, nextActive, excludeThisRound, crashLayer, round,
                         inputs, context, dag, def, reducer, cp, workflowId, nodeExecutor, executor,
-                        workflowStart, trace, budget, onErrorActivated, takenEdges);
+                        workflowStart, trace, budget, onErrorActivated, takenEdges)) {
+                    return true; // U4 审批暂停：本层未完成，立即退出（不写 barrier）
+                }
             }
             if (trace != null) {
                 trace.recordRound(round);
@@ -355,6 +368,7 @@ public final class BspEngine {
             checkIterationCap(round, maxIterations);
             active = nextActive;
         }
+        return false;
     }
 
     /** v2 循环：迭代轮次超限检查（per-loop max_iterations + 引擎 maxTotalRounds 双保险，execute/recover 共享）。 */
@@ -431,6 +445,13 @@ public final class BspEngine {
         List<SuperStep> allSteps = buildSuperSteps(layerer.computeSuperSteps(def));
         CheckpointManager cp = recovery.checkpointManager();
 
+        // U4 防御（U5 前）：AWAITING_APPROVAL 是审批暂停（合法中间态），不是崩溃——经 recoverAndExecute
+        // 误恢复会从崩溃层续跑、跳过等待的审批、破坏暂停语义。U5 approveAndResume 才处理该类工作流。
+        if (cp.findStatus(workflowId).orElse(null) == WorkflowStatus.AWAITING_APPROVAL) {
+            throw new IllegalStateException("工作流 " + workflowId + " 处于 AWAITING_APPROVAL（审批暂停），"
+                    + "不可用 recoverAndExecute 恢复——需 approveAndResume（U5）");
+        }
+
         int round = state.round();
         int crashLayerStep = state.nextSuperStep();
         List<String> crashedRoundDecisions = cp.findRoutingDecisions(workflowId, round);
@@ -476,12 +497,20 @@ public final class BspEngine {
         NodeExecutor nodeExecutor = new NodeExecutor(agentResolver, executor);
         Instant workflowStart = Instant.now();
         boolean outcomeRecorded = false; // U7 指标：兜底防漏记/防双记
+        boolean paused = false; // U4 审批暂停：合法中间态，finally 不兜底 FAILED
         try {
             cp.updateStatus(workflowId, WorkflowStatus.RUNNING);
             // v2 循环：恢复轮（round == startRound）从 crashLayerStep 起跑（剔除已完成节点），后续轮从层 0 完整遍历。
-            runRounds(allSteps, active, onErrorActivated, round, crashLayerStep, excluded, crashLayerStep, Map.of(),
+            paused = runRounds(allSteps, active, onErrorActivated, round, crashLayerStep, excluded, crashLayerStep, Map.of(),
                     context, dag, def, reducer, cp, workflowId, nodeExecutor, executor, workflowStart, trace, budget,
                     takenEdges, maxIterations);
+            if (paused) {
+                // U4：恢复续跑过程中再次遇审批 → 保持 AWAITING_APPROVAL（applyBarrier 已置），不标 SUCCESS/FAILED
+                if (trace != null) {
+                    trace.markCompleted(ExecutionTrace.Status.AWAITING_APPROVAL);
+                }
+                return context;
+            }
             cp.updateStatus(workflowId, WorkflowStatus.SUCCESS);
             if (trace != null) {
                 if (!onErrorActivated.isEmpty()) {
@@ -508,7 +537,8 @@ public final class BspEngine {
             }
             throw we;
         } finally {
-            if (!outcomeRecorded) {
+            // U4：paused 是合法中间态（AWAITING_APPROVAL），不兜底记 FAILED
+            if (!outcomeRecorded && !paused) {
                 recordWorkflowOutcome(AgentFlowMetrics.STATUS_FAILED);
             }
             executor.shutdownNow();
@@ -624,11 +654,11 @@ public final class BspEngine {
      * 只跑可达节点；崩溃层（{@code crashLayerStep}）再剔除 {@code excludedNodeIds}（已完成节点，输出已重放）。
      * 顺序：过滤可达 → 标 SKIPPED → 并行执行 → 路由决策持久化 → barrier 落盘（路由先于 barrier，崩溃窗口不丢）。
      */
-    private void runStep(SuperStep step, Set<String> active, Set<String> nextActive, Set<String> excludedNodeIds,
-                         int crashLayerStep, int round, Map<String, Object> inputs, WorkflowContext context, DAGraph dag,
-                         WorkflowDefinition def, ChannelReducer reducer, CheckpointManager cp, String workflowId,
-                         NodeExecutor nodeExecutor, ExecutorService executor, Instant workflowStart, ExecutionTrace trace,
-                         WorkflowBudget budget, Set<String> onErrorActivated, List<String> takenEdges) {
+    private boolean runStep(SuperStep step, Set<String> active, Set<String> nextActive, Set<String> excludedNodeIds,
+                            int crashLayerStep, int round, Map<String, Object> inputs, WorkflowContext context, DAGraph dag,
+                            WorkflowDefinition def, ChannelReducer reducer, CheckpointManager cp, String workflowId,
+                            NodeExecutor nodeExecutor, ExecutorService executor, Instant workflowStart, ExecutionTrace trace,
+                            WorkflowBudget budget, Set<String> onErrorActivated, List<String> takenEdges) {
         // 工作流总超时：super-step 间检查（超时则 abort，不推进下游）
         if (timeoutPolicy != null && timeoutPolicy.isWorkflowExceeded(workflowStart)) {
             throw new WorkflowExecutionException(step.index(),
@@ -648,28 +678,45 @@ public final class BspEngine {
         recordSuperStepTrace(trace, step);
         // v2 循环：记录节点所属迭代轮次（供 trace 区分跨轮重复执行的同 nodeId）
         recordNodeRounds(trace, step, round);
-        List<String> onErrorTargets = applyBarrier(step, results, context, dag, def, reducer, cp, workflowId,
+        BarrierResult barrier = applyBarrier(step, results, context, dag, def, reducer, cp, workflowId, round,
                 onErrorActivated, trace, takenEdges);
-        active.addAll(onErrorTargets);
+        // U4 审批暂停：不激活下游、不写路由决策/barrier（该层未完成，恢复时从层 0 续跑）
+        if (barrier.paused()) {
+            return true;
+        }
+        active.addAll(barrier.onErrorTargets());
         // v2 条件分支：成功节点计算路由决策、激活后继（无分支命中 → Fatal → 工作流 FAILED）
         updateReachability(results, active, nextActive, def, step.index(), trace, takenEdges, context, inputs);
         // 先持久化路由决策、再写 barrier（崩溃窗口内路由已落盘，恢复不丢下游）
         cp.saveRoutingDecisions(workflowId, round, step.index(), List.copyOf(takenEdges));
         cp.saveBarrier(workflowId, round, step.index(), context);
+        return false;
+    }
+
+    /** Barrier 扫描结果：on_error 激活目标 + 是否审批暂停（U4 HITL）。 */
+    private record BarrierResult(List<String> onErrorTargets, boolean paused) {
     }
 
     /** Barrier 阶段：按声明序合并成功节点输出；on_error 节点失败转兜底（激活目标、不 abort），
-     *  其余失败聚合抛出。返回本层 on_error 激活的目标节点（调用方加入可达集）。 */
-    private List<String> applyBarrier(SuperStep step, List<NodeResult> results, WorkflowContext context,
-                                      DAGraph dag, WorkflowDefinition def, ChannelReducer reducer,
-                                      CheckpointManager cp, String workflowId, Set<String> onErrorActivated,
-                                      ExecutionTrace trace, List<String> takenEdges) {
+     *  其余失败聚合抛出。返回本层 on_error 激活的目标节点（调用方加入可达集）。
+     *  U4 HITL：遇 {@link NodeResult.ApprovalRequired} → 审批优先暂停——兄弟 Success 输出已并入
+     *  context（快照用）、持久化审批单 + 上下文快照、置 {@code AWAITING_APPROVAL}，不 abort、不写 barrier。 */
+    private BarrierResult applyBarrier(SuperStep step, List<NodeResult> results, WorkflowContext context,
+                                       DAGraph dag, WorkflowDefinition def, ChannelReducer reducer,
+                                       CheckpointManager cp, String workflowId, int round, Set<String> onErrorActivated,
+                                       ExecutionTrace trace, List<String> takenEdges) {
         List<Throwable> fatalFailures = new ArrayList<>();
         List<String> onErrorTargets = new ArrayList<>();
+        NodeResult.ApprovalRequired approval = null;
         // results 已按声明序（提交序），保证 Reducer 合并确定
         for (NodeResult r : results) {
             if (r instanceof NodeResult.Success s) {
                 applyOutput(context, dag.node(s.nodeId()), s.output(), def, reducer);
+            } else if (r instanceof NodeResult.ApprovalRequired ar) {
+                // 审批优先：首个审批请求为准；同层兄弟 Success 仍并入 context（快照含兄弟输出）
+                if (approval == null) {
+                    approval = ar;
+                }
             } else if (r instanceof NodeResult.Failure f) {
                 NodeDefinition node = dag.node(f.nodeId());
                 // on_error 兜底：终态失败转跳转；on_error 目标自身失败不二次跳转（走致命失败）
@@ -682,6 +729,26 @@ public final class BspEngine {
                     fatalFailures.add(f.error());
                 }
             }
+        }
+        // U4 审批暂停：即使同层有 Failure 也以审批为准（兄弟输出已入 context，恢复时不重跑）
+        if (approval != null) {
+            ApprovalRequest request = ApprovalRequest.pending(workflowId, approval.nodeId(), round,
+                    step.index(), approval.description(), approval.requestPayload(), flattenContext(context));
+            try {
+                cp.saveApprovalRequest(workflowId, request);
+            } catch (RuntimeException e) {
+                // 审批单持久化失败 = 暂停无法恢复，视为致命（而非静默降级）
+                throw new WorkflowExecutionException(step.index(), List.of(e));
+            }
+            try {
+                cp.updateStatus(workflowId, WorkflowStatus.AWAITING_APPROVAL);
+            } catch (RuntimeException se) {
+                log.warn("暂停时 updateStatus(AWAITING_APPROVAL) 失败 wf={}: {}", workflowId, se.toString());
+            }
+            if (metrics != null) {
+                metrics.recordApprovalEvent(AgentFlowMetrics.STATUS_APPROVAL_PENDING);
+            }
+            return new BarrierResult(onErrorTargets, true);
         }
         if (!fatalFailures.isEmpty()) {
             // U4 ErrorHandler：转 FAILED 前 context 补偿（写 errorHandled=true 等；
@@ -701,7 +768,7 @@ public final class BspEngine {
         }
         // v2 注：saveBarrier 移到调用方（execute/recoverAndExecute）在 saveRoutingDecisions 之后执行，
         // 保证路由决策先于 barrier 落盘（review P1：崩溃窗口内路由不丢）
-        return onErrorTargets;
+        return new BarrierResult(onErrorTargets, false);
     }
 
     /** 把 AgentOutput 的 channelWrites 合并进全局 context（按 channel 的 Reducer）。 */
