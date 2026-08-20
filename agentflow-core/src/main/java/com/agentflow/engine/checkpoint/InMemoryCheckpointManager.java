@@ -47,6 +47,8 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
     private final ConcurrentHashMap<String, Long> workflowCreatedSeq = new ConcurrentHashMap<>();   // 单调插入序号（防同 created_at 时钟碰撞 flaky）
     private final AtomicLong seq = new AtomicLong();
     private final ConcurrentHashMap<String, List<String>> routingDecisions = new ConcurrentHashMap<>(); // v2 路由决策（累计）
+    private final ConcurrentHashMap<String, ApprovalRequest> approvals = new ConcurrentHashMap<>();      // U1 HITL：approvalId → ApprovalRequest
+    private final ConcurrentHashMap<String, List<String>> workflowApprovals = new ConcurrentHashMap<>(); // U1 HITL：workflowId → approvalId 列表（按序）
 
     // ──────────────────────────── 写入 ────────────────────────────
 
@@ -202,6 +204,47 @@ public final class InMemoryCheckpointManager implements CheckpointManager {
     @Override
     public List<String> findRoutingDecisions(String workflowId, int round) {
         return routingDecisions.getOrDefault(routingKey(workflowId, round), List.of());
+    }
+
+    // ──────────────────── HITL 审批（U1） ────────────────────
+
+    @Override
+    public String saveApprovalRequest(String workflowId, ApprovalRequest request) {
+        approvals.put(request.approvalId(), request);
+        workflowApprovals.computeIfAbsent(workflowId, k -> new CopyOnWriteArrayList<>()).add(request.approvalId());
+        return request.approvalId();
+    }
+
+    @Override
+    public List<ApprovalRequest> findPendingApprovals(String workflowId) {
+        List<String> ids = workflowApprovals.getOrDefault(workflowId, List.of());
+        return ids.stream()
+                .map(approvals::get)
+                .filter(r -> r != null && r.status() == ApprovalStatus.PENDING)
+                .collect(Collectors.toList());
+    }
+
+    @Override
+    public Optional<ApprovalRequest> findApprovalById(String approvalId) {
+        return Optional.ofNullable(approvals.get(approvalId));
+    }
+
+    @Override
+    public boolean confirmApproval(String approvalId, ApprovalDecision decision, String decidedBy) {
+        AtomicBoolean moved = new AtomicBoolean(false);
+        // compute：per-key 原子，PENDING→APPROVED/REJECTED 只发生一次（并发审批去重）
+        approvals.compute(approvalId, (id, req) -> {
+            if (req == null || req.status() != ApprovalStatus.PENDING) {
+                return req; // 不存在 / 已决策 → 不转移
+            }
+            moved.set(true);
+            ApprovalStatus st = decision == ApprovalDecision.APPROVE
+                    ? ApprovalStatus.APPROVED : ApprovalStatus.REJECTED;
+            return new ApprovalRequest(req.approvalId(), req.workflowId(), req.nodeId(), req.round(),
+                    req.superStep(), req.description(), req.requestPayload(), req.contextSnapshot(),
+                    st, decidedBy, req.createdAt());
+        });
+        return moved.get();
     }
 
     // ──────────────────────── 辅助方法 ────────────────────────

@@ -71,6 +71,11 @@ public final record RetryPolicy(
             if (r instanceof NodeResult.Success) {
                 return r;
             }
+            // U1 HITL：审批请求不是失败——不重试、透传给引擎（防 CCE 吞掉审批）。
+            // 审批节点首跑返回 ApprovalRequired；恢复批准后凭决策返回 Success/Failure。
+            if (r instanceof NodeResult.ApprovalRequired) {
+                return r;
+            }
             // Failure：取 cause 判定是否重试
             lastCause = ((NodeResult.Failure) r).error();
             if (!classifier.isTransient(lastCause)) {

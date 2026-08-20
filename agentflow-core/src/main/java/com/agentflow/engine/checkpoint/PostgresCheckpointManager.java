@@ -134,7 +134,7 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                     """
                     INSERT INTO workflow_node_outputs
                         (workflow_id, round, super_step, node_id, output, status, tokens_consumed, completed_at)
-                    VALUES (?, ?, ?, ?, ?::jsonb, 'COMPLETED', ?, ?)
+                    VALUES (?, ?, ?, ?, ?, 'COMPLETED', ?, ?)
                     ON CONFLICT (workflow_id, round, super_step, node_id)
                     DO UPDATE SET status = EXCLUDED.status,
                                   output = EXCLUDED.output,
@@ -167,7 +167,7 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                     """
                     INSERT INTO workflow_checkpoints
                         (workflow_id, round, super_step, channel_values)
-                    VALUES (?, ?, ?, ?::jsonb)
+                    VALUES (?, ?, ?, ?)
                     ON CONFLICT (workflow_id, round, super_step) DO NOTHING
                     """,
                     workflowId, round, superStep, jsonChannels);
@@ -281,6 +281,61 @@ public final class PostgresCheckpointManager implements CheckpointManager {
         return fromJson(rows.getFirst(), new TypeReference<List<String>>() {});
     }
 
+    // ──────────────────── HITL 审批（U1） ────────────────────
+
+    @Override
+    public String saveApprovalRequest(String workflowId, ApprovalRequest request) {
+        acquireSemaphore();
+        try {
+            jdbc.update(INSERT_APPROVAL_SQL,
+                    request.approvalId(), workflowId, request.nodeId(), request.round(), request.superStep(),
+                    request.description(),
+                    toJson(request.requestPayload()),
+                    toJson(request.contextSnapshot()),
+                    Timestamp.from(request.createdAt() != null ? request.createdAt() : Instant.now()));
+        } finally {
+            writeSemaphore.release();
+        }
+        return request.approvalId();
+    }
+
+    @Override
+    public List<ApprovalRequest> findPendingApprovals(String workflowId) {
+        return jdbc.query(SELECT_PENDING_APPROVALS_SQL, this::approvalRowMapper, workflowId);
+    }
+
+    @Override
+    public Optional<ApprovalRequest> findApprovalById(String approvalId) {
+        List<ApprovalRequest> rows = jdbc.query(SELECT_APPROVAL_BY_ID_SQL, this::approvalRowMapper, approvalId);
+        return rows.isEmpty() ? Optional.empty() : Optional.of(rows.getFirst());
+    }
+
+    @Override
+    public boolean confirmApproval(String approvalId, ApprovalDecision decision, String decidedBy) {
+        String status = decision == ApprovalDecision.APPROVE ? "APPROVED" : "REJECTED";
+        return jdbc.update(UPDATE_APPROVAL_SQL, status, decidedBy, approvalId) == 1;
+    }
+
+    private ApprovalRequest approvalRowMapper(ResultSet rs, int rowNum) throws SQLException {
+        Map<String, Object> payload = fromJson(
+                rs.getString("request_payload"), new TypeReference<Map<String, Object>>() {});
+        Map<String, Object> snapshot = fromJson(
+                rs.getString("context_snapshot"), new TypeReference<Map<String, Object>>() {});
+        Timestamp ts = rs.getTimestamp("created_at");
+        return new ApprovalRequest(
+                rs.getString("approval_id"),
+                rs.getString("workflow_id"),
+                rs.getString("node_id"),
+                rs.getInt("round"),
+                rs.getInt("super_step"),
+                rs.getString("description"),
+                payload,
+                snapshot,
+                ApprovalStatus.valueOf(rs.getString("status")),
+                rs.getString("decided_by"),
+                ts != null ? ts.toInstant() : null);
+    }
+
     // ─────────────────── 工作流生命周期 ───────────────────
 
     @Override
@@ -317,6 +372,41 @@ public final class PostgresCheckpointManager implements CheckpointManager {
             UPDATE workflow_executions
             SET status = 'RUNNING', updated_at = now()
             WHERE id = ? AND status = 'PENDING'
+            """;
+
+    // ──────────────────── HITL 审批 SQL（U1，单一真相源） ────────────────────
+
+    static final String INSERT_APPROVAL_SQL =
+            """
+            INSERT INTO workflow_approvals
+                (approval_id, workflow_id, node_id, round, super_step, description,
+                 request_payload, context_snapshot, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+            ON CONFLICT (approval_id) DO NOTHING
+            """;
+
+    static final String SELECT_PENDING_APPROVALS_SQL =
+            """
+            SELECT approval_id, workflow_id, node_id, round, super_step, description,
+                   request_payload, context_snapshot, status, decided_by, created_at
+            FROM workflow_approvals
+            WHERE workflow_id = ? AND status = 'PENDING'
+            ORDER BY created_at
+            """;
+
+    static final String SELECT_APPROVAL_BY_ID_SQL =
+            """
+            SELECT approval_id, workflow_id, node_id, round, super_step, description,
+                   request_payload, context_snapshot, status, decided_by, created_at
+            FROM workflow_approvals
+            WHERE approval_id = ?
+            """;
+
+    static final String UPDATE_APPROVAL_SQL =
+            """
+            UPDATE workflow_approvals
+            SET status = ?, decided_by = ?, decided_at = now()
+            WHERE approval_id = ? AND status = 'PENDING'
             """;
 
     @Override

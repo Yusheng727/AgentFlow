@@ -4,6 +4,7 @@ import com.agentflow.agent.AgentExecutionException;
 import com.agentflow.agent.AgentFunction;
 import com.agentflow.agent.AgentInput;
 import com.agentflow.agent.AgentOutput;
+import com.agentflow.agent.ApprovalRequiredException;
 import com.agentflow.dsl.NodeDefinition;
 
 import java.time.Duration;
@@ -74,6 +75,10 @@ public final class NodeExecutor {
         } catch (ExecutionException e) {
             // agent.execute 抛出的异常被包成 ExecutionException，取 cause
             Throwable cause = e.getCause() != null ? e.getCause() : e;
+            // U1 HITL：审批请求是「暂停」而非「失败」——区别于 Failure，引擎据此暂停工作流
+            if (cause instanceof ApprovalRequiredException are) {
+                return new NodeResult.ApprovalRequired(node.id(), are.requestDescription(), are.requestPayload());
+            }
             return new NodeResult.Failure(node.id(), cause);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

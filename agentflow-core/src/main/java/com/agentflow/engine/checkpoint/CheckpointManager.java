@@ -192,4 +192,35 @@ public interface CheckpointManager {
     default List<String> findRoutingDecisions(String workflowId, int round) {
         return findRoutingDecisions(workflowId);
     }
+
+    // ─────────────────── HITL 审批（U1/U2，随 checkpoint 持久化） ───────────────────
+
+    /**
+     * 持久化一个 PENDING 审批请求（含上下文快照，供批准后恢复执行）。
+     *
+     * @return 审批单 id（request 已含 approvalId，返回它便于调用方直接定位）
+     */
+    default String saveApprovalRequest(String workflowId, ApprovalRequest request) {
+        throw new UnsupportedOperationException("CheckpointManager 未实现审批持久化: " + getClass().getName());
+    }
+
+    /** 列某工作流的 PENDING 审批请求（按 created 序，供待办 API）。 */
+    default List<ApprovalRequest> findPendingApprovals(String workflowId) {
+        throw new UnsupportedOperationException("CheckpointManager 未实现审批查询: " + getClass().getName());
+    }
+
+    /** 按审批单 id 查（含上下文快照，恢复重建用）；不存在返回 empty。 */
+    default Optional<ApprovalRequest> findApprovalById(String approvalId) {
+        throw new UnsupportedOperationException("CheckpointManager 未实现审批查询: " + getClass().getName());
+    }
+
+    /**
+     * 原子决策（KTD-F 幂等升级）：仅当审批单当前为 PENDING 时置 APPROVED/REJECTED 并返回 true；
+     * 已被决策 / 不存在返回 false（幂等，防重复审批）。
+     *
+     * @param decidedBy 审批人标识（服务端从 callerId 推导，U6 安全点）
+     */
+    default boolean confirmApproval(String approvalId, ApprovalDecision decision, String decidedBy) {
+        throw new UnsupportedOperationException("CheckpointManager 未实现审批决策: " + getClass().getName());
+    }
 }
