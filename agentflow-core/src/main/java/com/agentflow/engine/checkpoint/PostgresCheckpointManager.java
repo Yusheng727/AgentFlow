@@ -100,17 +100,27 @@ public final class PostgresCheckpointManager implements CheckpointManager {
      * 创建 PostgresCheckpointManager（指定 ObjectMapper）。
      */
     public PostgresCheckpointManager(DataSource dataSource, ObjectMapper jsonMapper) {
+        this(dataSource, jsonMapper, true);
+    }
+
+    /**
+     * 包私有：测试 seam——skipMigrations 时跳过 Flyway（H2 测试手建兼容表后驱动真实实例方法，
+     * 覆盖 CHIT 审批方法行覆盖以达 JaCoCo；生产/IT 用上一构造跑迁移）。
+     */
+    PostgresCheckpointManager(DataSource dataSource, ObjectMapper jsonMapper, boolean runMigrations) {
         this.jdbc = new JdbcTemplate(dataSource);
         this.jsonMapper = jsonMapper;
 
-        // 运行 Flyway 迁移（幂等：仅执行待迁移的版本）
-        Flyway flyway = Flyway.configure()
-                .dataSource(dataSource)
-                .locations("classpath:db/migration")
-                .load();
-        int applied = flyway.migrate().migrationsExecuted;
-        if (applied > 0) {
-            log.info("Flyway 迁移完成，执行 {} 个迁移", applied);
+        if (runMigrations) {
+            // 运行 Flyway 迁移（幂等：仅执行待迁移的版本）
+            Flyway flyway = Flyway.configure()
+                    .dataSource(dataSource)
+                    .locations("classpath:db/migration")
+                    .load();
+            int applied = flyway.migrate().migrationsExecuted;
+            if (applied > 0) {
+                log.info("Flyway 迁移完成，执行 {} 个迁移", applied);
+            }
         }
     }
 
@@ -382,7 +392,6 @@ public final class PostgresCheckpointManager implements CheckpointManager {
                 (approval_id, workflow_id, node_id, round, super_step, description,
                  request_payload, context_snapshot, status, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
-            ON CONFLICT (approval_id) DO NOTHING
             """;
 
     static final String SELECT_PENDING_APPROVALS_SQL =
