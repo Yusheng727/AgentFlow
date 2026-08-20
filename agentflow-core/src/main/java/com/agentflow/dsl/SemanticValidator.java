@@ -1,5 +1,7 @@
 package com.agentflow.dsl;
 
+import com.agentflow.agent.ApprovalRequiredException;
+
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -242,5 +244,37 @@ public class SemanticValidator {
                         "回边节点 channel 声明非 OVERWRITE reducer: " + id + "（循环喂回需 OVERWRITE 每轮覆盖）");
             }
         }
+    }
+
+    /**
+     * U1 HITL 审批门布局 WARN（不阻断）：审批节点（agent 名 = {@code approval}）同 super-step 有兄弟时
+     * 返回一条警告。暂停时兄弟输出随快照保留、恢复不重跑，故非正确性问题——仅为可读性建议
+     * （审批节点独立一层，记在快照里的兄弟输出更直观）。
+     */
+    public List<String> approvalLayoutWarnings(WorkflowDefinition def) {
+        if (def == null || def.nodes() == null || def.nodes().isEmpty()) {
+            return List.of();
+        }
+        List<List<String>> steps;
+        try {
+            steps = new DAGLayerer().computeSuperSteps(def);
+        } catch (RuntimeException e) {
+            return List.of(); // 分层失败（如有环）由 validate() 抛，此处不作为 WARN
+        }
+        List<String> warnings = new ArrayList<>();
+        for (List<String> layer : steps) {
+            boolean approvalGated = layer.stream().anyMatch(id -> isApprovalGateNode(def, id));
+            if (approvalGated && layer.size() > 1) {
+                warnings.add("审批门节点（agent=approval）与兄弟节点同层执行：" + layer
+                        + "——暂停/恢复语义正确（兄弟输出进快照），但建议独立一层便于人工审核");
+            }
+        }
+        return warnings;
+    }
+
+    private static boolean isApprovalGateNode(WorkflowDefinition def, String nodeId) {
+        return def.nodes() != null && def.nodes().stream()
+                .anyMatch(n -> n.id().equals(nodeId)
+                        && ApprovalRequiredException.APPROVAL_AGENT_NAME.equals(n.agent()));
     }
 }

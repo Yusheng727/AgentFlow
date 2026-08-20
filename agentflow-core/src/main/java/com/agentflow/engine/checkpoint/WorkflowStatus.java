@@ -1,14 +1,12 @@
 package com.agentflow.engine.checkpoint;
 
 /**
- * 工作流执行实例状态。
- *
- * <p>U5 引入，对应 {@code workflow_executions.status} 列的 CHECK 约束。
- * 状态机：PENDING → RUNNING → SUCCESS | FAILED。
+ * 管理工作流状态（U8：加 {@code AWAITING_APPROVAL}——审批中暂停）。
  */
 public enum WorkflowStatus {
     PENDING,
     RUNNING,
+    AWAITING_APPROVAL,
     SUCCESS,
     FAILED
 }
