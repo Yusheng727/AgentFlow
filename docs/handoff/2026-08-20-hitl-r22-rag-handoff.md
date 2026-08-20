@@ -15,10 +15,10 @@
 | U3 V7 迁移 + Postgres 审批 + TEXT | 🟡 编码完成、**H2/真 PG 测试未写** | V7 SQL + Postgres 审批 4 方法 + 去 `::jsonb` 已改；**PostgresCheckpointManagerTest（H2）与 PostgresCheckpointManagerIT（真 PG）待补** |
 | U4 引擎暂停 | ✅ 编码+测试 | `BspEngineApprovalPauseTest` 6/6 绿；core 全量 340 tests 绿 |
 | U5 引擎恢复 | ✅ 编码+测试 | `BspEngineApprovalResumeTest` 8/8 绿；core 全量 348 tests 绿 |
-| U6 API + demo | ⛔ 未开始 | — |
-| U7 R22 加密 | ⛔ 未开始（V7 列型已就位） | — |
+| U6 API + demo | ✅ 编码+测试 | `ApprovalControllerTest` 8 + `WorkflowExecutionServiceHitlTest` 4 绿；api 94 + demo-api 6 绿 |
+| U7 R22 加密 | ✅ 编码+测试 | `AesGcmColumnEncryptorTest` 6 + `ColumnEncryptorsTest` 6 + `PostgresCheckpointManagerEncryptionTest` 3 绿；core 363 绿 + JaCoCo met |
 | U8 demo-rag | ⛔ 未开始 | — |
-| U9 文档 | ⛔ 未开始 | — |
+| U9 文档 | 🟡 部分（handoff 已同步 U4–U7；CLAUDE.md/ROADMAP/developer-notes 待补） | — |
 
 **关键基线**：U1–U3 改动后 core 全量测试 **330 全绿**（无回归）。分支已 commit + push（commit `feat(approval): U1 审批类型 + U2 InMemory SPI + U3 V7 迁移/Postgres 审批`）。
 
@@ -37,8 +37,9 @@
 ## 划的 Decided Deferred（尚未实现、需新会话完成）
 
 - **U5 引擎恢复（2026-08-20 落地）**：`BspEngine.approveAndResume(def, agentResolver, reducer, cp, workflowId, approvalId, decision, decidedBy)`——**从审批单恢复，不依赖 RecoveryProtocol**（崩溃恢复是另一条路径）。流程：① `findApprovalById` 无记录 → `IllegalStateException`（明确报错）；`confirmApproval` 原子 PENDING→终态，已决策 → 幂等 no-op 返回快照 context ② REJECT → `updateStatus(FAILED)` + trace/metrics rejected，下游不跑 ③ APPROVE → 重建 context（快照含兄弟输出）→ `updateStatus(RUNNING)` → **重跑待批节点**（12-arg AgentInput 注入 `approvalDecision=APPROVE` + round，走 retryPolicy；ApprovalRequired 原样透传 → 再次 saveApprovalRequest + AWAITING_APPROVAL 多级审批链；Failure → FAILED）→ `applyOutput` merge 真实输出 → **补记其路由决策**（U4 暂停走 paused 分支未调 updateReachability，`resolveTakenEdges` 重算入 takenEdges）→ `runRounds` 续跑：startRound=req.round()、startLayer=req.superStep()、**firstExcluded=审批层节点全集**（兄弟输出已在快照不重跑、审批节点已 merge，整层剔除防双跑）、active=`computeReachable`（源 → takenEdges）、**takenEdges 预置自 `findRoutingDecisions(wf, round)`**（防 saveRoutingDecisions UPSERT 覆盖丢边，review P2）、超时基线重定 `Instant.now()`（review 决议）。收尾 SUCCESS/FAILED 复用 `outcomeRecorded`/finally 不兜底 paused。
-- **U7 R22**：`ColumnEncryptor`（AES-GCM）+ `fromEnv()/fromEnvStrict()` fail-closed + AESGCM 前缀 legacy 兼容 + AutoConfiguration strict 接线。
-- **U8 demo-rag**、**U6 API**、**U9 doc**。
+- **U6 API + demo（2026-08-20 落地）**：① `WorkflowExecutionService.run()` U4 paused 后**不误标 SUCCESS**（查 status 若 AWAITING_APPROVAL 则 return 留待批态）+ 新增 `resumeAfterApproval(wfId, name, version, approvalId, decision, decidedBy)` → `approveAndResume` → 返回恢复后状态 ② 新建 `ApprovalController`（`/api/workflows/{wfId}/approvals`）：`GET .../pending` 待批列表（**精简投影** `ApprovalView`：approvalId/nodeId/description/status/createdAt——requestPayload/contextSnapshot 存库不**下发 API**，review P2 防敏感载荷旁路泄漏）+ `POST .../{approvalId}` 决策 ③ **decidedBy 服务端推导**：请求体仅 `{decision}`，客户端 decidedBy 一律忽略，`decidedBy` = caller X-API-Key hash（review P1 防审批审计身份伪造）④ 访问控制：创建者（ownership）或 admin（`AGENTFLOW_ADMIN_API_KEYS` 门控）可查/批；approval 归属 workflow 校验（不匹配 400）⑤ demo-api `ApiConfig.nodeRegistry` 注册 `approval` → `ApprovalGateAgent`（core 已有，demo 复用不重复建）⑥ `ApiKeyAuthFilter.sha256` 改 public（ApprovalController admin hash 用）。
+- **U7 R22 列级加密（2026-08-20 落地）**：`com.agentflow.security` 新建 4 类——`ColumnEncryptor`（接口 encrypt/decrypt）+ `NoopColumnEncryptor`（恒等，单例）+ `AesGcmColumnEncryptor`（AES-256-GCM，12B 随机 IV，`AESGCM:<ivB64>:<ctB64>` 自描述，GCM 完整校验篡改抛错，key 从 base64(32B) `SecretKeySpec` 显式派生防工厂漂移）+ `ColumnEncryptors` 工厂（`fromEnv()` 宽松：缺/非法 key → Noop+warn 明文落库 dev/demo；`fromEnvStrict()` 生产 fail-closed：缺/非法 → 抛异常拒绝明文落地；抽 package-private `build(key, strict)` 供测试直测，避免改写进程 env）。`PostgresCheckpointManager` 加可空 `ColumnEncryptor` 字段 + 新构造（默认 Noop），`saveNodeOutput/saveBarrier/saveApprovalRequest` 写用 `toEncryptedJson`、读（`findLatestBarrier/findCompletedNodes/approvalRowMapper`）用 `decryptRaw`（**decrypt 对非 `AESGCM:` 前缀值原样返回**——legacy 明文行兼容，KTD-E1）；`saveRoutingDecisions`（`::jsonb`）**不**加密。`AgentFlowAutoConfiguration.postgresCheckpointManager` 注入 `ColumnEncryptors.fromEnvStrict()` **生产装配确定接入 strict**。引擎/DSL/InMemory 零感知（加密是存储层关注点，KTD-E1/E2）。
+- **U8 demo-rag（用户回去再做）**、**U9 文档（handoff 已同步 U4–U7；CLAUDE.md/ROADMAP/developer-notes 待补）**。
 - **最后的 ce-code-review** + `mvn verify` 全仓绿 + push 远程 main。
 
 ## 风险与注意（接手前必读）

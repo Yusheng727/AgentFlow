@@ -438,3 +438,19 @@ recoverAndExecute 的轮次转换 else 分支（末 barrier 在最后一层 + �
 - **修复**：不依赖系统时钟精度，引入**单调递增插入序号** `workflowCreatedSeq`（`AtomicLong`），`listByCreatedBy` 按序号倒序。这是「最近优先」看板语义的诚实实现——序号严格反映创建先后，任何时钟粒度下都确定「后提交在前」。`createdAt` 保留仅作展示。
 - **教训**：用随机值（UUID）当排序决胜键无法消除 flaky——确定性排序必须用单调键（序号），不能把「两个相邻写入时间戳必然不同」当假设。这正是 2026-08-17 那次「H2 排序 flaky」教训在 **InMemory 实现**上的镜像：当时只修了 `PostgresCheckpointManagerTest`（`DATEADD` 错误开时间戳），InMemory 的对应隐患一直没堵，本次拉取后的 verify 才现形——**同一类缺陷可能藏在同样代码路径的另一实现里**，修复要排查同构实现。
 - **回归测试**：`CheckpointManagerTest.listByCreatedByOrderingIsDeterministic`——紧挨 initWorkflow 三条（含跨创建者），断言后提交在前 + 只见自己 + 空 createdBy 返回全部，锁定不确定时间下的确定性。
+
+## 2026-08-20 — HITL U6/U7（feat/hitl-r22-rag）实现发现
+
+### 坑：H2 不支持 PG 专有 `ON CONFLICT ... WHERE` → 加密分支验证换路径（R22）
+
+- **现象**：写 `PostgresCheckpointManagerEncryptionTest`（H2）验证列加密时，`saveNodeOutput`/`saveBarrier` 抛 `BadSqlGrammarException`（H2 `Syntax error ... ON CONFLICT`）。
+- **根因**：这两个方法的 INSERT 用了 PG 专有 `ON CONFLICT (...) DO UPDATE ... WHERE status <> 'COMPLETED'`，H2 不支持——这套 SQL 本来只该由真 PG IT（`PostgresCheckpointManagerIT`，Flyway V1–V7）跑，之前 H2 测试只测 `workflow_approvals`/`workflow_executions` 这类无 `ON CONFLICT` 的表（ApprovalTest/ListByCreatedBy 没撞上）。
+- **修复**：加密测试改用 `saveApprovalRequest`/`findApprovalById`（同一 `toEncryptedJson`/`decryptRaw` 加密路径，且其 SQL 无 `ON CONFLICT...WHERE` 在 H2 可跑）验证 Noop 明文 / AesGcm 密文不含明文子串 / legacy 明文原样返回；node output/channel 的密文形态标注留给真 PG IT。`AesGcmColumnEncryptor`/`ColumnEncryptors` 的纯加密逻辑单测照常全跑。
+- **教训**：「测试绿 ≠ 生产生效」——H2 能驱动的只是与 H2 兼容的那部分 SQL，PG 专有 SQL 的分支（加密落库、ON CONFLICT 幂等）只有真 PG IT 才真正验证。加密这种「存储层」关注点尤其要在真 PG 上确认密文形态，不能因为 H2 绿就断言生产加密生效。
+
+### 坑：`ApiKeyAuthFilter.sha256` package-private 挡住跨包 admin hash（U6）
+
+- **现象**：`ApprovalController`（`com.agentflow.api`）调 `ApiKeyAuthFilter.sha256` 编译失败——它在 `com.agentflow.api.security` 包是 package-private。
+- **根因**：U6 的「decidedBy 服务端推导 + admin key 门控」复用 `sha256`（对齐 `ToolGrantController` 的 `hashKeys`），但 controller 在 api 包、filter 在 security 子包。
+- **修复**：`sha256` 改 `public`（纯哈希函数无副作，公开无安全风险；`ToolGrantController`/`ApprovalController` 共用）。
+- **教训**：跨包复用「认证辅助工具」时先确认可见性；把哈希/sha 这类无状态纯函数直接 public，比包内到处复制一份更收敛（单一真相源）。
