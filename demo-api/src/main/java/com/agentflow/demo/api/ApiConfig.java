@@ -2,6 +2,7 @@ package com.agentflow.demo.api;
 
 import com.agentflow.adapters.langchain4j.LangChain4jAgentAdapter;
 import com.agentflow.adapters.mock.MockAgentFunction;
+import com.agentflow.agent.ApprovalRequiredException;
 import com.agentflow.agent.NodeRegistry;
 import com.agentflow.api.LocalVirtualThreadDispatcher;
 import com.agentflow.api.WorkflowDispatcher;
@@ -14,6 +15,7 @@ import com.agentflow.api.security.WorkflowOwnershipChecker;
 import com.agentflow.api.security.WorkflowSubmissionGuard;
 import com.agentflow.dsl.DAGLayerer;
 import com.agentflow.dsl.WorkflowDSLParser;
+import com.agentflow.engine.ApprovalGateAgent;
 import com.agentflow.engine.BspEngine;
 import com.agentflow.engine.ChannelReducer;
 import com.agentflow.engine.checkpoint.CheckpointManager;
@@ -115,6 +117,8 @@ public class ApiConfig {
             @Value("${agentflow.real.base-url:https://api.deepseek.com}") String realBaseUrl) {
         MockAgentFunction mock = new MockAgentFunction(agentFlowMetrics, mockModel, parseBudget(budgetThresholdUsd));
         NodeRegistry registry = new NodeRegistry(name -> mock);
+        // U6 HITL：审批门 agent（`agent: approval` 节点 → 暂停等人工决策；批准恢复后返回真实输出）
+        registry.register(ApprovalRequiredException.APPROVAL_AGENT_NAME, new ApprovalGateAgent());
         if (realEnabled) {
             registry.register(realAgentName, realDeepSeekAdapter(agentFlowMetrics, realAgentName, realModel, realBaseUrl));
         }

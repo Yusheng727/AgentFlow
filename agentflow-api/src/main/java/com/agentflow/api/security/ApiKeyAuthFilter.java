@@ -96,8 +96,8 @@ public final class ApiKeyAuthFilter extends OncePerRequestFilter {
 
     // ──────────────────────────── 辅助方法 ────────────────────────────
 
-    /** 计算字符串的 SHA-256 hex 摘要。 */
-    static String sha256(String input) {
+    /** 计算字符串的 SHA-256 hex 摘要（public：ApprovalController 也用于 admin key hash 比对）。 */
+    public static String sha256(String input) {
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-256");
             byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
