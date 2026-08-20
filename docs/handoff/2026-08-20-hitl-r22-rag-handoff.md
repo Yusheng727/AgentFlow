@@ -14,7 +14,7 @@
 | U2 审批持久化 SPI + InMemory | ✅ 编码+测试 | `InMemoryCheckpointManagerApprovalTest` 7/7 绿 |
 | U3 V7 迁移 + Postgres 审批 + TEXT | 🟡 编码完成、**H2/真 PG 测试未写** | V7 SQL + Postgres 审批 4 方法 + 去 `::jsonb` 已改；**PostgresCheckpointManagerTest（H2）与 PostgresCheckpointManagerIT（真 PG）待补** |
 | U4 引擎暂停 | ✅ 编码+测试 | `BspEngineApprovalPauseTest` 6/6 绿；core 全量 340 tests 绿 |
-| U5 引擎恢复 | ⛔ 未开始 | — |
+| U5 引擎恢复 | ✅ 编码+测试 | `BspEngineApprovalResumeTest` 8/8 绿；core 全量 348 tests 绿 |
 | U6 API + demo | ⛔ 未开始 | — |
 | U7 R22 加密 | ⛔ 未开始（V7 列型已就位） | — |
 | U8 demo-rag | ⛔ 未开始 | — |
@@ -36,7 +36,7 @@
 
 ## 划的 Decided Deferred（尚未实现、需新会话完成）
 
-- **U5 恢复**：`approveAndResume` 复用 `runRounds` re-entry + `computeReachable` + `firstExcluded`（兄弟不重跑）+ takenEdges 预置 + 超时重定基线。U4 已备好接入点：审批单 `contextSnapshot` 落库（含兄弟输出）、`approveAndResume` 重跑待批节点注入 `AgentInput.approvalDecision`（字段已在 U1 就位）。
+- **U5 引擎恢复（2026-08-20 落地）**：`BspEngine.approveAndResume(def, agentResolver, reducer, cp, workflowId, approvalId, decision, decidedBy)`——**从审批单恢复，不依赖 RecoveryProtocol**（崩溃恢复是另一条路径）。流程：① `findApprovalById` 无记录 → `IllegalStateException`（明确报错）；`confirmApproval` 原子 PENDING→终态，已决策 → 幂等 no-op 返回快照 context ② REJECT → `updateStatus(FAILED)` + trace/metrics rejected，下游不跑 ③ APPROVE → 重建 context（快照含兄弟输出）→ `updateStatus(RUNNING)` → **重跑待批节点**（12-arg AgentInput 注入 `approvalDecision=APPROVE` + round，走 retryPolicy；ApprovalRequired 原样透传 → 再次 saveApprovalRequest + AWAITING_APPROVAL 多级审批链；Failure → FAILED）→ `applyOutput` merge 真实输出 → **补记其路由决策**（U4 暂停走 paused 分支未调 updateReachability，`resolveTakenEdges` 重算入 takenEdges）→ `runRounds` 续跑：startRound=req.round()、startLayer=req.superStep()、**firstExcluded=审批层节点全集**（兄弟输出已在快照不重跑、审批节点已 merge，整层剔除防双跑）、active=`computeReachable`（源 → takenEdges）、**takenEdges 预置自 `findRoutingDecisions(wf, round)`**（防 saveRoutingDecisions UPSERT 覆盖丢边，review P2）、超时基线重定 `Instant.now()`（review 决议）。收尾 SUCCESS/FAILED 复用 `outcomeRecorded`/finally 不兜底 paused。
 - **U7 R22**：`ColumnEncryptor`（AES-GCM）+ `fromEnv()/fromEnvStrict()` fail-closed + AESGCM 前缀 legacy 兼容 + AutoConfiguration strict 接线。
 - **U8 demo-rag**、**U6 API**、**U9 doc**。
 - **最后的 ce-code-review** + `mvn verify` 全仓绿 + push 远程 main。
