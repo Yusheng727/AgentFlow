@@ -14,8 +14,11 @@ import com.agentflow.engine.checkpoint.CheckpointManager;
 import com.agentflow.engine.checkpoint.InMemoryCheckpointManager;
 import com.agentflow.engine.checkpoint.NodeOutputStore;
 import com.agentflow.engine.checkpoint.WorkflowStatus;
+import com.agentflow.observability.AgentFlowMetrics;
 import com.agentflow.version.InMemoryWorkflowDefinitionStore;
 import com.agentflow.version.WorkflowVersionManager;
+
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
@@ -97,6 +100,9 @@ class KafkaDispatchE2eIT {
     @Autowired
     private AtomicInteger executionCounter;
 
+    @Autowired
+    private AgentFlowMetrics metrics;
+
     @BeforeAll
     static void assumeKafka() {
         Assumptions.assumeTrue(kafkaReachable(),
@@ -120,6 +126,8 @@ class KafkaDispatchE2eIT {
         assertThat(completedNodes(wfId, 1)).hasSize(1);
         // 节点真实执行（非仅状态翻转）：draft + finalize 各记一次
         assertThat(executionCounter.get()).isGreaterThanOrEqualTo(2);
+        // review #7 metrics parity：Kafka 消费线程执行路径真实记账（tokens+cost），非空跑
+        assertThat(metrics.totalCost()).isPositive();
     }
 
     @Test
@@ -221,8 +229,14 @@ class KafkaDispatchE2eIT {
         }
 
         @Bean
-        BspEngine bspEngine() {
-            return new BspEngine(new DAGLayerer());
+        AgentFlowMetrics agentFlowMetrics() {
+            return new AgentFlowMetrics(new SimpleMeterRegistry());
+        }
+
+        @Bean
+        BspEngine bspEngine(AgentFlowMetrics metrics) {
+            // 6-arg：注入 metrics → Kafka 消费线程执行路径真实记账，对齐生产 demo-api 的 bspEngine 注入（review #7）
+            return new BspEngine(new DAGLayerer(), null, null, null, null, metrics);
         }
 
         @Bean
@@ -241,10 +255,11 @@ class KafkaDispatchE2eIT {
         }
 
         @Bean
-        NodeRegistry nodeRegistry(AtomicInteger executionCounter) {
-            // 内联 mock（kafka-starter 不依赖 adapters 模块）：每次执行计数 + 返回静态输出
+        NodeRegistry nodeRegistry(AtomicInteger executionCounter, AgentFlowMetrics metrics) {
+            // 内联 mock（kafka-starter 不依赖 adapters 模块）：每次执行计数 + 记账 token/cost + 返回静态输出
             return new NodeRegistry(name -> (AgentFunction) input -> {
                 executionCounter.incrementAndGet();
+                metrics.recordTokens("mock-e2e", "gpt-4o-mini", 16, 8);
                 return AgentOutput.of("mock:" + input.nodeId());
             });
         }
