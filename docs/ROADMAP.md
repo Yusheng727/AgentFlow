@@ -62,12 +62,12 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 | v2 能力 | 说明 |
 |:---|:---|
 | **运行时条件分支 / 动态跳转** | ✅ **已交付**（2026-08-14，`feat/v2-conditional-branching`，U1–U8）——`when` 谓词条件边 + `on_error: goto` 兜底，BSP 可达性剪枝 + SKIPPED + checkpoint 路由决策持久化；见 `docs/plans/2026-08-14-001-feat-v2-conditional-branching-plan.md` |
-| **完整 Human-in-the-Loop 审批中间件** | ✅ **已交付过半**（2026-08-20，`feat/hitl-r22-rag` U4–U7）：U4 引擎暂停（`AWAITING_APPROVAL` + 审批单快照落库）+ U5 `approveAndResume` 恢复 + U6 REST 审批端点（`ApprovalController` 待批投影/决策，decidedBy 服务端推导）+ U7 R22 列加密；**U8 demo-rag、U6/Kafka 跨节点恢复 Deferred** |
+| **完整 Human-in-the-Loop 审批中间件** | ✅ **已交付**（2026-08-20/21，`feat/hitl-r22-rag` U4–U8）：U4 引擎暂停（`AWAITING_APPROVAL` + 审批单快照落库）+ U5 `approveAndResume` 恢复 + U6 REST 审批端点（`ApprovalController` 待批投影/决策，decidedBy 服务端推导）+ U7 R22 列加密 + U8 demo-rag；**Kafka 跨节点审批恢复 Deferred** |
 | **Web 可视化工作流编辑器** | |
 | **多租户 SaaS 平台** | v2+ |
-| **RAG 演示加分项**（2026-08-10 拍板） | 自定义 `RagAgentFunction`（AgentFunction 内调向量检索），引擎层零改动——验证 KTD-6 扩展点设计成立。与 InterviewCoach（RAG 项目）分工不重复：AgentFlow 只做编排侧接入 |
+| **RAG 演示加分项**（2026-08-10 拍板） | ✅ **已交付**（2026-08-21，`feat/hitl-r22-rag` U8）——新模块 `demo-rag`：`InMemoryVectorStore`（确定性 token 集合 embedder + 余弦 top-k）+ `RagAgentFunction`（检索→增强→委托 wrapped agent）。**KTD-6 证明**：`RagEngineZeroChangeTest` 用 BspEngine 直跑 `agent: rag` 节点零改动成立。与 InterviewCoach（RAG 项目）分工不重复：AgentFlow 只做编排侧接入 |
 
-> 注意：v1 只做**静态 DAG**（KTD-9）；条件分支（动态路由 + on_error 跳转）已交付 v2（2026-08-14）；其余（Human-in-the-Loop、Web 编辑器、多租户、RAG 演示）仍属 v2。
+> 注意：v1 只做**静态 DAG**（KTD-9）；条件分支（动态路由 + on_error 跳转）已交付 v2（2026-08-14）；Human-in-the-Loop 审批 + RAG 演示已交付（2026-08-20/21，`feat/hitl-r22-rag`）；其余（Web 编辑器、多租户）仍属 v2。
 
 ---
 

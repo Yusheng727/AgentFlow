@@ -114,7 +114,9 @@ public class MyApp {
 - **Recovery Protocol**：off-by-one 修复（查崩溃层本身），replayOutputs 重放未进 barrier 的输出，stray COMPLETED 防护
 - **Mock LLM**：零成本本地调试，`${channel}` 占位符验证上下文传递
 - **容错**：Timeout → ErrorClassifier（Transient/Fatal）→ Retry（指数退避 1s→2s→4s）→ ErrorHandler 三层链路
-- **安全**：ApiKeyAuthFilter（SHA-256）+ IDOR 防护 + Tool 授权 + 凭证管理 + 敏感数据脱敏
+- **安全**：ApiKeyAuthFilter（SHA-256）+ IDOR 防护 + Tool 授权 + 凭证管理 + 敏感数据脱敏 + **列级静态加密**（`AgentFlow` 存库前 AES-256-GCM 加密 checkpoint 敏感列，R22）
+- **Human-in-the-Loop 审批**：节点抛 `ApprovalRequiredException` 请求人工决策 → 引擎暂停至 `AWAITING_APPROVAL` + 审批单（上下文快照落库）→ REST 批准/拒绝后续跑（`ApprovalController`）
+- **RAG Agent 扩展点（KTD-6）**：`demo-rag` 展示 `agent: rag` 节点「检索→增强→委托」，引擎层零改动（`RagEngineZeroChangeTest` 证明扩展点成立）
 
 ## 生产部署清单
 
@@ -165,6 +167,7 @@ AgentFlow/
 ├── agentflow-api/           # REST 端点 / 鉴权
 ├── agentflow-starter/       # @EnableAgentFlow / AutoConfiguration
 ├── demo-supplier-risk/      # 供应商风险评估 Demo（3 并行 → 汇总）
+├── demo-rag/                # RAG 检索增强 Demo（KTD-6 引擎零改动证明）
 ├── docker-compose.yml       # mock / production profiles
 └── docs/
     ├── plans/agentflow/     # 计划文档（8 分片）
