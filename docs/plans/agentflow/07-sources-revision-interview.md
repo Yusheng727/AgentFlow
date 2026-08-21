@@ -52,13 +52,13 @@
 
 ---
 
-## 档 C 面试口径（30s / 5min 自述稿，2026-08-18 定稿）
+## 档 C 面试口径（30s / 5min 自述稿，2026-08-21 定稿）
 
-> 目的：把 2026-06-28 review 的 13 条叙事/口径 Open Question（buy-vs-build、七三开折算、BSP vs Actor/CSP、@Tool 与 InterviewCoach 边界、Spring AI 差异化、cancel noop、mock 90%、Reducer 无 demo、API Key registry、InMemory ownership、DAG size 上界、budget 阈值、R20 archetypes）收口成可直接背的口径。**主线 = "静态 DAG → 动态路由 → 迭代收敛 → 分布式解耦"**，层层抛追问点、给落地答案。
+> 目的：把 2026-06-28 review 的 13 条叙事/口径 Open Question（buy-vs-build、七三开折算、BSP vs Actor/CSP、@Tool 与 InterviewCoach 边界、Spring AI 差异化、cancel noop、mock 90%、Reducer 无 demo、API Key registry、InMemory ownership、DAG size 上界、budget 阈值、R20 archetypes）收口成可直接背的口径。**主线 = "静态 DAG → 动态路由 → 迭代收敛 → 分布式解耦 → 人机协同审批 + RAG 扩展点"**，层层抛追问点、给落地答案。2026-08-21 更新：把 08-20/21 交付的 HITL 审批（U4–U6）+ R22 列加密（U7）+ demo-rag（U8）融入主线，并纠正 R21"下一步升级"的过时说法（已交付 DB 表 + 管理 API）。
 
 ### 30 秒自述（电梯版）
 
-> "我简历三个项目各打一个维度：ToyRush 是高并发基础，InterviewCoach 是 AI Agent + RAG 应用，AgentFlow 是**后端工程化 + Agent 工程化**。AgentFlow 是我从 0 用 Java 21 写的 Multi-Agent 编排引擎——业界有 LangGraph4j、Spring AI Alibaba，但我选从 0 复现，因为我的目标是展示后端工程深度不是补生态空白。整条主线：先做静态 DAG 的 BSP 执行模型 + 两级 Checkpoint 崩溃恢复防 LLM 重复计费，再扩 v2 的动态路由和迭代循环，最后 v1.1 用 Kafka 把提交和执行解耦。10 周 15 个实现单元全绿，12 模块 Maven 多模块、JaCoCo 80% 门禁。"
+> "我简历三个项目各打一个维度：ToyRush 是高并发基础，InterviewCoach 是 AI Agent + RAG 应用，AgentFlow 是**后端工程化 + Agent 工程化**。AgentFlow 是我从 0 用 Java 21 写的 Multi-Agent 编排引擎——业界有 LangGraph4j、Spring AI Alibaba，但我选从 0 复现，因为我的目标是展示后端工程深度不是补生态空白。整条主线：先做静态 DAG 的 BSP 执行模型 + 两级 Checkpoint 崩溃恢复防 LLM 重复计费，再扩 v2 的动态路由和迭代循环，再 v1.1 用 Kafka 把提交和执行解耦，最后加了 Human-in-the-Loop 审批（中断→外部批准→恢复）+ RAG 扩展点实证。10 周 15 个实现单元 + 后续一批全绿，14 模块 Maven 多模块、JaCoCo 80% 门禁。"
 
 ### 5 分钟自述（深度版）
 
@@ -86,7 +86,13 @@
 "InterviewCoach 是应用级 Agent——它用工具解决面试问答这个具体场景；AgentFlow 是**框架级工具布线**——@Tool 怎么从 bean 反射注册进 ToolSpecification、怎么在 YAML 解析期按 caller 做工具级授权、工具调用循环怎么防死循环（≤5 轮）。层不一样：一个是『用工具达到业务目的』，一个是『把工具调用的机制做对』。这叫互补不重复。"
 
 **⑧ 安全（R21/R22）**
-"三位一体：X-API-Key 鉴权（SHA-256 存 hash）+ 所有权校验防 IDOR + 工具级授权——`CallerToolAllowlist` 按 caller 白名单校验 YAML 里能引用哪些 @Tool，防止有人提交 YAML 引用特权工具。凭证只从 env 读、禁止硬编码；prompt/trace 走脱敏。R21 我下一步会升级成 DB 表 + 管理 API（现在是配置硬编码）。"
+"三位一体：X-API-Key 鉴权（SHA-256 存 hash）+ 所有权校验防 IDOR + 工具级授权——`CallerToolAllowlist` 按 caller 白名单校验 YAML 里能引用哪些 @Tool，防止有人提交 YAML 引用特权工具。R21 已升级成 DB 表 + 管理 API（`ToolGrantRepository` InMemory/Jdbc + V6 迁移 + `ToolGrantController`：grant/revoke 仅 admin key 门控），配置硬编码和 DB 求和、总空才 allow-all。R22 是**列级静态加密**：checkpoint 敏感列（node output / channel / 审批载荷）落库前用 AES-256-GCM 加密——`AESGCM:` 自描述前缀 + legacy 明文行兼容（升级前数据读得动），生产 `fromEnvStrict()` fail-closed（缺 key 拒绝明文落地）。凭证只从 env 读、禁止硬编码；prompt/trace 走脱敏。"
+
+**⑪ HITL 审批（U4–U6，人机协同）**
+"把工作流从'全自动'扩到'可中断等人工'：节点抛 `ApprovalRequiredException` → 引擎在 super-step barrier 识别、把**上下文快照**（含兄弟输出、不含审批节点）随审批单落库 → 置 `AWAITING_APPROVAL` 暂停 → 外部 REST 批准后 `approveAndResume` 重跑待批节点注入决策、续跑下游。三个点最能打：一是**防重复计费**——快照只含兄弟输出，恢复时兄弟不重跑，只重跑待批节点（KTD-3 在 HITL 的镜像）；二是**口径安全**——`decidedBy` 服务端从 caller 的 X-API-Key hash 推导，客户端传的 decidedBy 一律忽略，防审批身份伪造；三是**三种恢复路径统一**——崩溃恢复、审批恢复、retry 都复用 `runRounds` 同一套骨架，checkpoint 路由决策重放买回确定性。待批列表返回精简投影，requestPayload/contextSnapshot 存库不下发。"
+
+**⑫ RAG 扩展点（U8，KTD-6 实证）**
+"InterviewCoach 是应用级 RAG，AgentFlow 证明的是**编排引擎的 Agent 扩展点成立**：`RagAgentFunction` 在 Agent 侧做'检索→增强→委托'（`InMemoryVectorStore` 用确定性 token embedder，离线无外部向量库），`RagEngineZeroChangeTest` 直接拿 BspEngine 跑 `agent: rag` 节点，引擎/DSL 零改动就成功——说明 RAG 是 Agent 内部实现细节，引擎能编排任何 AgentFunction。这验证了架构的核心承诺：扩展点靠契约成立，不靠白盒 hack。"
 
 **⑨ mock 模式怎么控制成本（R13）**
 "90% 开发期用零成本 mock——`MockAgentFunction` 从 YAML 的 `mock_response` 读预设响应、支持 `${channel}` 占位符引用上游，语义上等价但不发真实 LLM。只有档 1 端到端才接真实 DeepSeek（OpenAI 兼容，env 读 key）。这让我每轮 CI 都能绿、开发迭代快，Demo 时才烧真钱。"
