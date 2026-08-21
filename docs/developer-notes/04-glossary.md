@@ -194,3 +194,27 @@ demo-api 接 `micrometer-registry-prometheus` + actuator，暴露 `/actuator/pro
 
 ### publishPercentileHistogram
 `recordNodeDuration` 的 Timer 开此开关，暴露 `_bucket` 序列 → Grafana `histogram_quantile` 算节点耗时 P50/P95/P99（count/sum/max 语义不变）。
+
+## HITL + R22 + RAG（2026-08，feat/hitl-r22-rag）
+
+### AWAITING_APPROVAL（审批暂停态）
+`WorkflowStatus` 枚举成员。引擎在 super-step barrier 识别 `NodeResult.ApprovalRequired` 后置此态——**合法中间态**（非 SUCCESS/FAILED），`run()` 不覆盖它、`recoverAndExecute` 拒绝误恢复、失去引用计时的"工作流总超时"也不计（恢复时重定基线）。批准续跑至 SUCCESS/FAILED，拒绝→FAILED。
+
+### ApprovalRequiredException / ApprovalRequired（NodeResult 三态）
+Agent 在需要人类决策时抛 `ApprovalRequiredException`（`ApprovalGateAgent` 首跑 `approvalDecision()==null` 即抛）；`NodeExecutor` 转成 `NodeResult.ApprovalRequired` 第三态（区别于 Success/Failure）。RetryPolicy 对它**不重试、原样透传**（防 unchecked cast 把审批吞成 Failure）。
+
+### 上下文快照（contextSnapshot）
+暂停时把当前 WorkflowContext 的 channel 扁平视图（**含兄弟 Success 输出、不含审批节点**）随审批单落库。恢复时用它重建 context → 兄弟不重跑（防 LLM 重复计费，KTD-3 在 HITL 的镜像），只重跑待批节点。
+
+### AesGcmColumnEncryptor（R22 列级加密）
+AES-256-GCM，12B 随机 IV，格式 `AESGCM:<ivB64>:<ctB64>` **自描述前缀**。GCM 自带完整性（篡改→decrypt 抛错）。key 从 base64(32B) `SecretKeySpec` 显式派生（防工厂漂移）。`decrypt` 对非 `AESGCM:` 前缀值**原样返回**——legacy 明文行兼容（升级前数据读得动）。key 只从 env `AGENTFLOW_ENCRYPTION_KEY` 读。
+
+### fromEnv() vs fromEnvStrict()（加密工厂）
+`ColumnEncryptors.fromEnv()` 宽松（dev/demo）：缺/非法 key → `NoopColumnEncryptor` + warn（明文落库）。`fromEnvStrict()` 生产 fail-closed：缺/非法 key → 抛异常**拒绝明文落地**。`AgentFlowAutoConfiguration` 生产装配确定接 strict。
+
+### RagAgentFunction（demo-rag）
+Agent 侧实现「检索 → 增强 → 委托」：query → `InMemoryVectorStore.topK` → 拼增强 prompt（`[上下文]` 段 + 原文 query）→ 委托 wrapped agent。**KTD-6 证明**：BspEngine 毫不知情能编排所有 AgentFunction，`RagEngineZeroChangeTest` 直跑 `agent: rag` 节点零改动成立。
+
+### InMemoryVectorStore（确定性 embedder）
+doc 列表 + **按空白切 token 的集合 + 余弦相似度**作检索，离线可测零外部向量服务。限定：中文无空格不分词（demo 文档用词间空格）。真实 embedding/向量库属于 InterviewCoach（分工不重复）。
+
