@@ -238,3 +238,29 @@
 **为什么**：LangChain4j 的内置闭环在 AiServices（接口抽象）那层，不在 ChatModel；为保持与 Spring 适配器同构的 ChatModel 窄表面，需自行驱动。有界 + usage 跨轮累加计费是必要约束。
 
 **为什么不选**：切 AiServices 会引入与 Spring 适配器完全不同的调用范式，KTD-7"同形对比"就破了强度。
+
+---
+
+## 为什么 HITL 审批用「引擎暂停 + 审批单快照」而非「内置 human_approve 原语」？
+
+**决策**：Agent 抛 `ApprovalRequiredException` → `NodeExecutor` 转 `NodeResult.ApprovalRequired` → barrier 识别后持久化审批单（含**上下文快照**与 round/superStep 定位）→ `AWAITING_APPROVAL` 暂停；批准后 `approveAndResume` 从快照重建 context、重跑待批节点注入决策、续跑下游。
+
+**为什么**：
+- **引擎复用既有骨架**：暂停/恢复都走 `runRounds`/`computeReachable`/barrier 同一套（BspEngine 已是 v2 路由/循环叠加体，不再另起炉灶）；恢复复用崩溃恢复的上下文重建思路但独立于 RecoveryProtocol。
+- **快照只含兄弟输出、不含审批节点** → 恢复时不双跑兄弟（不重复计费），审批节点重跑才计费——KTD-3「防 LLM 重复计费」在 HITL 的镜像。
+- **外部审批解耦**：引擎只管暂停/恢复，审批人/决策由 API 层（`ApprovalController`，decidedBy 服务端推导防伪造）负责，不污染引擎。
+- **确定性**：审批单持久化 round/superStep + takenEdges 预置（防 saveRoutingDecisions 覆盖丢边），崩溃/重启后仍能精确定位恢复点。
+
+**替代方案**：LangGraph 的 `interrupt` 原语、Flowise 的 on-event 审批钩子——都是图框架内建事件。AgentFlow 选「Agent 抛异常 + 引擎暂停」保持 AgentFunction 合约不新增侵入式 API。
+
+---
+
+## 为什么 RAG demo 用「确定性 token 集合 embedder + 业务侧 AgentFunction」而非接真实向量库？
+
+**决策**：`demo-rag` 的 `InMemoryVectorStore` 用「按空白切 token 的集合 + 余弦相似度」做检索，`RagAgentFunction` 在 Agent 侧实现「检索→增强→委托」；`RagEngineZeroChangeTest` 用 BspEngine 直跑证明引擎零改动。
+
+**为什么**：
+- **KTD-6 核心命题是「引擎扩展点成立」，不是「向量库多先进」**：引擎应能编排任何 AgentFunction，RAG 是 Agent 内部实现细节。用确定性 embedder（无外部服务、离线可测）恰好把「引擎不感知 RAG」这件事测到最干净——若接真实向量库，`mvn verify` 会因网络/服务依赖变红，偏离命题。
+- **与 InterviewCoach（RAG 项目）分工**：AgentFlow 只做编排侧接入，不重复造 RAG 后端。
+
+**为什么不选**：项目主价值在后端工程化（BSP/DAG/恢复/加密），RAG 是 KTD-6 验证样例 + 面试叙事加分项，真实向量库/embedding 属于 InterviewCoach 的领域。Deferred：`agentflow.rag.real.*` 真实模型接入、rag 接进 demo-api REST 的跨模块依赖（demo-rag 自包含可跑）。
