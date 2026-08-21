@@ -2,7 +2,7 @@
 
 > 记录 AgentFlow 开发过程中的工程沉淀：实现思路、踩坑、Review 发现、技术决策。
 > **用途**：简历素材 + 秋招面试「拷打」弹药库。与 `docs/plans/`（决策件）、`docs/handoff/`（Claude 接手清单）互补——本目录面向**人**（面试官/自己复习），后者面向**Agent**。
-> **持续更新（2026-08-11）**：补入档 B 收尾（WorkflowSubmissionGuard、R10 per-workflow budget）+ v1.1（LangChain4jAgentAdapter / KTD-7 + 其 review 发现），分布在 01/02/03/04。评审残留项另见 `../residual-review-findings/langchain4j-adapter-review.md`。
+> **持续更新（2026-08-21）**：补入 HITL 审批 + R22 列加密 + RAG demo（`feat/hitl-r22-rag` U4–U8，分布在 00/01/02/04——00 最新弹药、01 设计合理性、02 实现坑、04 术语）。此前（2026-08-11）补过档 B 收尾（WorkflowSubmissionGuard、R10 per-workflow budget）+ v1.1（LangChain4jAgentAdapter / KTD-7 + 其 review 发现）。评审残留项另见 `../residual-review-findings/langchain4j-adapter-review.md`。
 
 ## 文档清单
 

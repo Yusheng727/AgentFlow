@@ -386,3 +386,21 @@
 **深挖点**：
 - 「怎么知道面板会空、空在哪段？」（指标管线：定义→引擎钩子→exporter→Prometheus 抓→Grafana，任一段断就空；要端到端起服看，不是看测试）
 - 「为什么接口有了数据还是空的？」（define 不等于 hook——`recordWorkflowExecuted` 之前只有测试调，引擎不调就没样本）
+
+---
+
+## HITL 审批 + R22 列加密 + RAG demo（2026-08，feat/hitl-r22-rag）★最新鲜弹药
+
+**一句话**：把 v2 的「条件分支/迭代收敛」再扩成 **「中断 → 外部人工审批 → 恢复执行」** 全链路（HITL）+ 敏感列静态加密（R22）+ RAG 扩展点实证（KTD-6）。
+
+**可讲故事**：
+- **HITL 全链路**（U4–U6）：Agent 抛 `ApprovalRequiredException` → 引擎在 barrier 暂停至 `AWAITING_APPROVAL` + 审批单（**上下文快照**含兄弟输出）落库 → REST 批准后 `approveAndResume` 重跑待批节点注入决策、续跑下游。**最出彩**：快照只含兄弟输出 → 恢复不双跑兄弟（KTD-3 防重复计费在 HITL 的镜像）；`recoverAndExecute` 拒绝误恢复 AWAITING_APPROVAL
+- **decidedBy 服务端推导**（U6 安全）：请求体仅 `{decision}`，客户端 decidedBy 忽略，`decidedBy` = caller 的 X-API-Key hash——防审批审计身份伪造（review P1）
+- **R22 列加密**（U7）：`AesGcmColumnEncryptor`（AES-256-GCM，`AESGCM:` 自描述前缀 + **legacy 明文行兼容**）+ `fromEnvStrict()` 生产 fail-closed（缺 key 拒绝明文落库）。引擎/DSL/InMemory 零感知——加密是存储层关注点（KTD-E1/E2）
+- **RAG 扩展点实证**（U8/`demo-rag`）：`RagAgentFunction`（检索→增强→委托）+ 确定性 embedder（离线零外部服务）；`RagEngineZeroChangeTest` 用 BspEngine 直跑 `agent: rag` 零改动——**KTD-6「引擎零改动、扩展点成立」不靠白盒 hack 靠契约**
+
+**深挖点**：
+- 「BSP 在运行时动态 + 审批暂停下还能保留吗？」（暂停/恢复都走 `runRounds` 既有骨架；快照重放买回确定性——循环/审批/崩溃三条恢复路径复用同一套）
+- 「怎么防审批后重复计费？」（快照只含兄弟输出不含审批节点；`firstExcluded=审批层全集`；takenEdges 预置防 saveRoutingDecisions 覆盖丢边）
+- 「加密 key 从哪来？降级吗？」（只从 env `AGENTFLOW_ENCRYPTION_KEY` 读；dev 宽松 Noop、生产 strict fail-closed；key-before-first-write）
+- 「RAG 为什么用这么朴素的 embedder？」（KTD-6 命题是「扩展点成立」不是向量库先进；真实 embedding 属于 InterviewCoach，分工不重复）
