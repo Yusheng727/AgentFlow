@@ -1,4 +1,5 @@
 import type {
+  ApprovalSummary,
   DiagnosisReport,
   ExecutionTraceSnapshot,
   PipelineNode,
@@ -10,6 +11,16 @@ import type {
 // 移植自 prototype-final.html 的演示 state：后端不可达时 UI 降级渲染这些数据，保证不白屏。
 
 export const mockWorkflows: WorkflowSummary[] = [
+  {
+    id: 'wf-0',
+    name: 'supplier-pay-hold',
+    status: 'awaiting_approval',
+    nodes: 3,
+    steps: 2,
+    time: '暂停于 super-step 1',
+    date: '1m 前',
+    desc: '付款审批门等待人工决策（AWAITING_APPROVAL）。',
+  },
   {
     id: 'wf-1',
     name: 'supplier-risk-v2',
@@ -67,6 +78,28 @@ export const mockDefinitions: WorkflowDefinitionInfo[] = [
   { id: 'def-2', name: 'contract-review', version: '1.0', nodes: 4, desc: '合同审核流水线：4 步链式串行' },
   { id: 'def-3', name: 'investment-analysis', version: '1.0', nodes: 6, desc: '投资分析决策：双层 fork-join 混合拓扑' },
   { id: 'def-4', name: 'greeting-test', version: '1.0', nodes: 1, desc: '最小示例：单节点问候' },
+]
+
+/** mock 待批审批（审批中心 Tab 降级数据，U4）：对齐 ApprovalCenterView 精简投影。 */
+export const mockPendingApprovals: ApprovalSummary[] = [
+  {
+    approvalId: 'appr-mock-1',
+    workflowId: 'wf-0',
+    workflowName: 'supplier-pay-hold',
+    nodeId: 'pay-gate',
+    description: '审批付款：供应商 Acme Corp ¥100,000（财务/合规/声誉三路评估通过）',
+    status: 'PENDING',
+    createdAt: '2026-08-23T10:30:00Z',
+  },
+  {
+    approvalId: 'appr-mock-2',
+    workflowId: 'wf-0',
+    workflowName: 'supplier-pay-hold',
+    nodeId: 'contract-gate',
+    description: '审批合同条款：付款周期 Net-60 → Net-30 变更',
+    status: 'PENDING',
+    createdAt: '2026-08-23T10:32:00Z',
+  },
 ]
 
 const mockPipelineNodes: PipelineNode[] = [

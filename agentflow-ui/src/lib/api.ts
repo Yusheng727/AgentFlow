@@ -1,4 +1,7 @@
 import type {
+  ApprovalDecisionRequest,
+  ApprovalDecisionResponse,
+  ApprovalSummary,
   DiagnosisReport,
   ExecutionTraceSnapshot,
   StatusResponse,
@@ -8,7 +11,7 @@ import type {
   WorkflowStatusUi,
   WorkflowSummary,
 } from '../types'
-import { mockTrace, mockWorkflows } from './mockData'
+import { mockPendingApprovals, mockTrace, mockWorkflows } from './mockData'
 
 /**
  * fetch 封装（KTD-1：真实 API 优先 + mock fallback）。
@@ -117,8 +120,10 @@ export async function listWorkflows(): Promise<WorkflowListResult> {
 /** 后端执行记录 → 看板摘要（状态大小写归一，避免 real enum UPPER 静默错分列/成功率）。 */
 function toWorkflowSummary(r: WorkflowExecutionRecord): WorkflowSummary {
   const raw = r.status.toLowerCase()
-  // pending 是瞬时态，并入 running（看板三列 running/success/failed 分桶；对应后端 status=UPPER）
-  const status: WorkflowStatusUi = raw === 'pending' ? 'running' : (raw as WorkflowStatusUi)
+  // 状态归一：pending 是瞬时态并入 running（三列看板 running 桶）；
+  // awaiting_approval 直通独立列（HITL 可操作态，与 running 混淆会让用户错过审批）
+  const status: WorkflowStatusUi =
+    raw === 'pending' ? 'running' : (raw as WorkflowStatusUi)
   return {
     id: r.workflowId,
     name: r.workflowName,
@@ -173,4 +178,40 @@ export function diagnoseWorkflow(
     method: 'POST',
     body: JSON.stringify({ workflowId, trace }),
   })
+}
+
+// ──────────────────── HITL 审批（U3/U4 审批中心） ────────────────────
+
+export interface PendingApprovalsResult {
+  approvals: ApprovalSummary[]
+  /** 数据来源：api=真实后端（ApprovalCenterController），mock=降级数据。 */
+  source: 'api' | 'mock'
+}
+
+/**
+ * GET /api/approvals/pending — 跨工作流待批聚合（审批中心数据源，U3）。
+ * 后端不可达时降级 mockPendingApprovals（与既有端点同模式，UI 不白屏）。
+ */
+export async function listPendingApprovals(): Promise<PendingApprovalsResult> {
+  const { data, source } = await withMockFallback(
+    () => request<ApprovalSummary[]>('/approvals/pending'),
+    () => mockPendingApprovals,
+  )
+  return { approvals: data, source }
+}
+
+/**
+ * POST /api/workflows/{wfId}/approvals/{approvalId} — 提交 APPROVE/REJECT 决策并续跑。
+ * <b>无 mock fallback</b>：写操作不能静默假成功——失败直接抛（ApiError 走真实拒绝
+ * toast，网络不可达提示后端离线），与 retryWorkflow 的处理纪律一致。
+ */
+export function decideApproval(
+  workflowId: string,
+  approvalId: string,
+  decision: ApprovalDecisionRequest['decision'],
+): Promise<ApprovalDecisionResponse> {
+  return request<ApprovalDecisionResponse>(
+    `/workflows/${workflowId}/approvals/${approvalId}`,
+    { method: 'POST', body: JSON.stringify({ decision }) },
+  )
 }

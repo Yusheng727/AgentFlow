@@ -1,7 +1,7 @@
 // ──────────────────────────── UI 看板模型（Dashboard 渲染用） ────────────────────────────
 
-/** 看板三列分组的 UI 状态（对齐后端 WorkflowStatus 的小写形态）。 */
-export type WorkflowStatusUi = 'running' | 'success' | 'failed'
+/** 看板分组的 UI 状态（对齐后端 WorkflowStatus 的小写形态；AWAITING_APPROVAL 独立列——HITL 可操作态）。 */
+export type WorkflowStatusUi = 'running' | 'awaiting_approval' | 'success' | 'failed'
 
 /** 看板卡片 / 最近执行表格的一行。 */
 export interface WorkflowSummary {
@@ -109,4 +109,28 @@ export interface DiagnosisReport {
   totalNodes: number
   failedNodes: number
   findings: Diagnosis[]
+}
+
+// ──────────────────── HITL 审批契约（ApprovalCenterController，U3/U4） ────────────────────
+
+/** GET /api/approvals/pending 元素：跨工作流待批聚合（精简投影，无敏感载荷）。 */
+export interface ApprovalSummary {
+  approvalId: string
+  workflowId: string
+  workflowName: string | null
+  nodeId: string
+  description: string | null
+  status: 'PENDING' | 'APPROVED' | 'REJECTED'
+  createdAt: string | null
+}
+
+/** POST /api/workflows/{wfId}/approvals/{approvalId} 请求体（decidedBy 服务端推导）。 */
+export interface ApprovalDecisionRequest {
+  decision: 'APPROVE' | 'REJECT'
+}
+
+/** POST 决策响应：回显决策 + 后续工作流状态。 */
+export interface ApprovalDecisionResponse {
+  decision: string
+  workflowStatus: string
 }

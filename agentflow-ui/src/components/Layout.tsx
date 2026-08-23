@@ -5,10 +5,11 @@ import {
   GitBranch,
   LayoutDashboard,
   Play,
+  ShieldCheck,
   type LucideIcon,
 } from 'lucide-react'
 
-export type TabId = 'dashboard' | 'submit' | 'definitions' | 'trace' | 'diagnosis'
+export type TabId = 'dashboard' | 'submit' | 'definitions' | 'approval-center' | 'trace' | 'diagnosis'
 
 interface NavItem {
   id: TabId
@@ -23,6 +24,7 @@ const navSections: { title: string; items: NavItem[] }[] = [
       { id: 'dashboard', label: '看板', icon: LayoutDashboard },
       { id: 'submit', label: '提交工作流', icon: Play },
       { id: 'definitions', label: '工作流定义', icon: FileText },
+      { id: 'approval-center', label: '审批中心', icon: ShieldCheck },
     ],
   },
   {

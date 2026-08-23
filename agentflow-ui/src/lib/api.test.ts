@@ -8,6 +8,8 @@ import {
   retryWorkflow,
   getWorkflowTrace,
   diagnoseWorkflow,
+  listPendingApprovals,
+  decideApproval,
   type WorkflowListResult,
 } from './api'
 import type { WorkflowExecutionRecord } from '../types'
@@ -93,10 +95,11 @@ describe('resolveApiKey', () => {
 // ──────────────────── listWorkflows（看板列表）────────────────────
 
 describe('listWorkflows', () => {
-  it('真实 API 成功：状态归一 UPPER→lower（PENDING/RUNNING→running，SUCCESS→success，FAILED→failed）', async () => {
+  it('真实 API 成功：状态归一 UPPER→lower（PENDING/RUNNING→running，AWAITING_APPROVAL→awaiting_approval 独立列，SUCCESS→success，FAILED→failed）', async () => {
     const records: WorkflowExecutionRecord[] = [
       { workflowId: 'w1', workflowName: 'a', status: 'PENDING', createdAt: '2026-08-07T00:00:00Z' },
       { workflowId: 'w2', workflowName: 'b', status: 'RUNNING', createdAt: '2026-08-07T00:00:01Z' },
+      { workflowId: 'w2a', workflowName: 'b2', status: 'AWAITING_APPROVAL', createdAt: '2026-08-07T00:00:01Z' },
       { workflowId: 'w3', workflowName: 'c', status: 'SUCCESS', createdAt: null },
       { workflowId: 'w4', workflowName: 'd', status: 'FAILED', createdAt: '2026-08-07T00:00:02Z' },
     ]
@@ -105,11 +108,11 @@ describe('listWorkflows', () => {
     const result: WorkflowListResult = await listWorkflows()
 
     expect(result.source).toBe('api')
-    expect(result.workflows.map((w) => w.status)).toEqual(['running', 'running', 'success', 'failed'])
+    expect(result.workflows.map((w) => w.status)).toEqual(['running', 'running', 'awaiting_approval', 'success', 'failed'])
     // createdAt 为 null → date 回退 '--'
-    expect(result.workflows[2].date).toBe('--')
+    expect(result.workflows[3].date).toBe('--')
     // desc 保留原始 UPPER 形态（供 UI 展示真实枚举）
-    expect(result.workflows[2].desc).toBe('SUCCESS')
+    expect(result.workflows[3].desc).toBe('SUCCESS')
   })
 
   it('请求路径 /api/workflows + X-API-Key header', async () => {
@@ -232,5 +235,64 @@ describe('diagnoseWorkflow', () => {
     expect(url).toBe('/api/diagnosis')
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body)).toEqual({ workflowId: 'wf-x', trace })
+  })
+})
+
+// ──────────────────── HITL 审批（U3 聚合 + U4 决策）────────────────────
+
+describe('listPendingApprovals（审批中心聚合）', () => {
+  it('真实 API 成功 → source=api + 透传投影数组', async () => {
+    const approvals = [
+      { approvalId: 'a1', workflowId: 'wf-1', workflowName: 'pay', nodeId: 'gate', description: 'd', status: 'PENDING', createdAt: null },
+    ]
+    fetchMock.mockResolvedValue(fakeResponse(true, 200, approvals))
+
+    const out = await listPendingApprovals()
+
+    expect(out.source).toBe('api')
+    expect(out.approvals[0].approvalId).toBe('a1')
+    const [url] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/approvals/pending')
+  })
+
+  it('后端不可达（网络错误）→ 降级 mock 待批数据，source=mock', async () => {
+    fetchMock.mockRejectedValue(new TypeError('Network request failed'))
+
+    const out = await listPendingApprovals()
+
+    expect(out.source).toBe('mock')
+    // mock 待批审批（2 条演示数据，mockData U4）
+    expect(out.approvals.length).toBe(2)
+    expect(out.approvals[0].nodeId).toBe('pay-gate')
+  })
+})
+
+describe('decideApproval（审批决策）', () => {
+  it('POST /api/workflows/{wfId}/approvals/{approvalId}，body 仅 {decision}（decidedBy 服务端推导）', async () => {
+    const resp = { decision: 'APPROVE', workflowStatus: 'SUCCESS' }
+    fetchMock.mockResolvedValue(fakeResponse(true, 200, resp))
+
+    const out = await decideApproval('wf-1', 'a1', 'APPROVE')
+
+    expect(out.workflowStatus).toBe('SUCCESS')
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe('/api/workflows/wf-1/approvals/a1')
+    expect(init.method).toBe('POST')
+    // 请求体只有 decision——decidedBy 不由客户端提供（防伪造）
+    expect(JSON.parse(init.body)).toEqual({ decision: 'APPROVE' })
+  })
+
+  it('写操作无 mock fallback：后端拒绝（403）→ 抛 ApiError(403)（真实拒绝须露出）', async () => {
+    fetchMock.mockResolvedValue(fakeResponse(false, 403))
+
+    await expect(decideApproval('wf-1', 'a1', 'REJECT')).rejects.toMatchObject({
+      status: 403,
+    })
+  })
+
+  it('写操作无 mock fallback：网络错误 → 直接抛（不静默假成功）', async () => {
+    fetchMock.mockRejectedValue(new TypeError('Network request failed'))
+
+    await expect(decideApproval('wf-1', 'a1', 'APPROVE')).rejects.toThrow(TypeError)
   })
 })
