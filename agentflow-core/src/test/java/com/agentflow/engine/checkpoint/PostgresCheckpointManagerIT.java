@@ -135,6 +135,46 @@ class PostgresCheckpointManagerIT {
         assertThat(cm.findPendingApprovals("it-appr")).isEmpty();
     }
 
+    @Test
+    @DisplayName("真 PG：R22 扩列——加密 key 下 routing 决策 / 节点输出 / channel 密文形态 + 读还原（V8 TEXT 列）")
+    void routingDecisionsCiphertextOnRealPostgres() throws Exception {
+        String key = java.util.Base64.getEncoder().encodeToString(
+                "it-key-0123456789abcdef0123456789abcdef".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        com.agentflow.security.ColumnEncryptor enc = new com.agentflow.security.AesGcmColumnEncryptor(key);
+        com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper()
+                .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());
+        PostgresCheckpointManager encryptedCm = new PostgresCheckpointManager(
+                new DriverManagerDataSource(URL, USER, PASS), om, true, enc);
+
+        // routing 决策：写 → 列值是 AESGCM: 密文（无明文子串）→ 读解密还原
+        encryptedCm.saveRoutingDecisions("it-r22-routing", 0, 1, List.of("it-src->it-dst"));
+        try (Connection c = DriverManager.getConnection(URL, USER, PASS);
+             var rs = c.createStatement().executeQuery(
+                     "SELECT decisions FROM workflow_routing_decisions WHERE workflow_id = 'it-r22-routing'")) {
+            assertThat(rs.next()).isTrue();
+            assertThat(rs.getString(1))
+                    .startsWith(com.agentflow.security.AesGcmColumnEncryptor.PREFIX)
+                    .doesNotContain("it-src");
+        }
+        assertThat(encryptedCm.findRoutingDecisions("it-r22-routing", 0))
+                .containsExactly("it-src->it-dst");
+
+        // 节点输出 + channel（U7 既有加密路径，V8 IT 补密文形态证据）：
+        encryptedCm.initWorkflow("it-r22-node", "r22", "1.0", "it-creator");
+        encryptedCm.saveNodeOutput("it-r22-node", 0, 0, "n1",
+                com.agentflow.agent.AgentOutput.of("secret-node-output"));
+        try (Connection c = DriverManager.getConnection(URL, USER, PASS);
+             var rs = c.createStatement().executeQuery(
+                     "SELECT output FROM workflow_node_outputs WHERE workflow_id = 'it-r22-node'")) {
+            assertThat(rs.next()).isTrue();
+            assertThat(rs.getString(1))
+                    .startsWith(com.agentflow.security.AesGcmColumnEncryptor.PREFIX)
+                    .doesNotContain("secret-node-output");
+        }
+        assertThat(encryptedCm.findCompletedNodes("it-r22-node", 0, 0))
+                .singleElement().satisfies(n -> assertThat(n.output().content()).isEqualTo("secret-node-output"));
+    }
+
     // ──────────────────────── 测试辅助 ────────────────────────
 
     private static boolean pgReachable() {

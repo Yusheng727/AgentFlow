@@ -63,6 +63,17 @@ class PostgresCheckpointManagerEncryptionTest {
                         created_at       TIMESTAMP NOT NULL DEFAULT now(),
                         decided_at       TIMESTAMP
                     )""");
+            // U1 R22 扩列：routing 决策表（TEXT decisions 列，对齐 V8 迁移后形态；
+            // PK (workflow_id, round) 对齐 V5）
+            st.execute("DROP TABLE IF EXISTS workflow_routing_decisions");
+            st.execute("""
+                    CREATE TABLE workflow_routing_decisions (
+                        workflow_id  VARCHAR PRIMARY KEY,
+                        round        INT NOT NULL DEFAULT 0,
+                        super_step   INT NOT NULL,
+                        decisions    VARCHAR,
+                        updated_at   TIMESTAMP NOT NULL DEFAULT now()
+                    )""");
         }
     }
 
@@ -128,6 +139,47 @@ class PostgresCheckpointManagerEncryptionTest {
         ApprovalRequest read = aesCm.findApprovalById(approvalId).orElseThrow();
         assertThat(read.requestPayload()).containsEntry("amount", "legacy-amount");
         assertThat(read.contextSnapshot()).containsEntry("ctx", "snap");
+    }
+
+    // ──────────── U1 R22 扩列：routing_decisions 加密（V8 后 TEXT 列） ────────────
+    //
+    // 写路径（toEncryptedJson → INSERT ... ON CONFLICT DO UPDATE）的 SQL 含 H2 不支持的
+    // ON CONFLICT 语法（H2 PG 模式仅支持自有 MERGE KEY，已实测），密文形态断言归真 PG IT
+    // （PostgresCheckpointManagerIT#routingDecisionsCiphertextOnRealPostgres）——
+    // 与 node output / channel 的既有分工一致（该两处 INSERT 含 ON CONFLICT...WHERE 同样 H2 跑不通）。
+    // 本类聚焦读路径：种「密文行 / legacy 明文行」→ findRoutingDecisions 解密还原。
+
+    @Test
+    @DisplayName("routing AesGcm：读密文行 → 解密还原为已走边列表")
+    void routingReadsEncryptedRowAndDecrypts() {
+        // 用真实加密器生成密文种进表（模拟加密实例写入的行）
+        AesGcmColumnEncryptor enc = new AesGcmColumnEncryptor(KEY);
+        String secret = "secret-edge-src->dst";
+        jdbc.update("INSERT INTO workflow_routing_decisions (workflow_id, round, super_step, decisions) VALUES (?, ?, ?, ?)",
+                "wf-r1", 0, 2, enc.encrypt("[\"" + secret + "\"]"));
+
+        PostgresCheckpointManager cm = manager(enc);
+        assertThat(cm.findRoutingDecisions("wf-r1", 0)).containsExactly(secret);
+    }
+
+    @Test
+    @DisplayName("routing legacy 明文行：AesGcm 实例读非前缀明文 → 原样反序列化（升级前数据读得动）")
+    void routingReadsLegacyPlaintextRow() {
+        jdbc.update("INSERT INTO workflow_routing_decisions (workflow_id, round, super_step, decisions) VALUES (?, ?, ?, ?)",
+                "wf-r2", 0, 1, "[\"legacy-a->b\",\"legacy-a->c\"]");
+
+        PostgresCheckpointManager cm = manager(new AesGcmColumnEncryptor(KEY));
+        assertThat(cm.findRoutingDecisions("wf-r2", 0)).containsExactly("legacy-a->b", "legacy-a->c");
+    }
+
+    @Test
+    @DisplayName("routing Noop（默认）：读明文 JSON 行直通（回归，与既有行为一致）")
+    void routingNoopReadsPlaintextRow() {
+        jdbc.update("INSERT INTO workflow_routing_decisions (workflow_id, round, super_step, decisions) VALUES (?, ?, ?, ?)",
+                "wf-r3", 0, 1, "[\"plain-x->y\"]");
+
+        PostgresCheckpointManager cm = manager(NoopColumnEncryptor.INSTANCE);
+        assertThat(cm.findRoutingDecisions("wf-r3", 0)).containsExactly("plain-x->y");
     }
 
     private static DataSource h2DataSource() {

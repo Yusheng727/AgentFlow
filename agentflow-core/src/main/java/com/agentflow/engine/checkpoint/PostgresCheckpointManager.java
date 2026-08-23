@@ -212,13 +212,14 @@ public final class PostgresCheckpointManager implements CheckpointManager {
 
     @Override
     public void saveRoutingDecisions(String workflowId, int round, int superStep, List<String> decisions) {
-        String json = toJson(decisions);
+        // U1 R22 扩列：路由决策同走列加密边界（V8 后 decisions 列为 TEXT，无 ::jsonb cast）
+        String json = toEncryptedJson(decisions);
         acquireSemaphore();
         try {
             jdbc.update(
                     """
                     INSERT INTO workflow_routing_decisions (workflow_id, round, super_step, decisions)
-                    VALUES (?, ?, ?, ?::jsonb)
+                    VALUES (?, ?, ?, ?)
                     ON CONFLICT (workflow_id, round)
                     DO UPDATE SET super_step = EXCLUDED.super_step,
                                   decisions = EXCLUDED.decisions,
@@ -307,7 +308,8 @@ public final class PostgresCheckpointManager implements CheckpointManager {
         if (rows.isEmpty() || rows.getFirst() == null) {
             return List.of();
         }
-        return fromJson(rows.getFirst(), new TypeReference<List<String>>() {});
+        // U1 R22 扩列：读路径解密（Noop 恒等 / AesGcm 对非前缀 legacy 明文原样返回）
+        return fromJson(decryptRaw(rows.getFirst()), new TypeReference<List<String>>() {});
     }
 
     // ──────────────────── HITL 审批（U1） ────────────────────
