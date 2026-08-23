@@ -404,3 +404,22 @@
 - 「怎么防审批后重复计费？」（快照只含兄弟输出不含审批节点；`firstExcluded=审批层全集`；takenEdges 预置防 saveRoutingDecisions 覆盖丢边）
 - 「加密 key 从哪来？降级吗？」（只从 env `AGENTFLOW_ENCRYPTION_KEY` 读；dev 宽松 Noop、生产 strict fail-closed；key-before-first-write）
 - 「RAG 为什么用这么朴素的 embedder？」（KTD-6 命题是「扩展点成立」不是向量库先进；真实 embedding 属于 InterviewCoach，分工不重复）
+
+---
+
+## R22 系统性扩列 + 审批中心 UI（2026-08，feat/r22-extend-approval-ui）★最新鲜弹药
+
+**一句话**：把 R22 从「只加密 checkpoint 一处」升级为 **「敏感列系统性加密方案」**（routing_decisions + workflow_definitions 扩列 + starter 双 strict 装配 + 真 PG IT 密文证据），把 HITL 从「curl-only」升级为 **「审批中心 Web UI」**（跨工作流聚合端点 + 第 6 Tab + AWAITING_APPROVAL 独立看板列）。
+
+**可讲故事**：
+- **R22 扩列三件套**（U1/U2）：① `workflow_routing_decisions.decisions`（路由决策，V8 迁移 JSONB→TEXT）走既有 `toEncryptedJson/decryptRaw` 边界；② `workflow_definitions.definition`（**完整 DSL——prompt_template 含业务话术**）——`PostgresWorkflowDefinitionStore` 加可空 ColumnEncryptor 同一模式；③ **starter 双 strict**：生产模式注册 PG 定义存储也用 `fromEnvStrict()`，杜绝「checkpoint 加密了、定义还明文」的半吊子状态。5 处 JSONB 敏感列全覆盖 = 「系统性方案」而非 demo
+- **测试环境方言坑**（U1 实录）：H2 即使 PostgreSQL 兼容模式也**不支持 `ON CONFLICT DO UPDATE`**（只认自有 `MERGE INTO ... KEY`，写探针程序实测确认）——路由决策的 upsert SQL 在 H2 跑不通。解法：H2 聚焦**读路径**（种密文行/legacy 明文行 → 解密还原），**写路径密文形态归真 PG IT**——与 node output/channel 的既有分工完全一致（那两处 INSERT 的 `ON CONFLICT...WHERE` 同样 H2 跑不通）。测试策略跟着**方言边界**走，不是硬凑 H2
+- **审批中心聚合端点**（U3）：`GET /api/approvals/pending`——非 admin 经 `listByCreatedBy(caller)` 遍历只见自己的（**天然不泄漏他人审批存在性：空数组而非 403**）；admin 见全部。**精简投影纪律延续**：ApprovalCenterView 不下发 requestPayload/contextSnapshot（review P2 防敏感载荷旁路泄漏）
+- **审批中心 UI**（U4）：第 6 Tab + APPROVE/REJECT 决策。**读操作 mock fallback、写操作不 fallback**——后端不可达时列表降级演示数据，但决策 POST 失败必须 toast 报错，不能静默假成功（与 retry 同纪律）
+- **顺带修真 bug**：`AWAITING_APPROVAL` 在 UI 原来被 `as WorkflowStatusUi` 静默丢弃（三列分桶 lookup undefined、状态列空白）——现在独立第四列「待审批」（琥珀色）+ 卡片「去审批」按钮直达审批中心。「人机协同」的「人需要动手」在界面上大声说出来
+
+**深挖点**：
+- 「哪些列加密？为什么是这些？」（5 处 JSONB 敏感列：node output / channel / 审批载荷×2 / 路由决策 / 定义。判据 = 列内是否含**业务敏感数据**（prompt 话术、审批金额、路由上下文）；`workflow_name` 等运维元数据明文可接受——加密有边界不是越多越好）
+- 「列型为什么 JSONB→TEXT？」（密文非合法 JSON；对齐 V7 先例原列转型，不加影子列避免读路径分叉；legacy 明文行 decrypt 原样返回不碎裂）
+- 「聚合端点性能？」（N 工作流 N+1 查询，demo 规模可接受；SQL JOIN 单查询记 Deferred——**先说清楚边界再谈优化**）
+- 「为什么空数组不是 403？」（聚合端点不知道你要看谁：非 admin 只查自己的域，查出来空就是真没有；403 反而泄漏「存在你看不到的审批」这个事实）

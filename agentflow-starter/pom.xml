@@ -38,4 +38,21 @@
             <scope>test</scope>
         </dependency>
     </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!-- U2 R22 扩列：生产装配测试需 AGENTFLOW_ENCRYPTION_KEY 让 fromEnvStrict() 成功构造
+                         （strict「缺 key 抛错」分支由 core ColumnEncryptorsTest 经 build seam 覆盖，
+                         不与这里「配 key 成功装配」的 env 需求冲突）。32B base64 test key。 -->
+                    <environmentVariables>
+                        <AGENTFLOW_ENCRYPTION_KEY>MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=</AGENTFLOW_ENCRYPTION_KEY>
+                    </environmentVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
 </project>

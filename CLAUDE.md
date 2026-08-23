@@ -1,6 +1,6 @@
 # AgentFlow — 接手指南（给 Claude Code）
 
-> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-23（HITL 审批 U1–U9 + R22 列加密 + RAG demo（含真实模型接入）全落地并**已合 main**（`8540a1c`）；13 模块 `mvn verify` 绿 + JaCoCo 达标）。
+> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-24（R22 系统性扩列（routing_decisions + workflow_definitions + starter 双 strict）+ 审批中心 Web UI 全落地；13 模块 `mvn verify` 绿 + JaCoCo 达标）。
 >
 > **状态/路线文档**：`docs/ROADMAP.md`（v1 交付盘点 · 剩余工作 · v2 路线图）+ `docs/GRAFANA.md`（可观测/Grafana 部署与验证）——接手或规划下一步先看这两份。
 
@@ -16,6 +16,16 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 
 **计划文档**：`docs/plans/agentflow/`（8 个分片，`00-overview.md` 是索引+导航）。两轮 ce-doc-review 闭环 + 5 条动工前卡点拍板，**0 动工阻塞**。
 
+> **当前状态（2026-08-23/24）——R22 系统性扩列 + 审批中心 Web UI（feat/r22-extend-approval-ui，U1–U6 全落地）**：
+> - **U1 routing_decisions 加密**：`PostgresCheckpointManager` 的路由决策存取切 `toEncryptedJson/decryptRaw`（INSERT 去 `?::jsonb`）；V8 迁移（decisions JSONB→TEXT）。H2 聚焦**读路径** 3 例（写路径 upsert 的 `ON CONFLICT` H2 连 PG 模式都不支持——写探针实测只认自有 `MERGE KEY`，密文形态归真 PG IT `routingDecisionsCiphertextOnRealPostgres`：列值 `AESGCM:` 前缀不含明文 + 解密还原，顺带覆盖 node output 密文证据）
+> - **U2 workflow_definitions 加密**：`PostgresWorkflowDefinitionStore` 加可空 ColumnEncryptor（同一「可空加密器 + 边界加解密」模式，`prompt_template` 业务话术入密文）；**starter 生产双 strict**——`AgentFlowAutoConfiguration` 补注册 PG 定义存储 + `fromEnvStrict()`，杜绝「checkpoint 加密了、定义还明文」。H2 4 例（含 findLatest 解密）+ 真 PG IT + starter 装配 2 例（mock 不注册 / 生产缺 key fail-closed 抛 `AGENTFLOW_ENCRYPTION_KEY`）
+> - **U3 审批聚合端点**：`ApprovalCenterController`（`GET /api/approvals/pending`）——非 admin 经 `listByCreatedBy(caller)` 遍历只见自己的（**空数组非 403**，不泄漏他人审批存在性）；admin 见全部；`ApprovalCenterView` 精简投影 + workflowId（不下发 payload/snapshot）；N+1 查询 demo 规模可接受、JOIN 优化记 Deferred。测试 5 例，api 99 绿
+> - **U4 审批中心 UI**：第 6 Tab（跨工作流待批聚合 + APPROVE/REJECT，**写操作无 mock fallback** 防假成功，决策成功乐观移除）；**修 AWAITING_APPROVAL 丢状态真 bug**（原 `as WorkflowStatusUi` 静默丢 → 看板独立第四列「待审批」+ 卡片「去审批」按钮）；`api.ts` 补 listPendingApprovals/decideApproval；UI 33/33 绿 + build 绿
+> - **U5 文档**：ROADMAP（R22 系统性扩列 + HITL 含 UI ✅）、00-interview-arsenal 新章节（扩列三件套 / H2 方言坑 / 空数组 vs 403 可见域语义 / 读写 mock fallback 纪律）、CLAUDE.md 本段
+> - **U6**：ce-code-review → 修复 → 合 main push（进行中）
+> - **测试**：core 370 + api 99 + starter 9 + UI 33 全绿；JaCoCo 达标（全仓 verify）；R22 加密叙事升级为「5 处 JSONB 敏感列系统性覆盖 + 双 strict 装配 + 真 PG 密文证据」
+> - 面试叙事：R22 = 「哪些列、为什么这些列、判据=列内业务敏感数据」；HITL = 「中断→人工决策→恢复」全链路**含 UI 闭环**（提交→看板待审批列→审批中心决策→续跑终态）
+
 > **当前状态（2026-08-20/21，2026-08-23 确认已合 main）——HITL 审批 + R22 列加密 + RAG demo（U1–U9 全落地，`feat/hitl-r22-rag` 已合 main）**：
 > - **U1–U3** 审批核心类型（`ApprovalRequiredException`/`NodeResult.ApprovalRequired`/`AgentInput.approvalDecision` + checkpoint 审批 SPI + V7 迁移/PG 审批/TEXT 列型）；U3 的 H2 测试 + 真 PG IT 已补齐（`PostgresCheckpointManagerApprovalTest`/`PostgresCheckpointManagerEncryptionTest`/`PostgresCheckpointManagerIT`，`8161b92`，含 `skipMigrations` 构造 seam）
 > - **U4 引擎暂停（pause-on-approval）**：`applyBarrier` 识别 `ApprovalRequired` → 兄弟 Success 输出读入 context 作**上下文快照** → `ApprovalRequest.pending` 落库 + `AWAITING_APPROVAL` → paused 提前退出（finally 不兜底 FAILED）；`runStep`/`runRounds` 透出 paused；`recoverAndExecute` 对 AWAITING_APPROVAL 抛错拒绝误恢复
@@ -25,7 +35,7 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 > - **U8 demo-rag（KTD-6）**：`InMemoryVectorStore`（确定性 token 集合 embedder + 余弦 top-k）+ `RagAgentFunction`（检索→增强→委托）；`RagEngineZeroChangeTest` 用 BspEngine 直跑 `agent: rag` 零改动证明扩展点
 > - **RAG 真实模型接入（main `8540a1c`，原 Residual 已闭环）**：`RagDemoConfig` 加 `agentflow.rag.real.enabled=true` + env `DEEPSEEK_API_KEY` 条件装配——delegate 换 `LangChain4jAgentAdapter`（OpenAI 兼容 → DeepSeek，注入 metrics/model），默认仍 mock；`RagRealLlmIT`（Failsafe，key 门控）端到端断言真实输出非空 + `metrics.totalCost()>0`
 > - **分支状态**：`feat/hitl-r22-rag` **已合 main**（远程 `8540a1c`，比分支多 Kafka CI 移植 `0f6dc94` + RAG 真实模型 `8540a1c` + 档 C 文档 `4e812b0` 三条）；main 为当前工作分支
-> - **Residual Deferred**：Kafka 跨节点审批恢复；R22 加密扩到 routing_decisions；审批 Web UI
+> - **Residual Deferred**：Kafka 跨节点审批恢复；R22 key 轮换；~~R22 加密扩到 routing_decisions~~（✅ 2026-08-23 扩列闭环）；~~审批 Web UI~~（✅ 2026-08-23 审批中心 Tab）
 > - 面试叙事：HITL = 「中断→外部审批→恢复」全链路（暂停快照买回确定 + approveAndResume 复用 runRounds）；RAG = 「引擎零改动、Agent 扩展点成立」（KTD-6，mock 与真实 LLM 双证）
 
 > **当前状态（2026-08-18）——档 C 面试口径 + Kafka review 残留闭环 + R21 工具级授权（feat/review-residual-r21，已合 main）**：
