@@ -11,7 +11,7 @@ export default {
         line: '#E2E8F0',
         accent: { DEFAULT: '#3B82F6', dim: '#2563EB', light: '#EFF6FF' },
         success: { DEFAULT: '#16A34A', light: '#DCFCE7' },
-        warning: '#D97706',
+        warning: { DEFAULT: '#D97706', light: '#FEF3C7' },
         danger: { DEFAULT: '#DC2626', light: '#FEE2E2' },
         ink: '#0F172A',
         muted: '#64748B',

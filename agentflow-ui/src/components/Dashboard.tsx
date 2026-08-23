@@ -14,12 +14,21 @@ interface DashboardProps {
 
 const statusBadge: Record<WorkflowStatusUi, string> = {
   running: 'bg-accent-light text-accent',
+  awaiting_approval: 'bg-warning-light text-warning',
   success: 'bg-success-light text-success',
   failed: 'bg-danger-light text-danger',
 }
 
+const statusLabel: Record<WorkflowStatusUi, string> = {
+  running: 'running',
+  awaiting_approval: 'awaiting approval',
+  success: 'success',
+  failed: 'failed',
+}
+
 const boardColumns: { key: WorkflowStatusUi; label: string; dotClass: string }[] = [
   { key: 'running', label: '进行中', dotClass: 'text-accent' },
+  { key: 'awaiting_approval', label: '待审批', dotClass: 'text-warning' },
   { key: 'success', label: '已完成', dotClass: 'text-success' },
   { key: 'failed', label: '失败', dotClass: 'text-danger' },
 ]
@@ -97,8 +106,8 @@ export function Dashboard({ onNavigate, showToast }: DashboardProps) {
         <ChartPanel title="节点耗时分布" bars={durationChart.bars} labels={durationChart.labels} />
       </div>
 
-      {/* 三列看板 */}
-      <div className="mb-5 grid grid-cols-3 gap-4 max-[960px]:grid-cols-1">
+      {/* 看板四列（AWAITING_APPROVAL 独立列——HITL 可操作态大声说出来，U4） */}
+      <div className="mb-5 grid grid-cols-4 gap-4 max-[960px]:grid-cols-2">
         {boardColumns.map((col) => {
           const group = workflows.filter((w) => w.status === col.key)
           return (
@@ -138,7 +147,7 @@ export function Dashboard({ onNavigate, showToast }: DashboardProps) {
               <tr key={wf.id} className="group">
                 <td className="border-b border-line px-3.5 py-2.5 font-mono group-hover:bg-hover">{wf.name}</td>
                 <td className="border-b border-line px-3.5 py-2.5 group-hover:bg-hover">
-                  <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${statusBadge[wf.status]}`}>{wf.status}</span>
+                  <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${statusBadge[wf.status]}`}>{statusLabel[wf.status]}</span>
                 </td>
                 <td className="border-b border-line px-3.5 py-2.5 group-hover:bg-hover">{wf.nodes}</td>
                 <td className="border-b border-line px-3.5 py-2.5 font-mono group-hover:bg-hover">{wf.time}</td>
@@ -198,7 +207,7 @@ function WorkflowCard({ wf, onNavigate, onRetry }: { wf: WorkflowSummary; onNavi
       <div className="mb-2 flex items-center justify-between">
         <span className="text-sm font-semibold">{wf.name}</span>
         <span className={`rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${statusBadge[wf.status]}`}>
-          {wf.status.toUpperCase()}
+          {statusLabel[wf.status]}
         </span>
       </div>
       <div className="flex gap-4 font-mono text-xs text-muted">
@@ -237,6 +246,17 @@ function WorkflowCard({ wf, onNavigate, onRetry }: { wf: WorkflowSummary; onNavi
                 className="rounded-md border border-line bg-surface px-3 py-1 text-xs font-medium text-muted transition-all hover:border-accent hover:text-accent"
               >
                 重试
+              </button>
+            )}
+            {wf.status === 'awaiting_approval' && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onNavigate('approval-center')
+                }}
+                className="rounded-md border border-warning bg-warning px-3 py-1 text-xs font-medium text-white transition-all hover:opacity-90"
+              >
+                去审批
               </button>
             )}
           </div>

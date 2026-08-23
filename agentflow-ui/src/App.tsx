@@ -5,6 +5,7 @@ import { SubmitForm } from './components/SubmitForm'
 import { WorkflowDefinitions } from './components/WorkflowDefinitions'
 import { PipelineView } from './components/PipelineView'
 import { DiagnosisPanel } from './components/DiagnosisPanel'
+import { ApprovalCenter } from './components/ApprovalCenter'
 
 export default function App() {
   const [tab, setTab] = useState<TabId>('dashboard')
@@ -46,6 +47,7 @@ export default function App() {
         {tab === 'definitions' && (
           <WorkflowDefinitions navigate={navigate} showToast={showToast} onUseDefinition={useDefinition} />
         )}
+        {tab === 'approval-center' && <ApprovalCenter showToast={showToast} />}
         {tab === 'trace' && <PipelineView workflowId={workflowId} />}
         {tab === 'diagnosis' && <DiagnosisPanel workflowId={workflowId} />}
       </Layout>
