@@ -101,4 +101,16 @@ public class AgentFlowAutoConfiguration {
         // U7 R22：生产装配确定接入列级静态加密（fail-closed）——缺 AGENTFLOW_ENCRYPTION_KEY 抛错，拒绝明文落库
         return new PostgresCheckpointManager(dataSource, ColumnEncryptors.fromEnvStrict());
     }
+
+    /**
+     * U2 R22 扩列：生产模式注册 PG 定义存储，与 checkpoint 同一 strict 加密纪律
+     * （{@link ColumnEncryptors#fromEnvStrict()}）——杜绝「checkpoint 加密了、定义还明文」的半吊子状态。
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "agentflow.mock", name = "enabled", havingValue = "false",
+            matchIfMissing = true)
+    @ConditionalOnBean(DataSource.class)
+    public com.agentflow.version.PostgresWorkflowDefinitionStore postgresWorkflowDefinitionStore(DataSource dataSource) {
+        return new com.agentflow.version.PostgresWorkflowDefinitionStore(dataSource, ColumnEncryptors.fromEnvStrict());
+    }
 }

@@ -97,6 +97,33 @@ class StarterIntegrationTest {
             // 无 mock.enabled + 无 DataSource → PostgresCheckpointManager 条件不满足
             assertThat(context).doesNotHaveBean("postgresCheckpointManager");
             assertThat(context).doesNotHaveBean("inMemoryCheckpointManager");
+            // U2 R22 扩列：PG 定义存储同样条件注册，缺 DataSource 不注册
+            assertThat(context).doesNotHaveBean("postgresWorkflowDefinitionStore");
         });
+    }
+
+    @Test
+    @DisplayName("mock 模式：PG 定义存储不注册（仅生产模式）")
+    void mockModeDoesNotRegisterPostgresDefinitionStore() {
+        runner.withPropertyValues("agentflow.mock.enabled=true")
+                .run(context -> assertThat(context).doesNotHaveBean("postgresWorkflowDefinitionStore"));
+    }
+
+    @Test
+    @DisplayName("生产模式 + DataSource + 缺加密 key：定义存储 fail-closed（strict 工厂拒绝明文落库）")
+    void productionModeWithoutKeyFailsClosedOnDefinitionStore() {
+        // no-op DataSource 满足 @ConditionalOnBean（bean 创建在 fromEnvStrict() 抛错前不触库）；
+        // 缺 AGENTFLOW_ENCRYPTION_KEY 时 ColumnEncryptors.fromEnvStrict() 抛 IllegalStateException——
+        // 证明生产装配的定义存储与 checkpoint 同一 fail-closed 纪律（U2 R22 扩列）
+        runner.withPropertyValues("agentflow.mock.enabled=false")
+                .withBean("dataSource", javax.sql.DataSource.class,
+                        () -> new org.springframework.jdbc.datasource.DriverManagerDataSource(
+                                "jdbc:postgresql://localhost:5/unused", "u", "p"))
+                .run(context -> {
+                    assertThat(context).hasFailed();
+                    assertThat(context.getStartupFailure())
+                            .hasRootCauseInstanceOf(IllegalStateException.class)
+                            .hasMessageContaining("AGENTFLOW_ENCRYPTION_KEY");
+                });
     }
 }

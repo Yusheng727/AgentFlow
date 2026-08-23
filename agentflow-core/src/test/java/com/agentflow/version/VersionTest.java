@@ -126,7 +126,7 @@ class VersionTest {
     @DisplayName("Postgres store save/find/findLatest（FakeJdbc）：按 name+version 存取，findLatest 取最新")
     void postgresStoreSaveFind() {
         FakeJdbcTemplate jdbc = new FakeJdbcTemplate();
-        PostgresWorkflowDefinitionStore s = new PostgresWorkflowDefinitionStore(jdbc, null);
+        PostgresWorkflowDefinitionStore s = new PostgresWorkflowDefinitionStore(jdbc, null, null);
 
         s.save("x", "1.0", parseVersion("1.0"));
         s.save("x", "2.0", parseVersion("2.0"));
