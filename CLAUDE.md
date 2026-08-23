@@ -1,6 +1,6 @@
 # AgentFlow — 接手指南（给 Claude Code）
 
-> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-21（HITL 审批 U1–U8 + R22 列加密 + RAG demo 全落地，`feat/hitl-r22-rag` 待合 main；13 模块 `mvn verify` 绿 + JaCoCo 达标）。
+> 本文件让接手本项目的 Claude Code 会话快速读懂现状并继续工作。读完这一份 + `docs/plans/agentflow/` 就能动手。最后更新：2026-08-23（HITL 审批 U1–U9 + R22 列加密 + RAG demo（含真实模型接入）全落地并**已合 main**（`8540a1c`）；13 模块 `mvn verify` 绿 + JaCoCo 达标）。
 >
 > **状态/路线文档**：`docs/ROADMAP.md`（v1 交付盘点 · 剩余工作 · v2 路线图）+ `docs/GRAFANA.md`（可观测/Grafana 部署与验证）——接手或规划下一步先看这两份。
 
@@ -16,16 +16,17 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 
 **计划文档**：`docs/plans/agentflow/`（8 个分片，`00-overview.md` 是索引+导航）。两轮 ce-doc-review 闭环 + 5 条动工前卡点拍板，**0 动工阻塞**。
 
-> **当前状态（2026-08-20/21）——HITL 审批 + R22 列加密 + RAG demo（feat/hitl-r22-rag，U1–U8 全落地 + 文档收尾 U9）**：
-> - **U1–U3** 审批核心类型（`ApprovalRequiredException`/`NodeResult.ApprovalRequired`/`AgentInput.approvalDecision` + checkpoint 审批 SPI + V7 迁移/PG 审批/TEXT 列型）；**U3 的 H2/真 PG 测试仍待补**（`PostgresCheckpointManagerTest`/`IT`）
+> **当前状态（2026-08-20/21，2026-08-23 确认已合 main）——HITL 审批 + R22 列加密 + RAG demo（U1–U9 全落地，`feat/hitl-r22-rag` 已合 main）**：
+> - **U1–U3** 审批核心类型（`ApprovalRequiredException`/`NodeResult.ApprovalRequired`/`AgentInput.approvalDecision` + checkpoint 审批 SPI + V7 迁移/PG 审批/TEXT 列型）；U3 的 H2 测试 + 真 PG IT 已补齐（`PostgresCheckpointManagerApprovalTest`/`PostgresCheckpointManagerEncryptionTest`/`PostgresCheckpointManagerIT`，`8161b92`，含 `skipMigrations` 构造 seam）
 > - **U4 引擎暂停（pause-on-approval）**：`applyBarrier` 识别 `ApprovalRequired` → 兄弟 Success 输出读入 context 作**上下文快照** → `ApprovalRequest.pending` 落库 + `AWAITING_APPROVAL` → paused 提前退出（finally 不兜底 FAILED）；`runStep`/`runRounds` 透出 paused；`recoverAndExecute` 对 AWAITING_APPROVAL 抛错拒绝误恢复
 > - **U5 引擎恢复（approveAndResume）**：从审批单恢复（不依赖 RecoveryProtocol，那是崩溃路径）：REJECT→FAILED；APPROVE→重建 context→重跑待批节点（注入 `approvalDecision=APPROVE`，多级审批链可再次暂停）→merge→`runRounds` 从审批层续跑（firstExcluded=审批层全集防双跑）→takenEdges 预置防覆盖丢边→超时重定基线
 > - **U6 审批 REST + 服务层 HITL 感知**：`WorkflowExecutionService.run()` U4 paused 后不误标 SUCCESS + `resumeAfterApproval`；`ApprovalController`（GET pending 精简投影 + POST 决策），**decidedBy 服务端推导防伪造**、创建者/admin 门控、approval 归属校验；demo-api 注册 ApprovalGateAgent
 > - **U7 R22 列级静态加密**：`com.agentflow.security`（ColumnEncryptor/Noop/AesGcm AES-256-GCM `AESGCM:` 自描述+legacy 明文兼容/ColumnEncryptors 工厂 fromEnv 宽松 vs fromEnvStrict fail-closed）；`PostgresCheckpointManager` 条件加解密 + AutoConfiguration 生产注入 strict
 > - **U8 demo-rag（KTD-6）**：`InMemoryVectorStore`（确定性 token 集合 embedder + 余弦 top-k）+ `RagAgentFunction`（检索→增强→委托）；`RagEngineZeroChangeTest` 用 BspEngine 直跑 `agent: rag` 零改动证明扩展点
-> - **分支状态**：`feat/hitl-r22-rag` 已推远程（U4–U8 + 文档），**未合 main**；`mvn verify` 13 模块绿（skip IT）+ JaCoCo met；docker IT（PG 加密密文形态/Kafka）待有环境复测
-> - **Residual Deferred**：Kafka 跨节点审批恢复；R22 加密扩到 routing_decisions；RagAgentFunction 真实模型接入（`agentflow.rag.real.*`）；审批 Web UI
-> - 面试叙事：HITL = 「中断→外部审批→恢复」全链路（暂停快照买回确定 + approveAndResume 复用 runRounds）；RAG = 「引擎零改动、Agent 扩展点成立」（KTD-6）
+> - **RAG 真实模型接入（main `8540a1c`，原 Residual 已闭环）**：`RagDemoConfig` 加 `agentflow.rag.real.enabled=true` + env `DEEPSEEK_API_KEY` 条件装配——delegate 换 `LangChain4jAgentAdapter`（OpenAI 兼容 → DeepSeek，注入 metrics/model），默认仍 mock；`RagRealLlmIT`（Failsafe，key 门控）端到端断言真实输出非空 + `metrics.totalCost()>0`
+> - **分支状态**：`feat/hitl-r22-rag` **已合 main**（远程 `8540a1c`，比分支多 Kafka CI 移植 `0f6dc94` + RAG 真实模型 `8540a1c` + 档 C 文档 `4e812b0` 三条）；main 为当前工作分支
+> - **Residual Deferred**：Kafka 跨节点审批恢复；R22 加密扩到 routing_decisions；审批 Web UI
+> - 面试叙事：HITL = 「中断→外部审批→恢复」全链路（暂停快照买回确定 + approveAndResume 复用 runRounds）；RAG = 「引擎零改动、Agent 扩展点成立」（KTD-6，mock 与真实 LLM 双证）
 
 > **当前状态（2026-08-18）——档 C 面试口径 + Kafka review 残留闭环 + R21 工具级授权（feat/review-residual-r21，已合 main）**：
 > - **档 C 面试口径 ✅**：`07-sources-revision-interview.md` 附 30s/5min 自述稿（主线「静态 DAG → 动态路由 → 迭代收敛 → 分布式解耦」），收口 13 条叙事追问（buy-vs-build / 七三开 / BSP vs Actor / @Tool 边界 / Spring AI 差异化 / KTD-3 防重复计费 / v1.1 Kafka 解耦）。ROADMAP 档 C ✅
@@ -226,11 +227,15 @@ AgentFlow/
 │   ├── 05-implementation-units.md    # U0–U14 + Priority 矩阵（执行用）
 │   ├── 06-open-questions-risks-metrics.md
 │   └── 07-sources-revision-interview.md
-├── agentflow-core/              # BSP/DSL/Checkpoint/容错/可观测/安全
+├── agentflow-core/              # BSP/DSL/Checkpoint/容错/可观测/安全（含 com.agentflow.security R22 列加密）
 │   └── src/main/java/com/agentflow/dsl/   # U1 已落地
 ├── agentflow-adapters/spring-ai/# SpringAiAgentAdapter（U3 引入 Spring AI 2.0）
-├── agentflow-api/               # REST 端点 + 鉴权（U6/U14）
+├── agentflow-adapters/langchain4j/ # LangChain4jAgentAdapter（KTD-7 可移植性）
+├── agentflow-api/               # REST 端点 + 鉴权（U6/U14 + HITL ApprovalController）
+├── agentflow-kafka-starter/     # v1.1 Kafka 异步分发（agentflow.kafka.enabled 门控）
 ├── agentflow-starter/           # @EnableAgentFlow + AutoConfiguration（U9/U13）
+├── demo-supplier-risk|contract-review|investment-analysis|conditional|loop|rag  # 6 个演示模块（rag = U8 KTD-6）
+├── demo-api/                    # 可启动 REST demo（真实 LLM/Kafka/RAG 条件装配）
 └── agentflow-ui/                # React 18 + Vite + Tailwind，5 Tab 交付门面（U1/U2）
 ```
 
