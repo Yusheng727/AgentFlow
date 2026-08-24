@@ -111,28 +111,25 @@ class StarterIntegrationTest {
     }
 
     @Test
-    @DisplayName("生产模式 + DataSource + 配 key：两个 PG bean 方法执行（strict 加密构造成功，U2 R22 扩列）")
+    @DisplayName("生产模式 + DataSource + 配 key：定义存储可完整实例化且注入 strict；checkpoint 需真库（mock DS 抛连库错）")
     void productionModeWithKeyRegistersBothEncryptedStores() {
         // env AGENTFLOW_ENCRYPTION_KEY 由 surefire environmentVariables 注入（32B base64 key）。
-        // 直接调 bean 方法（构造器惰性）：postgresWorkflowDefinitionStore 不跑 Flyway（迁移由
-        // checkpoint manager 侧负责），可完整实例化断言类型；postgresCheckpointManager 构造器
-        // 会跑 Flyway 连库——mock DataSource 下抛错，但 bean 方法体指令（strict 加密构造 + new）
-        // 已执行（异常发生在构造器内部，方法体 try 吞掉即可）。
-        // strict「缺/非法 key 抛错」语义由 core ColumnEncryptorsTest 经包私有 build seam 覆盖。
+        // 说明：postgresWorkflowDefinitionStore 构造不触 Flyway，可完整实例化断言类型；
+        // postgresCheckpointManager 构造器跑 Flyway 连 mock DataSource 必然失败（无真库）。
+        // 原测试用 catch-all 吞异常 + assertThatCode(...).doesNotThrowAnyException() 恒绿（review P2）——
+        // 即便 strict「缺 key 抛错」也照样绿，测不出它声称验证的 fail-closed 构造。改为：
+        // 定义存储真断言（strict 注入经构造签名 + ColumnEncryptorsTest build seam 覆盖），
+        // checkpoint 断言「mock DS 下确实抛连库错」（证明构造走真库路径，非空断言）。
         AgentFlowAutoConfiguration config = new AgentFlowAutoConfiguration();
         javax.sql.DataSource ds = org.mockito.Mockito.mock(javax.sql.DataSource.class);
 
-        // 定义存储：完整实例化成功——strict 加密器注入 + 类型断言
+        // ① 定义存储：mock DataSource 下完整实例化成功——strict 加密器注入 + 类型断言
         Object store = config.postgresWorkflowDefinitionStore(ds);
         assertThat(store).isInstanceOf(com.agentflow.version.PostgresWorkflowDefinitionStore.class);
 
-        // checkpoint manager：strict 加密构造在 Flyway 连库前完成——方法体执行，异常吞掉
-        assertThatCode(() -> {
-            try {
-                config.postgresCheckpointManager(ds);
-            } catch (Exception expected) {
-                // mock DataSource 无真库：Flyway 连接失败属预期（加密装配已过、卡在环境）
-            }
-        }).doesNotThrowAnyException();
+        // ② checkpoint manager：mock DataSource 无真库 → Flyway 连接失败抛错（非恒绿吞掉）
+        org.assertj.core.api.Assertions.assertThatThrownBy(() ->
+                        config.postgresCheckpointManager(ds))
+                .isInstanceOf(RuntimeException.class);
     }
 }

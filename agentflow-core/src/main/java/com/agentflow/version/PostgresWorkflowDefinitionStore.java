@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import javax.sql.DataSource;
@@ -31,6 +33,8 @@ import java.util.Optional;
  */
 public final class PostgresWorkflowDefinitionStore implements WorkflowDefinitionStore {
 
+    private static final Logger log = LoggerFactory.getLogger(PostgresWorkflowDefinitionStore.class);
+
     private final JdbcTemplate jdbc;
     private final ObjectMapper jsonMapper;
     /** U2 R22：列级静态加密（可空=不加密，默认 Noop；生产经 starter 注入 fromEnvStrict）。 */
@@ -42,6 +46,9 @@ public final class PostgresWorkflowDefinitionStore implements WorkflowDefinition
 
     public PostgresWorkflowDefinitionStore(DataSource dataSource, ObjectMapper jsonMapper) {
         this(new JdbcTemplate(dataSource), jsonMapper, NoopColumnEncryptor.INSTANCE);
+        // review #7：未注入加密器 → R22 列加密不生效（明文落库）。生产由 starter 走 strict，此处警示直接实例化的 embedder
+        log.warn("PostgresWorkflowDefinitionStore 未注入 ColumnEncryptor → R22 定义列加密不生效（明文落库）。"
+                + "生产请用 fromEnvStrict/注入加密器");
     }
 
     /**

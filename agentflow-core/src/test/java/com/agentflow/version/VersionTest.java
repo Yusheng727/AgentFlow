@@ -3,6 +3,8 @@ package com.agentflow.version;
 import com.agentflow.dsl.WorkflowDSLParser;
 import com.agentflow.dsl.WorkflowDefinition;
 import com.agentflow.engine.checkpoint.InMemoryCheckpointManager;
+import com.agentflow.security.AesGcmColumnEncryptor;
+import com.agentflow.security.ColumnEncryptor;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -14,6 +16,7 @@ import javax.sql.DataSource;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.sql.ResultSet;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -135,6 +138,40 @@ class VersionTest {
         assertThat(s.find("x", "2.0")).get().extracting(WorkflowDefinition::version).isEqualTo("2.0");
         assertThat(s.find("x", "9.9")).isEmpty();
         assertThat(s.findLatest("x")).get().extracting(WorkflowDefinition::version).isEqualTo("2.0");
+    }
+
+    @Test
+    @DisplayName("R22 加密写路径 always-on：AesGcm 下 save 落库为密文（非明文），find 解密还原（不依赖真 PG/IT）")
+    void postgresStoreEncryptsWriteAlwaysOn() {
+        // review #5：写路径加密（save→toEncryptedJson）原先只被 env 门控真 PG IT 覆盖，
+        // 本地无 PG 时 0 覆盖——用 FakeJdbc + 真实 AesGcm 加密器补 always-on 断言（无需 PG/H2/ON CONFLICT）。
+        FakeJdbcTemplate jdbc = new FakeJdbcTemplate();
+        // 32 字节 base64 key（与 ColumnEncryptorsTest 使用的一致）
+        ColumnEncryptor aesgcm = new AesGcmColumnEncryptor(
+                Base64.getEncoder().encodeToString(new byte[32]));
+        PostgresWorkflowDefinitionStore s = new PostgresWorkflowDefinitionStore(jdbc, null, aesgcm);
+
+        WorkflowDefinition def = parseVersion("2.0");
+        s.save("x", "1.0", def);
+
+        // ① 写入的原始值是密文（AESGCM: 前缀 + 不含明文子串）——证明写路径真加密
+        String stored = jdbc.store.get("x@1.0");
+        assertThat(stored).startsWith("AESGCM:");
+        assertThat(stored).doesNotContain("mock");
+        // ② 读路径解密还原
+        assertThat(s.find("x", "1.0")).get().extracting(WorkflowDefinition::version).isEqualTo("2.0");
+    }
+
+    @Test
+    @DisplayName("read path fallback：无加密器（Noop）时 save 落库为明文 JSON，find 原样返回")
+    void postgresStoreNoopPlaintext() {
+        FakeJdbcTemplate jdbc = new FakeJdbcTemplate();
+        PostgresWorkflowDefinitionStore s = new PostgresWorkflowDefinitionStore(jdbc, null, null);
+        s.save("y", "1.0", parseVersion("1.0"));
+        String stored = jdbc.store.get("y@1.0");
+        assertThat(stored).doesNotStartWith("AESGCM:");
+        assertThat(stored).contains("mock");
+        assertThat(s.find("y", "1.0")).get().extracting(WorkflowDefinition::version).isEqualTo("1.0");
     }
 
     // ──────────────────────── 辅助 ────────────────────────

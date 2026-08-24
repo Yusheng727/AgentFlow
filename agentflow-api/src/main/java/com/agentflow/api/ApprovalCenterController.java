@@ -1,6 +1,6 @@
 package com.agentflow.api;
 
-import com.agentflow.api.security.ApiKeyAuthFilter;
+import com.agentflow.api.security.AdminApiKeys;
 import com.agentflow.api.security.WorkflowOwnershipChecker;
 import com.agentflow.engine.checkpoint.ApprovalRequest;
 import com.agentflow.engine.checkpoint.CheckpointManager;
@@ -18,11 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
  * 审批中心聚合端点（U3）：跨工作流待批列表，供 UI「审批中心」Tab。
@@ -52,16 +48,14 @@ public class ApprovalCenterController {
 
     private final CheckpointManager checkpointManager;
     private final WorkflowOwnershipChecker ownershipChecker;
-    private final Set<String> adminHashes;
+    private final AdminApiKeys adminKeys;
 
     public ApprovalCenterController(CheckpointManager checkpointManager,
                                     WorkflowOwnershipChecker ownershipChecker,
                                     @Value("${agentflow.admin.api-keys:}") String adminKeysCsv) {
         this.checkpointManager = checkpointManager;
         this.ownershipChecker = ownershipChecker;
-        this.adminHashes = adminKeysCsv == null || adminKeysCsv.isBlank()
-                ? Collections.emptySet()
-                : hashKeys(adminKeysCsv);
+        this.adminKeys = AdminApiKeys.from(adminKeysCsv);
     }
 
     /** GET /api/approvals/pending — 跨工作流待批聚合（精简投影，含 workflowId）。 */
@@ -71,27 +65,26 @@ public class ApprovalCenterController {
         if (callerId == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
         }
-        boolean admin = adminHashes.contains(callerId);
+        boolean admin = adminKeys.isAdmin(callerId);
         // admin 传 null=不过滤（listByCreatedBy 的既有语义：空 createdBy 返回全部）
         List<WorkflowExecutionRecord> workflows =
                 checkpointManager.listByCreatedBy(admin ? null : callerId);
 
         List<ApprovalCenterView> views = new ArrayList<>();
+        // per-workflow 错误隔离（review P1）：单 wf 的待批行解密损坏/key 轮换时，跳过该 wf 记 warn，
+        // 不让一个无关用户的坏行让整个聚合端点 500、弄瞎 admin 对全体待批的可见性。
         for (WorkflowExecutionRecord wf : workflows) {
-            for (ApprovalRequest r : checkpointManager.findPendingApprovals(wf.workflowId())) {
-                views.add(ApprovalCenterView.of(r));
+            try {
+                for (ApprovalRequest r : checkpointManager.findPendingApprovals(wf.workflowId())) {
+                    views.add(ApprovalCenterView.of(r, wf.workflowName()));
+                }
+            } catch (RuntimeException e) {
+                log.warn("审批中心聚合跳过损坏 wf={}（{}）——保持部分结果可用", wf.workflowId(), e.getMessage());
             }
         }
         log.debug("审批中心聚合 caller={} admin={} workflows={} pending={}",
                 maskCaller(callerId), admin, workflows.size(), views.size());
         return ResponseEntity.ok(views);
-    }
-
-    private static Set<String> hashKeys(String csv) {
-        Set<String> hashes = new LinkedHashSet<>();
-        Arrays.stream(csv.split(",")).map(String::trim).filter(s -> !s.isEmpty())
-                .forEach(k -> hashes.add(ApiKeyAuthFilter.sha256(k)));
-        return Collections.unmodifiableSet(hashes);
     }
 
     private static String maskCaller(String id) {
@@ -113,8 +106,8 @@ public class ApprovalCenterController {
             String status,
             java.time.Instant createdAt
     ) {
-        static ApprovalCenterView of(ApprovalRequest r) {
-            return new ApprovalCenterView(r.approvalId(), r.workflowId(), null, r.nodeId(),
+        static ApprovalCenterView of(ApprovalRequest r, String workflowName) {
+            return new ApprovalCenterView(r.approvalId(), r.workflowId(), workflowName, r.nodeId(),
                     r.description(), r.status().name(), r.createdAt());
         }
     }

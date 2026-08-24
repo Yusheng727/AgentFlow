@@ -319,3 +319,25 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - **Spring 宽松绑定 env 名**（live 起服踩坑）：`agentflow.api.api-keys` 的 env 是 **`AGENTFLOW_API_API_KEYS`**（非 `AGENTFLOW_API_KEYS`）；`agentflow.admin.api-keys` → `AGENTFLOW_ADMIN_API_KEYS`。用错名静默 401（filter 白名单没加进 key）。
 
 **面试讲法**：「Kafka 消费者幂等从 check-then-act 升级成原子 claim——`tryClaim` 用条件 UPDATE 在 DB 层做 PENDING→RUNNING 独占转移，10 线程并发只有 1 个成功；R21 把工具级授权从配置硬编码升级成 DB 表 + 管理 API，admin key 门控变更，提交时强制即时生效——这是把安全从『静态配置』推进到『可运营的运行时授权』。」
+
+---
+
+## R22 扩列 + 审批中心 ce-code-review（2026-08-24，11 评审）
+
+**背景**：`feat/r22-extend-approval-ui` 的 U6 ce-code-review 原计划门禁此前漏跑，本会话补跑——11 评审（correctness/security/adversarial/data-migration/api-contract/maintainability/project-standards/testing/agent-native/learnings-researcher/deployment-verify），base `8540a1c`。本批为「向已合 main 代码补做 review」的实例（review 迟于 merge），finding 全量落 `docs/residual-review-findings/r22-extend-approval-ui-review.md`，P1/P2 全量修复。
+
+**本轮最高危发现（P1，adversarial conf 75）**：
+- **聚合端点无 per-workflow 错误隔离**：`ApprovalCenterController.pending()` 裸 for 循环遍历全部工作流 `findPendingApprovals`，任一 wf 的审批行 `request_payload/context_snapshot` 解密抛异常（key 轮换 / 截断 `AESGCM:` / GCM auth 失败）→ 整个 `/api/approvals/pending` 500。admin `listByCreatedBy(null)` 遍历全部时，一个无关用户的坏行让 admin 看不见其它所有待批审批。
+- **+ UI 掩盖**：`withMockFallback` 把该 500 当「backend down」fallback 到静态 mock 审批列表——用户点「批准」→ 打真实端点 400 `APPROVAL_NOT_FOUND`，真实 pending 不可见、500 被隐藏。
+- **修复**：① 聚合端点 per-wf try/catch 跳过坏行（记 warn，返回部分结果）；② `withMockFallback` 新增 `preventServerErrorMock`——HTTP 5xx 不降级 mock，抛 `ApiError` 由 UI 显 error toast；③ 补测试。
+
+**两个「系统性方案隐藏落点」P2（跨 reviewer 佐证）**：
+- **`workflowName` 恒 null**——投影字段 `ApprovalCenterView.of(r)` 硬编码 null，外层循环已有 `wf.workflowName()` 却没用；mock 有值、真实恒 null，mock/真实漂移。**7 个 reviewer 独立命中**（correctness/api-contract/maintainability/project-standards/security/agent-native/learnings）——本批最一致 finding。修复：`of(r, wf.workflowName())`。
+- **写路径加密无门禁测试**——定义存储 `save→toEncryptedJson` 的写加密分支只被 env 门控真 PG IT 覆盖（`ON CONFLICT` H2 跑不了），本地 `mvn verify` 无 PG 时写路径密文形态 0 覆盖（正是「测试绿 ≠ 生产生效」翻版）。修复：`VersionTest` 用 FakeJdbcTemplate + 真实 `AesGcmColumnEncryptor` 补 always-on 写密文断言。
+
+**记坑**：
+- **V8 迁移漏 `USING x::text`**——照抄 V7 先例却漏了显式 USING 子句，靠 PG 隐式 assignment cast（PG jsonb→text 有隐式 cast 大概率能跑，但「照抄已验模式」前提是逐字一致）。补 `USING decisions::text`。
+- **`assertThatCode(...doesNotThrowAnyException())` 包 catch-all try = 恒绿**——starter 装配测试把唯一可抛语句吞进 try/catch 再断言不抛，即便 `fromEnvStrict()` 缺 key 抛错也照样绿，测不出声称验证的 fail-closed 构造。诚心修法：断言「mock DataSource 下确实抛连库错」（证明走真库路径）。
+- **hashKeys/admin-key 三处逐字重复**——`ApprovalCenterController`/`ApprovalController`/`ToolGrantController` 各一份「CSV→split→sha256→LinkedHashSet」。抽 `AdminApiKeys` 单一真相源。
+
+**面试讲法**：「我给已合 main 的功能也补跑了完整 code review——11 个 persona reviewer。最重的 P1 是 adversarial 用故障注入找到的：审批聚合端点遍历所有工作流时，一个损坏的审批行（比如 key 轮换后解不开）会让整个聚合 500，还剩过 mock fallback 掩盖成假数据。我加了 per-workflow 错误隔离 + 让 5xx 不降级 mock。另一个七人一致命中的是投影字段 workflowName 恒为 null——写代码时循环里明明有值却没用，这类『看着有字段其实没填』的契约陷阱，正是多视角 review 能扫出来的。」

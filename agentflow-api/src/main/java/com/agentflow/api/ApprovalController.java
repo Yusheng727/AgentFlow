@@ -1,5 +1,6 @@
 package com.agentflow.api;
 
+import com.agentflow.api.security.AdminApiKeys;
 import com.agentflow.api.security.ApiKeyAuthFilter;
 import com.agentflow.api.security.WorkflowOwnershipChecker;
 import com.agentflow.api.security.WorkflowOwnershipChecker.OwnershipException;
@@ -23,11 +24,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.Instant;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Set;
 
 /**
  * HITL 审批 REST 端点（U6）：查待批列表 + 提交审批决策。
@@ -57,7 +54,7 @@ public class ApprovalController {
     private final WorkflowExecutionService workflowExecutionService;
     private final CheckpointManager checkpointManager;
     private final WorkflowOwnershipChecker ownershipChecker;
-    private final Set<String> adminHashes;
+    private final AdminApiKeys adminKeys;
 
     public ApprovalController(WorkflowExecutionService workflowExecutionService,
                               CheckpointManager checkpointManager,
@@ -66,9 +63,7 @@ public class ApprovalController {
         this.workflowExecutionService = workflowExecutionService;
         this.checkpointManager = checkpointManager;
         this.ownershipChecker = ownershipChecker;
-        this.adminHashes = adminKeysCsv == null || adminKeysCsv.isBlank()
-                ? Collections.emptySet()
-                : hashKeys(adminKeysCsv);
+        this.adminKeys = AdminApiKeys.from(adminKeysCsv);
     }
 
     // ──────────────────────── GET /pending ────────────────────────
@@ -149,15 +144,8 @@ public class ApprovalController {
             ownershipChecker.requireOwnership(workflowId, callerId);
             return true;
         } catch (OwnershipException e) {
-            return adminHashes.contains(callerId);
+            return adminKeys.isAdmin(callerId);
         }
-    }
-
-    private static Set<String> hashKeys(String csv) {
-        Set<String> hashes = new LinkedHashSet<>();
-        Arrays.stream(csv.split(",")).map(String::trim).filter(s -> !s.isEmpty())
-                .forEach(k -> hashes.add(ApiKeyAuthFilter.sha256(k)));
-        return Collections.unmodifiableSet(hashes);
     }
 
     private static String maskCaller(String id) {

@@ -98,6 +98,8 @@ public final class PostgresCheckpointManager implements CheckpointManager {
      */
     public PostgresCheckpointManager(DataSource dataSource) {
         this(dataSource, defaultJsonMapper());
+        log.warn("PostgresCheckpointManager 未注入 ColumnEncryptor → R22 列加密不生效（明文落库）。"
+                + "生产请用 fromEnvStrict/注入加密器（review #7）");
     }
 
     /**
@@ -105,6 +107,8 @@ public final class PostgresCheckpointManager implements CheckpointManager {
      */
     public PostgresCheckpointManager(DataSource dataSource, ObjectMapper jsonMapper) {
         this(dataSource, jsonMapper, true);
+        log.warn("PostgresCheckpointManager 未注入 ColumnEncryptor → R22 列加密不生效（明文落库）。"
+                + "生产请用 fromEnvStrict/注入加密器（review #7）");
     }
 
     /**

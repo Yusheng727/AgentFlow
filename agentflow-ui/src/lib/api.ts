@@ -83,14 +83,25 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 }
 
-/** 真实 API 优先；任何失败（网络错误 / 超时 / 非 2xx）降级到 mock，保证 UI 不白屏。 */
+/**
+ * 真实 API 优先；失败降级 mock 保证 UI 不白屏。
+ *
+ * <p>默认：任何失败（网络错误 / 超时 / 非 2xx）都降级 mock（KTD-1 白屏保护）。
+ * <p>{@code preventServerErrorMock}: review P1（审批中心 500 掩盖）——HTTP 5xx 是后端真实错误，
+ * 不降级 mock，否则单个 corrupt 审批行导致的 500 会被当成「后端 down」换成静态 mock 列表、
+ * 真实待批审批不可见。仅网络不可达/超时（非 ApiError）降级。
+ */
 async function withMockFallback<T>(
   real: () => Promise<T>,
   mock: () => T,
+  opts?: { preventServerErrorMock?: boolean },
 ): Promise<{ data: T; source: 'api' | 'mock' }> {
   try {
     return { data: await real(), source: 'api' }
-  } catch {
+  } catch (e) {
+    if (opts?.preventServerErrorMock && e instanceof ApiError && e.status >= 500) {
+      throw e
+    }
     return { data: mock(), source: 'mock' }
   }
 }
@@ -190,12 +201,15 @@ export interface PendingApprovalsResult {
 
 /**
  * GET /api/approvals/pending — 跨工作流待批聚合（审批中心数据源，U3）。
- * 后端不可达时降级 mockPendingApprovals（与既有端点同模式，UI 不白屏）。
+ * 网络不可达/超时降级 mockPendingApprovals（与既有端点同模式，UI 不白屏）；
+ * <b>后端 5xx 不降级 mock</b>（review P1：防单行 corrupt 500 被 mock 掩盖成假待批）——抛 ApiError，
+ * 由 UI 显错误态/toast。
  */
 export async function listPendingApprovals(): Promise<PendingApprovalsResult> {
   const { data, source } = await withMockFallback(
     () => request<ApprovalSummary[]>('/approvals/pending'),
     () => mockPendingApprovals,
+    { preventServerErrorMock: true },
   )
   return { approvals: data, source }
 }

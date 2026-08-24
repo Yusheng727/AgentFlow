@@ -1,5 +1,8 @@
 package com.agentflow.api.security;
 
+import com.agentflow.api.security.AdminApiKeys;
+import com.agentflow.api.security.ApiKeyAuthFilter;
+
 import jakarta.servlet.http.HttpServletRequest;
 
 import org.slf4j.Logger;
@@ -16,9 +19,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.Set;
 
 /**
@@ -36,15 +36,13 @@ public class ToolGrantController {
     private static final Logger log = LoggerFactory.getLogger(ToolGrantController.class);
 
     private final ToolGrantRepository repository;
-    private final Set<String> adminHashes;
+    private final AdminApiKeys adminKeys;
 
     public ToolGrantController(ToolGrantRepository repository,
                                @Value("${agentflow.admin.api-keys:}") String adminKeysCsv) {
         this.repository = repository;
-        this.adminHashes = adminKeysCsv == null || adminKeysCsv.isBlank()
-                ? Collections.emptySet()
-                : hashKeys(adminKeysCsv);
-        if (adminHashes.isEmpty()) {
+        this.adminKeys = AdminApiKeys.from(adminKeysCsv);
+        if (adminKeys.isEmpty()) {
             log.warn("ToolGrantController：未配置 AGENTFLOW_ADMIN_API_KEY——grant/revoke 全部 403（仅允许读取）");
         }
     }
@@ -95,19 +93,12 @@ public class ToolGrantController {
     // ──────────────────────────── 辅助 ────────────────────────────
 
     private boolean isAdmin(HttpServletRequest httpRequest) {
-        return adminHashes.contains(callerIdOf(httpRequest));
+        return adminKeys.isAdmin(callerIdOf(httpRequest));
     }
 
     private static String callerIdOf(HttpServletRequest httpRequest) {
         Object c = httpRequest.getAttribute(ApiKeyAuthFilter.CALLER_ID_ATTR);
         return c != null ? c.toString() : "unknown";
-    }
-
-    private static Set<String> hashKeys(String csv) {
-        Set<String> hashes = new LinkedHashSet<>();
-        Arrays.stream(csv.split(",")).map(String::trim).filter(s -> !s.isEmpty())
-                .forEach(k -> hashes.add(ApiKeyAuthFilter.sha256(k)));
-        return Collections.unmodifiableSet(hashes);
     }
 
     private static String maskCaller(String id) {

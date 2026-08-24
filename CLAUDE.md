@@ -22,7 +22,7 @@ AgentFlow = **Java 原生轻量级 Multi-Agent 编排引擎**。YAML DSL 声明�
 > - **U3 审批聚合端点**：`ApprovalCenterController`（`GET /api/approvals/pending`）——非 admin 经 `listByCreatedBy(caller)` 遍历只见自己的（**空数组非 403**，不泄漏他人审批存在性）；admin 见全部；`ApprovalCenterView` 精简投影 + workflowId（不下发 payload/snapshot）；N+1 查询 demo 规模可接受、JOIN 优化记 Deferred。测试 5 例，api 99 绿
 > - **U4 审批中心 UI**：第 6 Tab（跨工作流待批聚合 + APPROVE/REJECT，**写操作无 mock fallback** 防假成功，决策成功乐观移除）；**修 AWAITING_APPROVAL 丢状态真 bug**（原 `as WorkflowStatusUi` 静默丢 → 看板独立第四列「待审批」+ 卡片「去审批」按钮）；`api.ts` 补 listPendingApprovals/decideApproval；UI 33/33 绿 + build 绿
 > - **U5 文档**：ROADMAP（R22 系统性扩列 + HITL 含 UI ✅）、00-interview-arsenal 新章节（扩列三件套 / H2 方言坑 / 空数组 vs 403 可见域语义 / 读写 mock fallback 纪律）、CLAUDE.md 本段
-> - **U6**：ce-code-review → 修复 → 合 main push（进行中）
+> - **U6 ✅ 已闭环（2026-08-24 补跑）**：配套 ce-code-review 11 评审（correctness/security/adversarial/data-migration/api-contract/maintainability/project-standards/testing/agent-native/learnings + deployment-verify），`mode:agent` 报告制 + residual 落 `docs/residual-review-findings/r22-extend-approval-ui-review.md`；全量修复已应用（无 P0，1 P1 + 6 P2 + advisory）——① **P1 聚合端点 per-wf 错误隔离**（单 corrupt 行不再 500 整个 pending，跳过记 warn）+ `withMockFallback` 5xx 不 mock（防 corrupt 500 被演示 mock 掩盖）② `ApprovalCenterView.workflowName` 传真实名（原恒 null，7 reviewer）③ V8 迁移补 `USING x::text` 对齐 V7 ④ starter 装配测试去「吞异常恒绿」⑤ 写路径加密 always-on 测试（FakeJdbc+AesGcm，不依赖 PG）⑥ `AdminApiKeys` 收敛三处 hashKeys ⑦ PG store 无加密器构造补 warn；测试 +8（api 3 / core 2 / starter 1 / UI 2）
 > - **测试**：core 370 + api 99 + starter 9 + UI 33 全绿；JaCoCo 达标（全仓 verify）；R22 加密叙事升级为「5 处 JSONB 敏感列系统性覆盖 + 双 strict 装配 + 真 PG 密文证据」
 > - 面试叙事：R22 = 「哪些列、为什么这些列、判据=列内业务敏感数据」；HITL = 「中断→人工决策→恢复」全链路**含 UI 闭环**（提交→看板待审批列→审批中心决策→续跑终态）
 

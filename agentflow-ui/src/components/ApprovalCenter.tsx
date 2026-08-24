@@ -29,9 +29,13 @@ export function ApprovalCenter({ showToast }: ApprovalCenterProps) {
         setSource(r.source)
         setLoading(false)
       })
-      .catch(() => {
-        // withMockFallback 已兜底，防御性处理避免白屏
+      .catch((err: unknown) => {
+        // review P1：listPendingApprovals 对后端 5xx 不降级 mock——此处显错而非装成「暂无待批」
+        //（网络不可达/超时仍被 withMockFallback 兜底成 mock，理论到不了这里）。
         setLoading(false)
+        if (err instanceof ApiError) {
+          showToast(`审批加载失败：后端错误 HTTP ${err.status}`)
+        }
       })
   }, [])
 
@@ -123,7 +127,7 @@ function ApprovalCard({
           PENDING
         </span>
         <span className="text-sm font-semibold">{a.nodeId}</span>
-        <span className="font-mono text-xs text-dim">{a.workflowId}</span>
+        <span className="font-mono text-xs text-dim">{a.workflowName ?? a.workflowId}</span>
         {a.createdAt && (
           <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-dim">
             <Clock size={11} />

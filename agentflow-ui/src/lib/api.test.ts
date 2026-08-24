@@ -265,6 +265,12 @@ describe('listPendingApprovals（审批中心聚合）', () => {
     expect(out.approvals.length).toBe(2)
     expect(out.approvals[0].nodeId).toBe('pay-gate')
   })
+
+  it('后端 5xx → 不降级 mock，抛 ApiError（review P1：防 corrupt 审批 500 被 mock 掩盖）', async () => {
+    fetchMock.mockResolvedValue(fakeResponse(false, 500))
+
+    await expect(listPendingApprovals()).rejects.toMatchObject({ status: 500 })
+  })
 })
 
 describe('decideApproval（审批决策）', () => {
