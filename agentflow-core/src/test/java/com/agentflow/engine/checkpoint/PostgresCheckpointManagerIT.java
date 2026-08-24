@@ -47,13 +47,16 @@ class PostgresCheckpointManagerIT {
 
     @BeforeEach
     void setUp() {
-        // 每次构造跑 Flyway 迁移（幂等：仅执行未应用的版本；CI 每次全新容器）
+        // 必须先迁移后清理，且二者在同一 @BeforeEach 内显式顺序——JUnit 5 多个 @BeforeEach
+        // 不保证声明序（本机持久化卷停 V4 时实测 clean 先于 setUp 跑，workflow_approvals
+        // V7 建表前 DELETE 报 relation 不存在）。构造即跑 Flyway（幂等），旧卷升到
+        // 最新 schema 后，清理 SQL 引用的表才全部存在。
         DataSource ds = new DriverManagerDataSource(URL, USER, PASS);
         cm = new PostgresCheckpointManager(ds);
+        cleanItTestData();
     }
 
-    @BeforeEach
-    void cleanItTestData() {
+    private void cleanItTestData() {
         // 真 PG 是持久化的（pg-data 卷），测试间 / 多次 verify 的数据会残留并相互污染——
         // H2 内存库 / CI 全新容器每次拿到干净库，永远暴露不了；真实持久化 PG 实跑才见。
         // 按 it-% 前缀清理本类测试数据（先子表后父表，子表无外键需显式删）。
@@ -138,8 +141,9 @@ class PostgresCheckpointManagerIT {
     @Test
     @DisplayName("真 PG：R22 扩列——加密 key 下 routing 决策 / 节点输出 / channel 密文形态 + 读还原（V8 TEXT 列）")
     void routingDecisionsCiphertextOnRealPostgres() throws Exception {
+        // 32 字节 key（对齐 EncryptionTest 先例；R22 首版 "it-key-"+32hex=39B 被 256-bit 校验拒绝）
         String key = java.util.Base64.getEncoder().encodeToString(
-                "it-key-0123456789abcdef0123456789abcdef".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                "0123456789abcdef0123456789abcdef".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         com.agentflow.security.ColumnEncryptor enc = new com.agentflow.security.AesGcmColumnEncryptor(key);
         com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper()
                 .registerModule(new com.fasterxml.jackson.datatype.jsr310.JavaTimeModule());

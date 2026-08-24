@@ -454,3 +454,21 @@ recoverAndExecute 的轮次转换 else 分支（末 barrier 在最后一层 + �
 - **根因**：U6 的「decidedBy 服务端推导 + admin key 门控」复用 `sha256`（对齐 `ToolGrantController` 的 `hashKeys`），但 controller 在 api 包、filter 在 security 子包。
 - **修复**：`sha256` 改 `public`（纯哈希函数无副作，公开无安全风险；`ToolGrantController`/`ApprovalController` 共用）。
 - **教训**：跨包复用「认证辅助工具」时先确认可见性；把哈希/sha 这类无状态纯函数直接 public，比包内到处复制一份更收敛（单一真相源）。
+
+## 2026-08-24 — 本地真 PG 首跑 R22 扩列 IT：两处「未实跑」测试缺陷现形
+
+拉取 `f62eb8a`（R22 扩列 + 审批中心 U6 修复）后在本机起 Docker PG（持久卷）首次实跑 R22 新增的两个 IT，`mvn verify` 红——此前这批 IT **从未在任何真 PG 上跑过**（本地当时 PG 未起全跳过，CI 的 postgres service 也尚未跑到/或同样红），H2/单元层绿掩盖了它们。
+
+### 坑：IT 测试 key 39 字节——注释标「32B」但没数过字节数
+
+- **现象**：`PostgresWorkflowDefinitionStoreIT` / `PostgresCheckpointManagerIT`（routing 用例）构造 `AesGcmColumnEncryptor` 直接抛 `AES-GCM key 必须是 32 字节（256-bit），实际 39 字节`。
+- **根因**：两个 IT 的 key 字面量 `"it-key-0123456789abcdef0123456789abcdef"`——作者意图是「it-key- 前缀 + 32 hex」，但 `"it-key-"` 本身占 7 字节，总计 **39B**，被 256-bit 校验拒绝。注释写着 `// 32B` 从没被验证过。
+- **修复**：改成真 32 字节 `"0123456789abcdef0123456789abcdef"`（对齐 `AesGcmColumnEncryptorTest` / `PostgresCheckpointManagerEncryptionTest` 的既有 KEY 先例——同仓已有正确样板，新 IT 没复用）。
+- **教训**：字面量常量自注释长度时，用 `printf | wc -c` 数一下再写注释；写新测试先 grep 同仓既有 KEY 样板复用，别新造一份。
+
+### 坑：@BeforeEach 清理先于 Flyway 迁移执行——持久卷停在旧 schema 时 relation 不存在
+
+- **现象**：`PostgresCheckpointManagerIT` 三个用例全 error：`relation "workflow_approvals" does not exist`（该表 V7 建）。本机 PG 卷停在 V4（2026-08-17 最后一次迁移）。
+- **根因**：类里两个 `@BeforeEach`——`setUp`（构造 manager 即跑 Flyway）与 `cleanItTestData`（DELETE 各表）。**JUnit 5 不保证多个 @BeforeEach 按声明顺序执行**（默认 `MethodOrderer` 随机/确定性但非声明序），本机实跑 clean 先于 setUp → 清理 SQL 引用 V7 表时库还在 V4。CI 全新库从 V1 全量建表，且此前的执行恰好顺序有利，掩盖了这个顺序依赖。`PostgresWorkflowDefinitionStoreIT` 同构（clean-only @BeforeEach，Flyway 在测试体内才跑）。
+- **修复**：两个 IT 都收敛为**单一 `@BeforeEach setUp`**，方法体内显式「先构造（=幂等迁移）后 `cleanItTestData()`（降为私有方法）」——顺序由代码顺序保证，不再赌 JUnit 的回调排序。
+- **教训**：多个 `@BeforeEach` 之间存在依赖（迁移→清理、建容器→注入连接串）时必须合并成一个方法显式排序，声明顺序在 JUnit 5 不可依赖；「CI 绿」只证明了一种执行序，持久化旧 schema 卷是第二种环境形态——这正是「真 PG 实跑」的价值（同 2026-08-17 档 A 首跑暴露 IT 数据污染一节的续篇）。

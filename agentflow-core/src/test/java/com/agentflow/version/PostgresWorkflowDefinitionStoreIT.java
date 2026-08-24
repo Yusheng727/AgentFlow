@@ -37,8 +37,10 @@ class PostgresWorkflowDefinitionStoreIT {
     private static final String PASS =
             System.getenv().getOrDefault("SPRING_DATASOURCE_PASSWORD", "agentflow");
 
+    // 32 字节（对齐 AesGcmColumnEncryptorTest / EncryptionTest 的 KEY 先例）。
+    // R22 首版误用 "it-key-"+32hex=39B 被 256-bit 校验拒绝——真 PG 实跑才暴露（H2/单元层不构造该 IT）。
     private static final String KEY = Base64.getEncoder().encodeToString(
-            "it-key-0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8)); // 32B
+            "0123456789abcdef0123456789abcdef".getBytes(StandardCharsets.UTF_8)); // 32B
 
     @BeforeAll
     static void assumePostgres() {
@@ -47,7 +49,16 @@ class PostgresWorkflowDefinitionStoreIT {
     }
 
     @BeforeEach
-    void cleanItTestData() {
+    void setUp() {
+        // 先跑 Flyway 再清理：本测试类的 @BeforeEach 原先只做清理，但持久化卷可能停在旧
+        // schema——构造 PostgresCheckpointManager 即幂等迁移（V3 建 workflow_definitions、
+        // V8 转 TEXT），之后清理 SQL 引用的表才存在。CI 全新库恰好掩盖了这一顺序依赖。
+        new com.agentflow.engine.checkpoint.PostgresCheckpointManager(
+                new DriverManagerDataSource(URL, USER, PASS));
+        cleanItTestData();
+    }
+
+    private void cleanItTestData() {
         try (Connection c = DriverManager.getConnection(URL, USER, PASS);
              Statement s = c.createStatement()) {
             s.executeUpdate("DELETE FROM workflow_definitions WHERE workflow_name LIKE 'it-%'");
@@ -59,9 +70,6 @@ class PostgresWorkflowDefinitionStoreIT {
     @Test
     @DisplayName("真 PG：加密 key 下定义落库为密文（不含 prompt 明文）+ find/findLatest 解密还原")
     void definitionCiphertextRoundTripOnRealPostgres() throws Exception {
-        // 先跑 checkpoint 侧 Flyway（V8 含本表列型迁移）；definition store 复用同一迁移链
-        new com.agentflow.engine.checkpoint.PostgresCheckpointManager(
-                new DriverManagerDataSource(URL, USER, PASS));
         ColumnEncryptor enc = new AesGcmColumnEncryptor(KEY);
         PostgresWorkflowDefinitionStore store =
                 new PostgresWorkflowDefinitionStore(new DriverManagerDataSource(URL, USER, PASS), enc);
