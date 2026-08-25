@@ -40,6 +40,42 @@
 | 生产 Kafka offset 策略需运维确认 | open-questions.md Q1 | 待确认 | — |
 | 恢复触发编排（自动 vs 人工）待确认 | open-questions.md Q2 | 待确认 | — |
 
+### 第二批（2026-08-26，7 能力）
+
+| 结论 | 所在文档 | 可信度 | 证据（文件#符号） |
+|---|---|---|---|
+| 授权判定 = config ∪ DB，双空才 allow-all；DB 有记录即强制 | flows/tool-authorization.md | 已确认 | CallerToolAllowlist#isAllowed + CallerToolAllowlistTest 10 断言 |
+| 工具授权强制点唯一 = 提交时逐节点校验；拒绝 403 不落记录 | flows/tool-authorization.md | 已确认 | CodeGraph: isAllowed 生产唯一调用点 submit:152 + WorkflowController:176-188 |
+| grant/revoke admin-only；未配 admin key 全 403（安全默认）；幂等 INSERT | flows/tool-authorization.md | 已确认 | ToolGrantController + GRANT_SQL(WHERE NOT EXISTS) |
+| 通配 `*` 授全部工具（config 与 DB 双侧语义一致） | flows/tool-authorization.md | 已确认 | hasTool + IS_GRANTED_SQL |
+| Kafka 装配属性门控：不 enabled 零 bean（回落本地 VT，v1 行为） | flows/kafka-async-dispatch.md | 已确认 | @ConditionalOnProperty + defaultDispatcher |
+| wire = String 承载 JSON + starter 自持 Jackson2 mapper（JavaTime/ISO） | flows/kafka-async-dispatch.md | 已确认 | KafkaAgentFlowAutoConfiguration#agentflowKafkaObjectMapper |
+| 消息 key=workflowId 同分区保序；submit/retry 双路径统一 dispatch | flows/kafka-async-dispatch.md | 已确认 | KafkaWorkflowDispatcher#dispatch + CodeGraph: dispatch 生产恰两处 |
+| tryClaim 原子认领恰一执行 + 未 staged 丢弃 + 非引擎异常兜底 FAILED | flows/kafka-async-dispatch.md | 已确认 | TRY_CLAIM_SQL + onMessage + KafkaDispatchE2eIT |
+| offset 默认 earliest（订阅前消息不丢；幂等使重扫安全） | flows/kafka-async-dispatch.md | 已确认 | KafkaAgentFlowAutoConfiguration:74/113-116 |
+| 定义按 (name, version) 快照；恢复/retry 按旧版本执行；缺失 3 次退避不进 RUNNING | flows/workflow-versioning.md | 已确认 | WorkflowVersionManager + loadDefinitionWithRetry + VersionTest |
+| 版本冲突 WARN 不阻断（在途实例按旧 DAG 跑完） | flows/workflow-versioning.md | 已确认 | VersionConflictDetector + versionCheck 端点 |
+| 生产定义存储与 checkpoint 双 strict 加密（缺 key 启动失败） | flows/workflow-versioning.md / column-encryption.md | 已确认 | AgentFlowAutoConfiguration:100-114 |
+| 提交守卫双上界（节点数 500 默认/预估成本）→ 422 不落记录 | flows/cost-budget-control.md | 已确认 | WorkflowSubmissionGuard#check + GuardTest 12 断言 |
+| per-workflow 预算 = 记账告警非阻断（硬防护在提交前——两道防线分工决议） | flows/cost-budget-control.md | 已确认 | WorkflowBudget 无中止 + recordBudget + CLAUDE.md 拍板 |
+| edge-triggered 超限恰一次 + synchronized 线程安全 + 双维度独立 | flows/cost-budget-control.md | 已确认 | WorkflowBudget#record + WorkflowBudgetTest 12 断言 |
+| trace 仅创建者 + 未注册 404；三执行入口都注册（不与 checkpoint 状态分裂） | flows/observability-diagnosis.md | 已确认 | TraceController + BspEngine:209/424/606 |
+| 终态指标恰一次（outcomeRecorded + finally 兜底；paused 不记终态） | flows/observability-diagnosis.md | 已确认 | BspEngine#execute:218-277 |
+| 诊断 6 类问题（循环重复豁免；Token 阈值 3×均值且>100） | flows/observability-diagnosis.md | 已确认 | DiagnosisService#diagnose + DiagnosisServiceTest 6 断言 |
+| 干跑零 LLM 零生产调用（CodeGraph 证实 4 处全测试） | flows/observability-diagnosis.md | 已确认 | DryRunEngine + CodeGraph: callers dryRun |
+| 加密生产 fail-closed（缺 key 启动失败）+ dev Noop 宽松 + key 只从 env | flows/column-encryption.md | 已确认 | ColumnEncryptors#build + ColumnEncryptorsTest |
+| 密文 AESGCM:iv:ct 自描述 + legacy 明文前缀兼容 + GCM 篡改检测 + 每次新 IV | flows/column-encryption.md | 已确认 | AesGcmColumnEncryptor + IT 真密文证据 |
+| 扩列范围 = 5 处敏感列（CodeGraph: toEncryptedJson 恰 5 生产写点闭环） | flows/column-encryption.md | 已确认 | PostgresCheckpointManager×4 + PostgresWorkflowDefinitionStore×1 + V7/V8 DDL |
+| RAG 引擎零改动（纯 AgentFunction 扩展点，KTD-6 实证） | flows/rag-retrieval.md | 已确认 | RagEngineZeroChangeTest + demo 无 core 改动 |
+| 检索确定性（词袋+余弦）+ 0 分过滤 + 无命中不硬造上下文 + 全字段透传委托 | flows/rag-retrieval.md | 已确认 | RagAgentFunction + InMemoryVectorStore + 4 断言测试 |
+| 真实 LLM fail-fast（缺 key 启动失败不静默回落）+ 成本入账 | flows/rag-retrieval.md | 已确认 | RagDemoConfig#realDelegate + RagRealLlmIT |
+| 授权 DB 不可用 → 提交 fail-fast（无静默放行降级） | flows/tool-authorization.md | 合理推断 | JdbcToolGrantRepository 无 catch（按异常传播推断） |
+| 授权回收时点语义（不追溯在途工作流） | flows/tool-authorization.md | 合理推断 | 提交校验时点 + 无运行中撤销机制 |
+| 提交侧「落库+发消息」无 outbox（发送失败悬空 PENDING） | flows/kafka-async-dispatch.md | 合理推断 | submit 顺序 + 未发现 outbox（Q6 待确认） |
+| 守卫估算不含循环轮次（循环工作流实际成本可数倍于估算） | flows/cost-budget-control.md | 合理推断 | estimateCost 无 round 维度 |
+| Kafka send 异步确认策略待定 | open-questions.md Q6 | 待确认 | — |
+| key 轮换机制缺失 | open-questions.md Q10 | 待确认 | — |
+
 ## 维护说明
 
 - 新增/修改流程文档时同步更新本索引；

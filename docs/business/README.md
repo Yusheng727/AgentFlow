@@ -6,18 +6,30 @@ AgentFlow 仓库核心业务流程/规则/状态流转的可追溯文档，供�
 
 ## 覆盖范围
 
-已覆盖（flows/ 下，2026-08-25 首批 4 条核心链路）：
+已覆盖（flows/ 下，2026-08-25/26 两批共 11 条——全部已识别业务能力）：
+
+第一批（2026-08-25，核心四链路）：
 
 - [工作流生命周期（提交到终态）](flows/workflow-lifecycle.md)
 - [人工审批（HITL）全链路](flows/hitl-approval.md)
 - [崩溃恢复与重试](flows/crash-recovery-retry.md)
 - [动态路由与循环](flows/dynamic-routing-and-loops.md)
 
-未覆盖（已识别候选，见 [business-capability-catalog.md](business-capability-catalog.md)）：权限与工具授权、Kafka 异步分发（仅生命周期文档涉及其幂等面）、工作流版本管理、成本与预算控制、可观测与诊断、敏感数据列加密、RAG 检索增强。
+第二批（2026-08-26，支撑七能力）：
+
+- [工具授权与 API 准入（权限域）](flows/tool-authorization.md)
+- [Kafka 异步分发（提交/执行解耦）](flows/kafka-async-dispatch.md)
+- [工作流版本管理（定义持久化与版本冲突）](flows/workflow-versioning.md)
+- [成本与预算控制（LLM 花费治理）](flows/cost-budget-control.md)
+- [可观测与诊断（指标、轨迹、异常诊断、干跑）](flows/observability-diagnosis.md)
+- [敏感数据列加密（静态加密 R22）](flows/column-encryption.md)
+- [RAG 检索增强（向量检索扩展点）](flows/rag-retrieval.md)
+
+未覆盖：无（[business-capability-catalog.md](business-capability-catalog.md) 11 项全部文档化；新能力出现时按增量更新模式补录）。
 
 ## 生成信息
 
-- 生成时间：2026-08-25（同日 CodeGraph 索引 v2 精化：调用链/路由/状态写入点经图谱复核，关键结论补测试断言 B 级交叉验证）
+- 生成时间：2026-08-25（首批 4 条）/ 2026-08-26（第二批 7 条，CodeGraph 复核 + 测试断言 B 级交叉验证贯穿两批）
 - 代码版本：main@2a37d6b
 - 生成方式：business-flow-documenter skill（取证优先级 1 = CodeGraph：`.codegraph/` 索引 266 文件 / 5,068 节点 / 11,949 边）
 

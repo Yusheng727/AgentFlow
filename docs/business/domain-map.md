@@ -1,5 +1,7 @@
 # 领域地图
 
+> 更新时间：2026-08-26（补 7 个支撑域，共 11 域全覆盖）
+
 ## 核心业务域
 
 ### 工作流执行域（核心）
@@ -35,17 +37,57 @@
 - 关键实体：WorkflowDispatchRequest、Topic `agentflow.workflow.executions`、tryClaim（原子认领）
 - 服务/模块归属：agentflow-api（Dispatcher 抽象）、agentflow-kafka-starter
 - 上游：工作流执行域（提交） ｜ 下游：工作流执行域（run 语义）
-- 文档：flows/workflow-lifecycle.md（幂等面）＋候选（独立文档待排期）
+- 文档：flows/kafka-async-dispatch.md（+ workflow-lifecycle.md 幂等面）
+
+### 权限域（准入与授权）
+- 子域：API Key 鉴权、工具授权判定（config ∪ DB）、授权管理（admin-only）、所有权校验
+- 关键实体：callerId（Key 哈希）、caller_tool_grants、AdminApiKeys、tool 通配 `*`
+- 服务/模块归属：agentflow-api/security
+- 上游：全部 HTTP 入口 ｜ 下游：工作流执行域（提交拦截）、审批域（admin 复用）
+- 文档：flows/tool-authorization.md
+
+### 版本管理域
+- 子域：定义快照存取、冲突检测
+- 关键实体：workflow_definitions（(name, version) 主键）、VersionConflict
+- 服务/模块归属：agentflow-core/version
+- 上游：工作流执行域（提交记录） ｜ 下游：执行/恢复/retry（按版本取定义）
+- 文档：flows/workflow-versioning.md
+
+### 成本预算域
+- 子域：提交守卫（硬拦截）、运行记账（软告警）、单价表
+- 关键实体：WorkflowBudget（edge-triggered）、WorkflowSubmissionGuard、CostCalculator
+- 服务/模块归属：api/security + core/observability
+- 上游：提交（守卫）、执行（记账） ｜ 下游：可观测域（指标）
+- 文档：flows/cost-budget-control.md
+
+### 可观测诊断域
+- 子域：指标族、trace 穿线、异常诊断、干跑
+- 关键实体：AgentFlowMetrics（6 指标族）、ExecutionTrace/NodeTrace、ExecutionTraceRegistry、DiagnosisReport
+- 服务/模块归属：core/observability + core/debug + api（Controller/Service）
+- 上游：全部执行路径（埋点） ｜ 下游：Grafana、UI 轨迹/诊断 Tab
+- 文档：flows/observability-diagnosis.md
+
+### 静态加密域（横切）
+- 子域：列加密器、密文格式、装配纪律
+- 关键实体：ColumnEncryptor 家族、`AESGCM:iv:ct` 密文、AGENTFLOW_ENCRYPTION_KEY、5 处敏感列
+- 服务/模块归属：core/security + starter（双 strict 装配）
+- 上游：checkpoint/定义/审批全部写路径 ｜ 下游：读路径（解密+legacy 兼容）
+- 文档：flows/column-encryption.md
+
+### RAG 检索域（demo）
+- 子域：向量检索、prompt 增强、委托执行
+- 关键实体：InMemoryVectorStore、RagAgentFunction、NodeRegistry 扩展点
+- 服务/模块归属：demo-rag
+- 上游：工作流执行域（agent: rag 解析） ｜ 下游：LLM 适配器（delegate）
+- 文档：flows/rag-retrieval.md
 
 ## 未明确归属的模块
 
 | 模块 | 观察到的行为 | 疑似归属 | 待确认 |
 |---|---|---|---|
 | agentflow-ui（React 5+1 Tab） | 看板/提交/定义/轨迹/诊断/审批中心 | 各业务域的展示层 | 否（展示层，非业务规则载体） |
-| demo-* 6 个演示模块 | 端到端演示拓扑（串行/fork-join/条件/循环/RAG） | 工作流执行域的消费者 | 否 |
-| com.agentflow.security（列加密） | 5 处 JSONB 敏感列 AES-256-GCM 静态加密 | 横切安全（存储层） | 是（独立业务能力候选，未文档化） |
-| com.agentflow.version（版本管理） | 定义按 (name, version) 存储、冲突检测 | 工作流执行域子域 | 是（影响恢复/retry 语义，未独立文档化） |
-| com.agentflow.observability | 5 类指标 + trace + 预算记账 | 可观测支撑域 | 否（支撑性，候选低优先级） |
+| demo-* 6 个演示模块 | 端到端演示拓扑（串行/fork-join/条件/循环/RAG） | 工作流执行域的消费者 | 否（rag 单列见 RAG 检索域） |
+| com.agentflow.prompt（SpEL/谓词） | prompt 模板解析 + when 谓词求值（沙箱） | 工作流执行域/路由域共用件 | 否（已随路由文档覆盖） |
 
 ## 领域关系图
 
@@ -54,10 +96,16 @@ flowchart LR
     subgraph 调用方
         UI[UI/外部系统]
     end
+    subgraph 权限域
+        SEC[ApiKeyAuthFilter<br/>CallerToolAllowlist]
+    end
     subgraph 工作流执行域
         SUB[提交受理]
         ENG[BSP执行]
         ST[状态管理<br/>PENDING→RUNNING→终态]
+    end
+    subgraph 成本预算域
+        BUD[提交守卫422<br/>WorkflowBudget记账]
     end
     subgraph 派发域
         DISP[Dispatcher<br/>本地VT/Kafka]
@@ -71,15 +119,35 @@ flowchart LR
     subgraph 路由域
         RTE[when/on_error/loop<br/>takenEdges]
     end
-    UI -->|POST 提交| SUB
-    SUB --> DISP
+    subgraph 版本管理域
+        VER[workflow_definitions<br/](name,version)]
+    end
+    subgraph 静态加密域
+        ENC[AESGCM列加密<br/>5敏感列]
+    end
+    subgraph 可观测诊断域
+        OBS[指标/trace/诊断]
+    end
+    subgraph RAG检索域
+        RAG[向量检索→增强→委托]
+    end
+
+    UI -->|X-API-Key| SEC
+    SEC -->|callerId| SUB
+    SUB --> BUD
+    BUD -->|422/通过| DISP
+    SUB --> VER
     DISP --> ENG
     ENG -->|ApprovalRequired| APR
-    APR -->|APPROVE 续跑| ENG
+    APR -->|APPROVE| ENG
     APR -->|REJECT| ST
-    ENG -->|崩溃/abort| REC
-    REC -->|重放续跑| ENG
+    ENG -->|崩溃| REC
+    REC -->|重放| ENG
     ENG -->|路由决策| RTE
-    RTE -->|恢复重放| REC
+    RTE -->|重放| REC
+    ENC -.加密横切.-> VER
+    ENC -.加密横切.-> REC
+    ENG -.埋点.-> OBS
+    RAG -->|agent扩展点| ENG
     ENG -->|终态| UI
 ```

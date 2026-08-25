@@ -89,3 +89,31 @@
 - **「恢复」两路径**：崩溃恢复（recoverAndExecute，处理 RUNNING 崩溃/FAILED abort）≠ 审批恢复（approveAndResume，处理 AWAITING_APPROVAL）；互斥拒绝混用。
 - **SUCCESS vs FALLBACK**：on_error 兜底收敛的执行 status 字段是 SUCCESS，仅指标/trace 记 fallback——下游按 status 判定时注意（见 dynamic-routing-and-loops.md 待确认问题）。
 - **callerId vs createdBy**：同一概念（API Key SHA-256 hash）在请求上下文与持久化列两个名字。
+- **两套 admin env 名**：`AGENTFLOW_ADMIN_API_KEYS`（admin 判定）≠ `AGENTFLOW_API_API_KEYS`（普通鉴权，宽松绑定带 API_ 前缀）——配错名静默 401。
+- **「预算」两道防线**：提交守卫（422 硬拦截，WorkflowSubmissionGuard）≠ 运行预算（记账告警非阻断，WorkflowBudget）——硬软分工，勿混。
+- **「加密」两模式**：fromEnv()（dev 宽松 Noop）≠ fromEnvStrict()（生产 fail-closed 启动失败）。
+- **Agent「扩展点」vs「引擎改动」**：RAG/审批门/任意 LLM 适配器都是 AgentFunction 实现零引擎改动；路由/循环/审批暂停是引擎改动——判断新能力归属哪侧先查此界。
+
+## 第二批补充术语（2026-08-26）
+
+| 术语 | 业务含义 | 证据 | 可信度 |
+|---|---|---|---|
+| 工具授权（tool grant） | 调用方对某 LLM 工具的使用许可：config 静态 ∪ DB 动态（caller_tool_grants），双空才全局允许 | api/security/CallerToolAllowlist.java#isAllowed | 已确认 |
+| 通配授权 `*` | 授予该调用方全部工具（config 集合与 DB 行语义一致） | CallerToolAllowlist#hasTool + IS_GRANTED_SQL | 已确认 |
+| grantedBy | 授权操作的审计字段（admin 的 caller hash） | V6 迁移 + ToolGrantController#grant | 已确认 |
+| AGENTFLOW_ENCRYPTION_KEY | 列加密密钥（base64 32B AES-256），只从 env 读；生产缺失启动失败 | security/ColumnEncryptors.java | 已确认 |
+| `AESGCM:iv:ct` | 自描述密文格式；decrypt 按前缀识别，无前缀=legacy 明文原样返回 | security/AesGcmColumnEncryptor.java | 已确认 |
+| 双 strict 装配 | 生产同时强制 checkpoint 与定义存储加密（杜绝半吊子状态） | starter/AgentFlowAutoConfiguration:100-114 | 已确认 |
+| Topic key=workflowId | Kafka 消息以 workflowId 为 key——同工作流同分区保序 | kafka/KafkaWorkflowDispatcher#dispatch | 已确认 |
+| agentflow-workers | 默认消费组（同组多实例分摊分区） | KafkaAgentFlowAutoConfiguration:73 | 已确认 |
+| auto.offset.reset=earliest | 新消费组从分区头读——订阅前消息不丢（幂等消费使重扫安全） | KafkaAgentFlowAutoConfiguration:74 | 已确认 |
+| （name, version）定义键 | 工作流定义的全局定位键；同键重提交覆盖（last-write-wins） | version/WorkflowVersionManager | 已确认 |
+| 版本冲突（Conflict） | 执行版本落后最新定义版本——WARN 提示不阻断，在途实例按旧 DAG 跑完 | version/VersionConflictDetector | 已确认 |
+| edge-triggered 超限 | 预算超限事件恰记一次（首次跨过上界），非每节点重复 | observability/WorkflowBudget#record | 已确认 |
+| budget_exceeded | 预算超限指标名（agentflow.workflow.cost.budget_exceeded） | observability/AgentFlowMetrics 常量 | 已确认 |
+| ExecutionTrace / NodeTrace | 执行轨迹（进程内存 Registry，重启丢——与 checkpoint 独立） | observability/ExecutionTraceRegistry | 已确认 |
+| 诊断 6 类问题 | 迭代超限/连续超时/Token 异常(>3×均值且>100)/SpEL 失败/Channel 缺失/节点重复（合法循环豁免） | api/DiagnosisService#diagnose | 已确认 |
+| 干跑（DryRun） | 不调 LLM 的拓扑验证（内置 mock 复用分层）；生产入口未接线 | debug/DryRunEngine | 已确认 |
+| 词袋 embedder | 确定性嵌入（小写+分词+集合），无外部向量服务——demo RAG 离线可测 | demo-rag/InMemoryVectorStore | 已确认 |
+| 检索→增强→委托 | RagAgentFunction 三步：topK 检索 → 拼上下文换 prompt → 全字段透传 delegate | demo-rag/RagAgentFunction#execute | 已确认 |
+| mock fallback（NodeRegistry） | 未注册 agent 名回落 mock——demo 拓扑混合 agent 可用 | demo-api ApiConfig + RagDemoConfig | 已确认 |
