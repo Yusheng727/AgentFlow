@@ -7,29 +7,9 @@ YAML DSL 声明工作流，BSP（Bulk Synchronous Parallel）执行模型驱动�
 
 ## 架构
 
-```
-  POST /api/workflows  ──→  WorkflowController  ──→  BspEngine
-       │                         │                      │
-       │  YAML DSL                │  Auth (SHA-256)      │  Plan → Execute → Barrier
-       ▼                         ▼                      ▼
-  WorkflowDSLParser        ApiKeyAuthFilter      Virtual Threads
-       │                                               │
-       │  Parse + Validate                              │  Super-step 0
-       ▼                                               │  ┌───┐ ┌───┐ ┌───┐
-  WorkflowDefinition                                  │  │ A │ │ B │ │ C │ (parallel)
-  (DAG + Channels)                                    │  └───┘ └───┘ └───┘
-       │                                               │       barrier
-       ▼                                               │  Super-step 1
-  DAGLayerer                                           │  ┌───────────┐
-  (最长路径分层 → super-steps)                            │  │  Supervisor │ (aggregate)
-       │                                               │  └───────────┘
-       ▼                                               │
-  CheckpointManager           RecoveryProtocol         ▼
-  (两级: 节点级 + barrier 级)   (崩溃恢复, off-by-one 修复)  WorkflowContext
-                                                      (channel 快照)
-```
+![AgentFlow 架构图](docs/design/agentflow-architecture.png)
 
-引擎不关心 Agent 是谁：`AgentFunction` 是唯一合约，Spring AI / LangChain4j / Mock / RAG 委托都是它的实现。执行模型变化（条件路由、迭代循环）不改 Agent 层，Agent 层扩展（RAG、新框架适配器）不改引擎。
+*左侧：静态编译链（YAML → 解析校验 → 不可变定义 → 最长路径分层 → 两级 Checkpoint）；右侧：BSP 运行时时间轴（super-step 0 三节点并行 → 同步屏障 → super-step 1 聚合），琥珀色即 barrier 语义。引擎不感知 Agent 实现：`AgentFunction` 是唯一合约，Spring AI / LangChain4j / Mock / RAG 委托都是它的实现。执行模型变化（条件路由、迭代循环）不改 Agent 层，Agent 层扩展（RAG、新框架适配器）不改引擎。*
 
 ## 快速开始（5 分钟，mock 模式，零 LLM 成本）
 
