@@ -100,6 +100,9 @@
 **⑩ 可观测性**
 "ExecutionTrace 树记每节点结果 + Micrometer 5 类指标（执行/延迟/token/成本/预算超限）+ Grafana 面板 + 成本核算表。崩溃了能查 trace，跑贵了能看成本面板。"
 
+**⑬ 为什么不接 Spring Cloud（2026-08-25 调研拍板，"知道什么时候不用"）**
+"我调研过这个赛道的主流产品架构——Dify、Coze Studio 开源版、Spring AI Alibaba、LangGraph4j——**没有一个把 Spring Cloud 织进编排内核**。Dify 是 Flask 单体 api + celery worker 进程 + Redis/PG 共享存储；Coze Studio 开源版就是一个 Go 二进制 + nginx（compose 里的 etcd 是给 Milvus 用的，不是应用注册发现）；阿里自家的 Spring AI Alibaba，graph-core 和 agent-framework 两个核心模块的 pom 里零 Spring Cloud 依赖，Nacos 只出现在两个可选 side starter（A2A 跨服务 Agent 发现 / 配置中心）。这个赛道的共识形态是**无状态执行层 + 队列分发 + 共享状态存储**——恰好就是我的 Kafka 提交/执行解耦 + tryClaim 原子幂等 + PG checkpoint。所以要不要 Nacos/Gateway，是 executor 真多节点部署时的**接入层决策，不动引擎内核**——一个零用户的项目提前上注册中心，回答不了'你 QPS 多少'。什么时候我会接？工作流执行吞吐真成为瓶颈、executor 节点数超过个位数时：Nacos 做实例发现、Gateway 聚合提交入口、Sentinel 给提交端点限流——但引擎的扩展机制不依赖它们成立（consumer group 分区分配天然水平扩展）。**知道什么时候不用，比用过更值钱**。"
+
 **收尾（简短总结）**
 "一句话收：AgentFlow 证明的是『我能把一个分布式系统面对的那些后端难题——并发、崩溃恢复、容错、安全、可观测、分布式解耦——在真实工程里做对做完』。"
 

@@ -66,6 +66,7 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 | **完整 Human-in-the-Loop 审批中间件** | ✅ **已交付**（2026-08-20/21，`feat/hitl-r22-rag` U4–U8）：U4 引擎暂停（`AWAITING_APPROVAL` + 审批单快照落库）+ U5 `approveAndResume` 恢复 + U6 REST 审批端点（`ApprovalController` 待批投影/决策，decidedBy 服务端推导）+ U7 R22 列加密 + U8 demo-rag；**审批 Web UI → ✅ 已交付**（2026-08-23，`feat/r22-extend-approval-ui` U3/U4）：`ApprovalCenterController` 跨工作流聚合端点（`GET /api/approvals/pending`，admin/创建者可见域）+ React UI 第 6 Tab「审批中心」（决策无 mock fallback）+ 看板 AWAITING_APPROVAL 独立第四列；**Kafka 跨节点审批恢复 Deferred** |
 | **Web 可视化工作流编辑器** | |
 | **多租户 SaaS 平台** | v2+ |
+| **Spring Cloud 接入（Nacos/Gateway/Sentinel）** | ⛔ **明确不做**（2026-08-25 调研拍板）——考察了 Dify / Coze Studio 开源版 / Spring AI Alibaba / LangGraph4j 的架构与依赖树：**没有一个把 Spring Cloud 织进编排内核**（Dify=Flask 单体+celery worker；Coze=单 Go 二进制+nginx，etcd 是 Milvus 的；SAA 的 graph-core/agent-framework 零 Spring Cloud 依赖，Nacos 只在可选 side starter）。赛道共识形态 = 无状态执行层 + 队列分发 + 共享状态存储——AgentFlow 的 Kafka 解耦 + tryClaim 幂等 + PG checkpoint 已是该形态。注册中心/网关属 executor 多节点时的接入层决策，不进引擎内核；面试口径见 `07-sources-revision-interview.md` ⑬「为什么不接 Spring Cloud」 |
 | **RAG 演示加分项**（2026-08-10 拍板） | ✅ **已交付**（2026-08-21，`feat/hitl-r22-rag` U8）——新模块 `demo-rag`：`InMemoryVectorStore`（确定性 token 集合 embedder + 余弦 top-k）+ `RagAgentFunction`（检索→增强→委托 wrapped agent）。**KTD-6 证明**：`RagEngineZeroChangeTest` 用 BspEngine 直跑 `agent: rag` 节点零改动成立。与 InterviewCoach（RAG 项目）分工不重复：AgentFlow 只做编排侧接入 |
 
 > 注意：v1 只做**静态 DAG**（KTD-9）；条件分支（动态路由 + on_error 跳转）已交付 v2（2026-08-14）；Human-in-the-Loop 审批 + RAG 演示已交付（2026-08-20/21，`feat/hitl-r22-rag`）；其余（Web 编辑器、多租户）仍属 v2。
