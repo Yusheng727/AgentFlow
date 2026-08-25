@@ -18,6 +18,15 @@
 | Q3 | P1 | 提交守卫 DEFAULT_MAX_NODES=500 与 CHARS_PER_TOKEN=4 的估算参数依据（压测/行业经验/拍脑袋）？面试被追问「为什么是 500」时的答案 | product-intent-hypotheses.md | javadoc 只给了值未给依据 | 项目作者本人 | `docs/plans/agentflow/06-open-questions-risks-metrics.md` OQ 清单 | 待确认 |
 | Q4 | P2 | 引擎 MAX_TOTAL_ROUNDS=1000 硬上界的量级选择依据（单个回边循环 3-5 次为常态时 1000 是否过松/过紧） | technical-architecture.md | 字段注释只说「纵深防御」未说量级来源 | 项目作者本人 | 同上 | 待确认 |
 | Q5 | P2 | `demo-api` 的 `agentflow.real.enabled=true` 真实 LLM 路径在生产部署叙事中的定位——demo-api 本身是否会被当作生产参考部署物，还是纯粹演示（影响加密/鉴权配置的严肃程度评估） | system-overview.md | demo-api 模块名与内容均为演示形态，但 README 有 Quick Start | 项目作者本人 | README.md「3 接入模式」节 | 待确认 |
+| Q6 | P2 | BspEngine execute 的 4 个公开重载是否构成调用方迁移负担（95 callers 中还有多少用旧 Map 形式；是否该标 @Deprecated） | implementation-walkthroughs/bsp-engine-execution-loop.md | 重载共存无废弃标注；未统计调用方分布 | 项目作者本人 | CodeGraph callers 按重载签名分组 | 待确认 |
+| Q7 | P1 | recoverAndExecute 生产触发路径——当前 callers 全在测试/演示，是否有计划接定时扫描 RUNNING 超时工作流或 admin 端点 | implementation-walkthroughs/checkpoint-recovery-protocol.md | CodeGraph：生产代码无调用点 | 项目作者本人 | ROADMAP v1.1 节 | 待确认 |
+| Q8 | P1 | 恢复入口无 tryClaim——并发 recoverAndExecute 同一 workflow 会双跑；生产预期靠调用纪律还是待补原子抢占 | implementation-walkthroughs/checkpoint-recovery-protocol.md | recoverAndExecute 无任何 claim 前置 | 项目作者本人 / 架构师 | ce-code-review 记录 | 待确认 |
+| Q9 | P2 | replayOutputs 与 completedNodeIds「同序同源」约定靠注释维持（无类型级绑定），演化中如何防漂移 | implementation-walkthroughs/checkpoint-recovery-protocol.md | RecoveryProtocol javadoc 注释约定 | 项目作者本人 | — | 待确认 |
+| Q10 | P2 | Spring 适配器无 LC4j 对称的「逐轮」中断检查（ChatClient 内置循环无法插检查点）——是否有框架 issue 跟踪或 workaround 计划 | implementation-walkthroughs/dual-adapter-comparison.md | callLlm 单次调用无 isInterrupted 检查 | 项目作者本人 | Spring AI issue tracker | 待确认 |
+| Q11 | P2 | 审批单无超时机制（PENDING 永久等待）——是否有业务场景需要审批超时自动 REJECT 或升级提醒 | implementation-walkthroughs/hitl-approval-lifecycle.md | workflow_approvals 无 TTL/超时列 | 项目作者本人（业务向） | 02-requirements R20 | 待确认 |
+| Q12 | P2 | Kafka listener 并发度与 VT 引擎的配合——容器线程数小于同层节点数时是否成吞吐瓶颈 | implementation-walkthroughs/kafka-dispatch-decoupling.md | listener 容器并发配置未与引擎层宽耦合论证 | 项目作者本人 / 架构师 | KafkaAgentFlowAutoConfiguration factory 配置 | 待确认 |
+| Q13 | P1 | API Key 无轮换/吊销机制（静态 hash 集合，改 key 需重启）——v1.1/v2 是否计划（短期 token/JWT/管理端点） | implementation-walkthroughs/api-security-layers.md | ApiKeyAuthFilter 构造时固化集合 | 项目作者本人 | ROADMAP 安全条目 | 待确认 |
+| Q14 | P2 | real.enabled 模式下其余 agent 名回落 mock——混合模式（部分真实部分 mock）是演示便利还是有生产用途（如灰度） | implementation-walkthroughs/rag-extension-point.md | ApiConfig 注释「其他 agent 名仍回落 mock fallback」 | 项目作者本人 | — | 待确认 |
 
 ## 已解决问题归档
 

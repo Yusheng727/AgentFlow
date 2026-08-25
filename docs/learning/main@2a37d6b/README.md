@@ -14,11 +14,11 @@
 | [technical-architecture.md](technical-architecture.md) | 技术架构学习笔记：9 个设计模式（带 CodeGraph 调用计数）、扩展点/隔离点、稳定性设计 |
 | [glossary.md](glossary.md) | 术语表：17 个项目特有概念（super-step/channel/回边/HITL/tryClaim 等） |
 | [product-intent-hypotheses.md](product-intent-hypotheses.md) | 产品意图假设：12 条可观察行为与动机推测（带可信度） |
-| [open-questions.md](open-questions.md) | 待确认问题清单（Q1–Q5） |
+| [open-questions.md](open-questions.md) | 待确认问题清单（Q1–Q14） |
 | [evidence-index.md](evidence-index.md) | 40 条结论 → 证据锚点速查表 |
-| [implementation-walkthroughs/](implementation-walkthroughs/) | 端到端实现讲解（深挖，待选） |
-| [technical-decisions/](technical-decisions/) | ADR 风格技术决策记录（深挖，待选） |
-| [learning-summaries/](learning-summaries/) | 个人学习总结（深挖，待选） |
+| [implementation-walkthroughs/](implementation-walkthroughs/) | 7 篇端到端实现讲解（已交付：BSP 执行循环 / checkpoint 恢复 / 双适配器对比 / HITL 审批 / Kafka 分发 / API 安全 / RAG 扩展点） |
+| [technical-decisions/](technical-decisions/) | 3 篇 ADR（BSP 选型 / 最小事实 checkpoint / core 零框架） |
+| [learning-summaries/](learning-summaries/) | 2 篇总结（工程思想全景 / 面试问题覆盖地图） |
 
 ## 可信度统计（本骨架集）
 
