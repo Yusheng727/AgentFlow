@@ -1,0 +1,221 @@
+{
+  "schema_version": 1,
+  "profile": {
+    "candidate_id": "wang-yongsheng",
+    "target_roles": [
+      "AI 应用开发（Agent 方向）",
+      "Java 后端开发"
+    ],
+    "updated_at": "2026-08-28"
+  },
+  "claims": [
+    {
+      "id": "claim-agentflow-001",
+      "source_fact": "个人项目 AgentFlow：Java 21 从 0 实现 Multi-Agent 编排引擎，13 个 Maven 模块 + React UI，174 commits（2026-06 至今），GitHub 公开仓库。",
+      "candidate_wording": "AgentFlow — Java 原生 Multi-Agent 编排引擎（个人项目 | 2026.06–至今）｜ github.com/Yusheng727/AgentFlow ｜ 13 个 Maven 模块 ｜ 500+ 测试 / JaCoCo 80% 门禁 / CI 全绿",
+      "sources": [
+        { "type": "repository", "location": "https://github.com/Yusheng727/AgentFlow", "public": true, "note": "公开可点开" },
+        { "type": "document", "location": "docs/career-research/04-resume-draft-and-strategy.md", "public": false, "note": "客观数据锚点（commit 数需按最新复核）" }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["AI 应用（Agent）岗简历", "Java 后端岗简历", "HR 开场白", "面试自我介绍"],
+      "interview_details": {
+        "decisions": ["从 0 复现而非扩展 LangGraph4j——目标是展示后端工程深度（并发模型/崩溃恢复/容错/可观测/解耦），不是填补生态空白", "七三开定位：后端工程化 70% + Agent 工程化 30%，与 InterviewCoach（AI 应用）互补"],
+        "difficulties": ["面试官标准挑战「为什么不用现成的」——答案见 interview_details.decisions 与 docs/plans/agentflow/07-sources-revision-interview.md 档 C ①"],
+        "verification": ["git rev-list --count HEAD = 174（2026-08-28 复核）", "全仓 mvn verify 绿 + JaCoCo 门禁"],
+        "result": "GitHub 公开仓库 + CI 全绿 + 11 份业务流程文档（docs/business/）"
+      },
+      "boundary": "个人项目，无真实用户/线上流量；『主导』指个人项目全链路负责，不冒领团队成果。AI 辅助开发（Claude Code）口径主动交代：AI 写代码、本人负责架构决策与质量把关。",
+      "risk_notes": ["04 号文档的 173 commits 已过时，各材料统一用 174（或『170+』防再漂移）"],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-agentflow-002",
+      "source_fact": "BSP 执行引擎：YAML DSL 声明 DAG → 最长路径预分层 → Virtual Threads 层内并行 + CompletableFuture.allOf barrier；只读快照互不可见；channel 并发写按声明序 Reducer 合并。v2 扩条件路由（when 谓词 + 可达性剪枝 + SKIPPED）与有界循环（回边 + 迭代轮次 + 双上限）。",
+      "candidate_wording": "从 0 实现 BSP（整体同步并行）执行引擎：YAML DSL 声明 DAG、Virtual Threads 层内并行 + barrier 确定性合并（免锁）；扩展运行时条件路由与有界循环不破坏 BSP 不变量，路由决策落 checkpoint 供恢复重放",
+      "sources": [
+        { "type": "source_code", "location": "agentflow-core/src/main/java/com/agentflow/engine/BspEngine.java", "public": true, "note": "runRounds/applyBarrier/resolveTakenEdges" },
+        { "type": "business_doc", "location": "docs/business/flows/dynamic-routing-and-loops.md", "public": true, "note": "19 条已确认规则带证据" }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["两岗简历", "面试自我介绍"],
+      "interview_details": {
+        "decisions": ["BSP vs Actor/CSP：有界 DAG 编排不需要消息队列管并发，barrier 天然消除竞态；代价是并行度受限，对几十节点的工作流足够", "动态路由牺牲执行路径确定性 → checkpoint 只持久化已走边、恢复期 BFS 重算可达集买回确定性（KTD-5 单一真相源）"],
+        "difficulties": ["回边方向校验/喂回 channel 必须解析期拒绝（有界性前置），否则运行时死循环"],
+        "verification": ["BspEngineConditionalTest 7 断言 / BspEngineLoopTest 7 断言（含 iterationCapFails）"],
+        "result": "静态分层 + 可达性剪枝 + 轮次重放，三层测试全绿"
+      },
+      "boundary": "单机 VT 并行，非分布式执行；Kafka 只解耦提交/执行不并行化节点。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-agentflow-003",
+      "source_fact": "两级 Checkpoint + RecoveryProtocol：节点级完成即写（COMPLETED 不可覆盖）+ barrier 级快照；恢复查 nextSuperStep（崩溃层本身）；stray COMPLETED 防护（FAILED 状态 → 崩溃层整体重跑）；2 个 P0 修复（off-by-one、stray 防护，4 reviewer 独立确认）。",
+      "candidate_wording": "两级 Checkpoint 崩溃恢复防 LLM 重复计费：节点级完成即写 + 恢复期只重跑崩溃层未完成节点；修复评审发现的 off-by-one 层定位与 stray COMPLETED 防护两个正确性 P0",
+      "sources": [
+        { "type": "source_code", "location": "agentflow-core/src/main/java/com/agentflow/engine/checkpoint/RecoveryProtocol.java", "public": true, "note": "stray 防护 91-101 行" },
+        { "type": "business_doc", "location": "docs/business/flows/crash-recovery-retry.md", "public": true, "note": "CodeGraph 证实 recoverAndExecute 生产零调用（已知边界）" }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["两岗简历", "面试自我介绍"],
+      "interview_details": {
+        "decisions": ["stray 防护取舍：宁可重复计费（软约束）不可用未过 barrier 的脏数据（正确性硬约束）", "RecoveryProtocol 查崩溃层本身而非已 barrier 层（off-by-one 修复）"],
+        "difficulties": ["超时 abort 后在飞 VT 仍可能写出 COMPLETED——按工作流状态鉴别", "真 PG IT 才暴露的测试环境差异（数据残留/时间戳排序）"],
+        "verification": ["RecoveryProtocolTest stray 正反两面断言", "真 PG PostgresCheckpointManagerIT 实跑"],
+        "result": "恢复三不变量：不丢进度、不重复计费（可恢复场景）、不用脏数据"
+      },
+      "boundary": "恢复入口 recoverAndExecute 无生产编排（CodeGraph 证实 9 个调用方全为测试）——被问『谁触发恢复』时如实答已知边界 + 需运维编排。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-agentflow-004",
+      "source_fact": "HITL 审批：节点抛 ApprovalRequiredException → barrier 识别暂停（兄弟输出入快照、不写 barrier）→ AWAITING_APPROVAL → REST/Web UI 审批（decidedBy 服务端推导防伪造、原子幂等 confirmApproval）→ approveAndResume 重跑待批节点续跑下游；多级审批链；三条恢复路径共享 runRounds 骨架。",
+      "candidate_wording": "HITL 人工审批全链路（中断→人工决策→恢复）：上下文快照随审批单落库，批准后重跑待批节点并续跑，兄弟节点不重跑防重复计费；decidedBy 服务端推导防审批身份伪造，决策原子幂等",
+      "sources": [
+        { "type": "source_code", "location": "agentflow-core/src/main/java/com/agentflow/engine/BspEngine.java#approveAndResume", "public": true },
+        { "type": "business_doc", "location": "docs/business/flows/hitl-approval.md", "public": true, "note": "16 规则全已确认" }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["AI 应用（Agent）岗简历（JD 逐字命中：任务中断/敏感操作确认）", "两岗面试", "HR 开场白"],
+      "interview_details": {
+        "decisions": ["快照只含兄弟输出不含待批节点——恢复时兄弟不重跑（KTD-3 在 HITL 的镜像）", "审批单持久化失败视为致命而非静默降级（暂停不可恢复 = 无法恢复语义）"],
+        "difficulties": ["同层既有 Failure 又有 ApprovalRequired 的优先级：审批优先（失败在恢复续跑中重新面对）"],
+        "verification": ["BspEngineApprovalPauseTest 4 断言 + ResumeTest 6 断言 + concurrentConfirm 并发断言", "真 PG 审批单往返 IT"],
+        "result": "含 Web UI 审批中心的完整闭环（提交→看板待审批列→审批中心决策→续跑终态）"
+      },
+      "boundary": "审批人模型 = 创建者 ∪ admin，无独立审批角色/会签（已知边界，待业务扩展）。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-agentflow-005",
+      "source_fact": "Kafka 提交/执行解耦：submit/retry 统一走 dispatcher；tryClaim 单条条件 UPDATE 原子认领（PENDING→RUNNING 恰一胜出）；终态跳过；未 staged 消息丢弃；auto.offset.reset 默认 earliest。真 bug：retry 消息被终态跳过吞掉静默失效——修复为先复位 PENDING 再派发。",
+      "candidate_wording": "Kafka 提交/执行解耦：消费者以单条条件 UPDATE 原子认领执行权，at-least-once 投递下防重复消费双计费；修复 retry 被幂等防护吞掉静默失效的真 bug（本地单测全绿、Kafka 模式才暴露——『测试绿 ≠ 生产生效』）",
+      "sources": [
+        { "type": "source_code", "location": "agentflow-kafka-starter/src/main/java/com/agentflow/kafka/KafkaWorkflowConsumer.java", "public": true },
+        { "type": "business_doc", "location": "docs/business/flows/kafka-async-dispatch.md", "public": true }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["Java 后端岗简历（分布式/幂等关键词）", "两岗面试"],
+      "interview_details": {
+        "decisions": ["earliest 而非 latest：任务队列语义下订阅前消息不丢，幂等消费使重扫安全", "wire 用 String 承载 JSON + starter 自持 Jackson2 mapper（避开 spring-kafka 4.x 废弃的 JsonSerializer）"],
+        "difficulties": ["retry 复位与消费认领的并发竞争：复位先行 + 认领原子 + E2E 重放断言三重闭环"],
+        "verification": ["KafkaDispatchE2eIT 真 Kafka 三场景（含 replayDoesNotReRun）", "tryClaimConcurrentExactlyOneWins 并发断言"],
+        "result": "retry bug 修复 + 幂等三件套（认领/终态跳过/未 staged 丢弃）"
+      },
+      "boundary": "当前单 JVM 语义（生产者消费者同应用）；send 异步无 outbox（发送失败悬空 PENDING 为已知边界）。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-agentflow-006",
+      "source_fact": "双框架适配器：Spring AI 2.0 与 LangChain4j 收敛到同一 AgentFunction 窄接口，core 零 LLM 框架依赖；RAG（RagAgentFunction：检索→增强→委托）作为 AgentFunction 扩展点接入，RagEngineZeroChangeTest 证明引擎零改动；真实 DeepSeek 端到端（RagRealLlmIT 门控实跑，真实 token 计费落 Prometheus）。",
+      "candidate_wording": "Spring AI 与 LangChain4j 双框架收敛到同一 AgentFunction 窄接口（core 零框架依赖，换框架只动适配器）；RAG 作为扩展点接入、引擎零改动；真实 DeepSeek 端到端验证",
+      "sources": [
+        { "type": "source_code", "location": "agentflow-adapters/langchain4j + demo-rag", "public": true },
+        { "type": "business_doc", "location": "docs/business/flows/rag-retrieval.md", "public": true }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["AI 应用（Agent）岗简历", "面试自我介绍"],
+      "interview_details": {
+        "decisions": ["RAG 定位是证明扩展点成立（KTD-6）而非产品级 RAG——内存向量库/确定性词袋是有意的最小验证实现", "@Tool 边界：AgentFlow 做框架级工具布线（注册/授权/防死循环），InterviewCoach 做应用级工具使用——互补不重复"],
+        "difficulties": ["真实模式缺 key fail-fast 启动失败（禁止静默回落 mock 假装真实）"],
+        "verification": ["DeepSeekE2eIT + RagRealLlmIT 真实 key 实跑（Tests run: 1, Failures: 0）"],
+        "result": "同一 DSL 在两框架 + mock 三后端下语义一致"
+      },
+      "boundary": "RAG 为 demo 级（无 pgvector/嵌入模型/动态知识库）；Python 生态不在本项目范围（由 InterviewCoach 对冲）。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-agentflow-007",
+      "source_fact": "安全三件套：X-API-Key 鉴权（SHA-256 存哈希）+ 所有权校验防 IDOR + 工具级授权（config ∪ DB，admin-only 管理 API，防自授）；R22 列加密：5 处敏感列 AES-256-GCM（AESGCM: 自描述前缀 + legacy 明文兼容 + GCM 篡改检测），生产双 strict fail-closed（缺 key 拒绝启动）。",
+      "candidate_wording": "工具级授权（config ∪ DB、admin 管理、防自授特权工具）与 5 处敏感列 AES-256-GCM 静态加密（生产 fail-closed），API Key 只存哈希、所有权校验防越权",
+      "sources": [
+        { "type": "source_code", "location": "agentflow-api/src/main/java/com/agentflow/api/security/ + agentflow-core/src/main/java/com/agentflow/security/", "public": true },
+        { "type": "business_doc", "location": "docs/business/flows/tool-authorization.md + column-encryption.md", "public": true, "note": "CodeGraph: isAllowed 唯一强制点 / toEncryptedJson 恰 5 写点" }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["两岗简历（安全关键词）", "面试"],
+      "interview_details": {
+        "decisions": ["扩列判据 = 列内业务敏感数据（node output/channel/审批载荷/路由决策/定义话术）", "授权判定 config ∪ DB 求和、双空才 allow-all（向后兼容 + least-surprise）"],
+        "difficulties": ["key 轮换未实现（换 key 旧行不可解）——已知边界，聚合端点做了损坏行容错"],
+        "verification": ["真 PG 密文 IT（AESGCM: 前缀不含明文 + 解密还原）", "starter 装配测试（缺 key fail-closed）"],
+        "result": "R21 live 验证：admin grant 后授权 202 / 未授权 403"
+      },
+      "boundary": "单部署单钥（非 per-tenant）；合规审计未做外部测评。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-agentflow-008",
+      "source_fact": "质量工程：500+ 测试（core 370 + api 99 + starter 9 + UI 33，R22 时点）、JaCoCo 80% INSTRUCTION/BUNDLE 门禁强制、GitHub Actions CI（push/PR/每日）、11 份业务流程文档 + 面试弹药库、每轮 ce-code-review 10 persona 修复记录。成本两道防线：提交守卫 422 硬拦截 + per-workflow 预算记账告警（edge-triggered 恰一次）。",
+      "candidate_wording": "500+ 测试 / JaCoCo 80% 覆盖率门禁 / CI 全绿；提交守卫事前拦截失控 DAG（节点数/预估成本 422）+ per-workflow 预算事后告警两道防线",
+      "sources": [
+        { "type": "document", "location": "CLAUDE.md 当前进度段 + .github/workflows/ci.yml", "public": true },
+        { "type": "document", "location": "docs/career-research/04-resume-draft-and-strategy.md", "public": false, "note": "数据锚点" }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["两岗简历", "HR 开场白（数字锚点）"],
+      "interview_details": {
+        "decisions": ["预算语义拍板：记账/告警非阻断，硬防护由提交守卫承担（两道防线分工不重复设卡）", "踩坑主打：预算记账原实现只记成功路径末次、低估 ≤3x——code review 抓到后改逐轮记账"],
+        "difficulties": ["JaCoCo 80% 门禁驱动补测（含并发 edge-triggered 断言）"],
+        "verification": ["mvn verify 全绿 = 门禁通过的直接证据", "WorkflowBudgetTest 12 断言含并发"],
+        "result": "数字口径全部可复现：git rev-list / mvn verify 输出 / JaCoCo 报告"
+      },
+      "boundary": "个人项目测试数；无性能压测数据（不编造延迟/吞吐数字）。",
+      "risk_notes": ["测试数随时点增长，面试报『500+』即可；不写精确数"],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-agentflow-009",
+      "source_fact": "AI 辅助开发工作流：Claude Code 深度使用，架构决策/质量把关由本人负责；证据链 = 174 commits 演进节奏 + 每轮 10 persona code review 修复记录 + 真实环境验证（DeepSeek E2E/真 PG/真 Kafka）。",
+      "candidate_wording": "（面试口径，不进简历正文）AI 辅助开发：AI 负责写代码，我负责架构决策和质量把关——每轮多视角 code review 的修复记录与真实环境验证可查",
+      "sources": [
+        { "type": "document", "location": "docs/developer-notes/03-review-findings.md + docs/business/", "public": true, "note": "过程文档链" }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["面试追问 AI 辅助时的口径", "HR 沟通"],
+      "interview_details": {
+        "decisions": ["主动说、不回避——诺姆四达 JD 把 Claude Code/Codex/Cursor 使用经验列为加分项"],
+        "difficulties": ["鉴假环境下『证明是自己做的』：踩坑故事 + 取舍依据 + 过程文档是三件武器"],
+        "verification": ["git log 与口头叙事吻合（面试前跑 git log --stat 重温）"],
+        "result": "JD 加分项直接命中"
+      },
+      "boundary": "不虚构『手写每一行』；定位是 AI 时代的工程负责人工作方式。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-agentflow-010",
+      "source_fact": "可观测：Micrometer 6 指标族 + Grafana 6 面板（本机 Docker 实跑部署验证）+ trace 穿线 + 6 类问题自动诊断；工作流版本管理（定义按 (name, version) 快照，旧实例按旧 DAG 执行）。",
+      "candidate_wording": "Micrometer 指标 + Grafana 面板真实部署验证；工作流定义版本化（版本 bump 后在途实例按旧 DAG 执行到终态）",
+      "sources": [
+        { "type": "business_doc", "location": "docs/business/flows/observability-diagnosis.md + workflow-versioning.md", "public": true }
+      ],
+      "responsibility_level": "负责模块",
+      "verification_status": "已确认",
+      "allowed_uses": ["Java 后端岗简历", "面试"],
+      "interview_details": {
+        "decisions": ["版本冲突 WARN 不阻断（在途实例稳定优先）"],
+        "difficulties": ["PromQL status 大小写不匹配导致面板全空的坑（已修并记录）"],
+        "verification": ["Grafana datasource + dashboard 自动装配（Docker 实跑 5 容器健康）"],
+        "result": "6 面板全有数据"
+      },
+      "boundary": "本机 Docker 部署验证，非生产集群运维经验。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    }
+  ]
+}
