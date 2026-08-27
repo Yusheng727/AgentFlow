@@ -84,7 +84,7 @@ flowchart LR
         DRY[DryRunEngine 干跑<br/>不调LLM验拓扑] --> DEV[开发者]
     end
 
-    MET --> PROM[/actuator/prometheus] --> GRAF[Grafana 6 面板]
+    MET --> PROM["/actuator/prometheus"] --> GRAF[Grafana 6 面板]
     REG --> UI1[UI 轨迹页]
     DS --> UI2[UI 诊断页]
 ```

@@ -120,7 +120,7 @@ flowchart LR
         RTE[when/on_error/loop<br/>takenEdges]
     end
     subgraph 版本管理域
-        VER[workflow_definitions<br/](name,version)]
+        VER["workflow_definitions<br/>(name,version)"]
     end
     subgraph 静态加密域
         ENC[AESGCM列加密<br/>5敏感列]

@@ -95,8 +95,8 @@ flowchart TD
     subgraph 解析期
         YAML[YAML edges/nodes] --> VAL[SemanticValidator:<br/>回边三件套/方向/喂回channel/去回边无环<br/>违例→400]
     end
-    VAL --> LAYER[静态分层(回边豁免,<br/>on_error 隐式边纳入)]
-    LAYER --> EXEC[执行当前层可达节点(VT并行)]
+    VAL --> LAYER["静态分层(回边豁免,<br/>on_error 隐式边纳入)"]
+    LAYER --> EXEC["执行当前层可达节点(VT并行)"]
 
     EXEC --> NODE{节点结果}
     NODE -->|Success| ROUTE[路由求值 resolveTakenEdges:<br/>fan-out全走 / when按声明序首true<br/>无命中无默认→Fatal FAILED]
@@ -108,7 +108,7 @@ flowchart TD
     EDGE -->|前向边| ACT[后继进本轮active]
     EDGE -->|回边loop| NEXT[目标累积进nextActive]
     FALLBACK --> BARRIER
-    ACT --> BARRIER[barrier合并+路由决策持久化(先于barrier)]
+    ACT --> BARRIER["barrier合并+路由决策持久化(先于barrier)"]
     BARRIER --> STEP{还有下一层?}
     STEP -->|是| EXEC
     STEP -->|否| CONV{nextActive非空?}

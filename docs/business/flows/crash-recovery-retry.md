@@ -91,8 +91,8 @@ flowchart TD
 
     RP --> B[查最新barrier<br/>nextSuperStep=k+1]
     B --> S{状态=FAILED?}
-    S -->|是(stray防护)| EMPTY[completedNodeIds=空<br/>崩溃层整体重跑]
-    S -->|否(正常崩溃)| C[查崩溃层COMPLETED节点<br/>completedNodeIds+replayOutputs]
+    S -->|是（stray防护）| EMPTY[completedNodeIds=空<br/>崩溃层整体重跑]
+    S -->|否（正常崩溃）| C[查崩溃层COMPLETED节点<br/>completedNodeIds+replayOutputs]
     EMPTY --> CTX
     C --> CTX[重建context:<br/>barrier快照+重放输出按Reducer合并]
     CTX --> LOOP{该轮回边已命中?}

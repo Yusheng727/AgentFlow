@@ -83,7 +83,7 @@ flowchart TD
     EDGE -->|否/已报过| CONT[继续记账]
     BEP --> RUNON[工作流继续执行到终态<br/>非阻断]
     CONT --> RUNON
-    NB --> CALL2[记账照常(tokens/cost指标)]
+    NB --> CALL2["记账照常(tokens/cost指标)"]
     CALL2 --> RUNON
 ```
 

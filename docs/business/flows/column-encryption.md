@@ -76,14 +76,14 @@ flowchart TD
         D -->|合法| AES
     end
 
-    subgraph 写路径(5处)
+    subgraph 写路径["写路径(5处)"]
         W1[node output] & W2[channel values] & W3[routing decisions] & W4[approval payload+snapshot] & W5[definition] --> ENC[toEncryptedJson:<br/>JSON→AESGCM:iv:ct→TEXT列]
     end
 
     subgraph 读路径
         R[读列值] --> P{AESGCM: 前缀?}
         P -->|是| DEC[decryptRaw: GCM验签+解密]
-        P -->|否 legacy| PASS[原样返回(明文兼容)]
+        P -->|否 legacy| PASS["原样返回(明文兼容)"]
         DEC -->|验签失败| ERR[IllegalStateException]
     end
 
