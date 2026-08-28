@@ -6,7 +6,7 @@
       "AI 应用开发（Agent 方向）",
       "Java 后端开发"
     ],
-    "updated_at": "2026-08-28"
+    "updated_at": "2026-08-28（第二批：实习项目 Report Automation 主张新增）"
   },
   "claims": [
     {
@@ -214,6 +214,169 @@
         "result": "6 面板全有数据"
       },
       "boundary": "本机 Docker 部署验证，非生产集群运维经验。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-intern-001",
+      "source_fact": "实习项目 Report Automation（货代报表自动化）：Python/FastAPI/Playwright/pandas，14 家船司爬虫 + 6 步 Excel 流水线，服务 Meiyume Sourcing 团队；系统为接手的存量系统（十几万行），实习期 2026.06 至今，个人分支 yusheng/feat-*。",
+      "candidate_wording": "Meiyume ｜ 货代报表自动化系统（实习 2026.06–至今）：14 家船司网站数据抓取 → 标准化 → Excel 报告回填的自动化平台【待补：公司主体正式名称】",
+      "sources": [
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/CodeLearning/MYM Report/system-overview.md + XTS Report/system-overview.md", "public": false, "note": "report_automation@d2edb7b 代码分析" },
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/实习记录-2026-06-29_至_07-14.md", "public": false, "note": "主线实习工作记录" }
+      ],
+      "responsibility_level": "参与",
+      "verification_status": "待确认",
+      "allowed_uses": [],
+      "interview_details": {
+        "decisions": [],
+        "difficulties": [],
+        "verification": ["公司主体与部门名称以正式 offer/合同为准，确认前不进简历"],
+        "result": null
+      },
+      "boundary": "系统整体架构为接手的存量系统，不主张搭建者身份。",
+      "risk_notes": ["成稿前置阻塞项：公司名称确认", "系统规模（十几万行）如实交代为接手"],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-intern-002",
+      "source_fact": "爬虫等待机制优化：11 家船司脚本 142 处 wait_for_timeout 固定盲等（OOCL 45/EMC 21/COSCO 20 最多），系统性替换为条件驱动等待（expect_response/wait_for_selector/AJAX 行数稳定判定）；EMC 多候选选择器串行 is_visible(2s) 最坏 22s，用 locator.or_() 合并单次等待解决。",
+      "candidate_wording": "系统性清理 11 家船司脚本 142 处固定盲等，替换为条件驱动等待（接口拦截/元素出现/AJAX 行数稳定）；多候选选择器合并单次等待，消除最坏 22s 串行探测",
+      "sources": [
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/实习记录-2026-06-29_至_07-14.md §1.2（记录 5-14）", "public": false, "note": "45 条逐条记录，含每处优化的根因与解法" }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["两岗简历", "面试自我介绍"],
+      "interview_details": {
+        "decisions": ["按数据加载机制（SPA/整页导航/API/验证码）决策矩阵选等待策略，不套同一公式", "抓取函数返回值必须反映真实成功/失败，不能永远 return True"],
+        "difficulties": ["networkidle 在现代网站不可靠（长连接/埋点心跳永不满足）", "Playwright 专有选择器 :has-text 混入 document.querySelector 静默失败"],
+        "verification": ["142 处为逐家统计（OOCL 45/EMC 21/COSCO 20…）", "22s 为 EMC 候选数 × 2s 超时的实测推算"],
+        "result": "抓取从『靠超时兜底』变为可判定成功失败"
+      },
+      "boundary": "定性结果（无端到端压测百分比）；142 处为本人清理计划覆盖面，逐处核验以 git 历史为准。",
+      "risk_notes": ["数字口径（142/22s）建议投递前向 mentor 确认可对外"],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-intern-003",
+      "source_fact": "反爬攻坚：ZIM（真 Chrome channel + API 预热 + page.evaluate XHR 借页面 origin 绕 Cloudflare/CORS）、WHL（导出真人登录 Cookie 含 Incapsula 信誉 cookie，CDP/DPAPI 双路径导出 + 注入复用）、OOCL（持久化 profile + CF 滑块）、ONE（网站改版后补 type_mapping 恢复）、COSCO（按 BL 查一单多柜按入参箱号过滤）、CMA（随机延时防 IP 封禁 + Kendo grid 行数稳定判定）。",
+      "candidate_wording": "14 家异构船司站点反爬攻坚：真 Chrome + 持久化 profile + API 预热绕 Cloudflare；真人 Cookie 导出注入跳过验证码；网站改版恢复数据链路——沉淀『数据加载机制 → 等待策略』决策矩阵",
+      "sources": [
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/实习记录-2026-06-29_至_07-14.md §1.4（记录 22-28）", "public": false },
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/oocl-cloudflare-turnstile-bypass.md + CodeLearning/XTS Report/implementation-walkthroughs/whl-cookie-auth-bypass.md", "public": false }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["AI 应用岗简历（外部系统容错叙事）", "Java 后端岗简历", "面试"],
+      "interview_details": {
+        "decisions": ["ZIM：requests 直调 403 → 根因是 Origin/Referer + cf_clearance 校验 → page.evaluate 跑 XHR 借页面上下文 + 预热先过质询", "WHL：用『一次性真人信誉』换掉『每次自动过验证码』——导出 visid_incap_* 信誉 cookie 复用", "弃爬改 API 终局判断：8/11 家有 DCSA 标准 API，三梯队演进"],
+        "difficulties": ["patchright/camoufox 过 CF 不是银弹，高频仍被封——组合拳（真 Chrome+profile+延时+滑块）", "ZIM 本机已有 Chrome 时新实例被吸进现有窗口，Playwright 报浏览器关闭"],
+        "verification": ["CMA 加随机延时后完全不封（实测）", "ONE 补映射后数据链路恢复（日志 origin_type 缺 key 定位）"],
+        "result": "14 家站点稳定抓取 + 演进路线图"
+      },
+      "boundary": "反爬手段仅用于公司业务授权的船司数据查询，不涉及绕过付费墙/恶意抓取；OOCL 滑块方案为团队既有，本人参与维护。",
+      "risk_notes": ["面试中注意措辞：反爬应对是工程容错叙事，避免被误解为攻击性话题"],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-intern-004",
+      "source_fact": "XTS 报告接入：search_type 框架（SearchType 枚举 + 船司 SUPPORTED_SEARCH_TYPES 能力声明 + carriers.yaml default_search_type 行为配置）+ 紫/红 BL 重试（_find_retry_candidates + force_rescrape 只存非空防毒化）+ poe/poe_eta 中转港日期；设计文档 2026-08-13 评审稿；配置驱动使新报告零代码接入。",
+      "candidate_wording": "参与 XTS 在途报告接入的搜索框架设计：SearchType 能力声明与行为配置分离、异常行自动升级 BL 搜索 + 绕缓存重试（只存非空防坏缓存）",
+      "sources": [
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/CodeLearning/MYM Report/technical-decisions/search-type.md", "public": false, "note": "设计文档 2026-08-13 评审稿 + 代码落地" }
+      ],
+      "responsibility_level": "参与",
+      "verification_status": "待确认",
+      "allowed_uses": [],
+      "interview_details": {
+        "decisions": ["能力放代码、行为放配置（防两处漂移）", "重试轮 force_rescrape + 只保存非空结果（防空结果冲掉好缓存）"],
+        "difficulties": ["配置变更带来测试/模板漂移（XTS 4 个失败测试为活例）——配置与测试基线需同步"],
+        "verification": ["确认本人是否为设计文档执笔者（是→改『主导设计』）", "git log search-type 相关 commit 作者归属"],
+        "result": null
+      },
+      "boundary": "角色边界待确认：设计文档执笔人 vs 参与评审者——确认前只写『参与设计』。",
+      "risk_notes": ["【待确认】设计文档是否本人执笔——决定『主导』还是『参与』的动词等级"],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-intern-005",
+      "source_fact": "F&A 工作台前端：yusheng/feat-ticket-pdf 分支——AI 识别字段置信度展示（服务端平行 confidence dict 结构 + 无 confidence dict 兜底防白屏 + 回归单测覆盖异常形状）、PDF 分屏对照/平移高亮、筛选记忆、详情态进 URL；已合并入远程并部署。",
+      "candidate_wording": "AI 发票识别工作台前端：AI 字段旁展示置信度（结构化兜底防脏数据白屏），PDF 分屏对照与逐字段比对的可解释交互；功能已合并部署",
+      "sources": [
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/CodeLearning/ReportAutomation-FNA工作台前端与部署排障-2026-08-19.md §1", "public": false },
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/devlogs/Report_Automation/2026-08-26-fna-deploy-troubleshooting.md", "public": false, "note": "线上部署排障记录" }
+      ],
+      "responsibility_level": "负责模块",
+      "verification_status": "已确认",
+      "allowed_uses": ["AI 应用岗简历（AI 提取+人工确认场景）", "面试"],
+      "interview_details": {
+        "decisions": ["置信度从父对象平行 dict 取（非叶子对象内嵌）——查库确认真实结构而非按口述实现", "金额字段强制手填不预填 AI 值（机器值不可直接入账）"],
+        "difficulties": ["部分 ticket 无 confidence dict（TK-361）——整体 try/catch + confidenceText(null)='' 防白屏 + 单测覆盖『异常形状』"],
+        "verification": ["合并部署记录（devlogs 2026-08-26：8001 生产部署）", "构建产物 grep 验证修复烙进 bundle"],
+        "result": "AI 值 + 置信度 + 人工终值三重可解释展示上线"
+      },
+      "boundary": "DocAgent 模型与 field_config 机制为 SDU 团队/团队既有方案，本人负责前端工作台功能与展示层。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-intern-006",
+      "source_fact": "离线部署工程化：内网 Windows 服务器零网络部署——pip download wheelhouse 离线依赖 + playwright install 离线浏览器 + install.bat；配置外置（config.py 写死路径是两套包根因 → 外部 config.yaml，12-Factor）；定位部署双重前缀登录 404（config.js 相对路径变 /fnaworkbench/fnaworkbench/，diff 锁定单行根因）；Vue 构建产物进 Git 的离线部署策略。",
+      "candidate_wording": "内网零网络环境部署工程化：离线 wheelhouse + 配置外置（一份包 N 份配置消除测试/生产两套包）；定位并修复部署双重前缀登录 404（构建产物 diff 锁定单行根因）",
+      "sources": [
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/实习记录-2026-06-29_至_07-14.md §1.6（记录 30-31）+ cicd-实习日记.md + FNA 排障记录 §4/§5", "public": false }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["Java 后端岗简历（部署/配置管理）", "两岗面试"],
+      "interview_details": {
+        "decisions": ["离线环境下 dist 产物提交 Git（违背常规但内网最可靠，hash 文件名解决缓存）", "配置外置 = 12-Factor Config 原则，一份包 + N 份配置"],
+        "difficulties": ["相对 vs 绝对 URL 是带子路径部署的高发坑——修完要 grep bundle 验证修复烙进产物", "服务器多 uvicorn 实例时确认 nginx 反代指向"],
+        "verification": ["新 bundle 验证到 var sV=/fnaworkbench（API 前缀绝对化）", "git pull 冲突按 checkout+clean 清理后部署成功"],
+        "result": "测试/生产统一一套包；部署回归从『猜』变为 diff 定位"
+      },
+      "boundary": "Windows 离线部署（非容器化/K8s）；配置外置方案为本人提出与实施。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-intern-006b",
+      "source_fact": "「监控看板/user_feedback 拆表重构/parse_error 动态 JOIN」等数据治理工作由同事 godtree 主导（master 07-22~07-27 提交记录），本人为学习观察视角；本人不主张此部分。",
+      "candidate_wording": "（不进简历；面试中可作为『我了解系统监控反馈闭环设计』的知识储备）",
+      "sources": [
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/monitor-dashboard-实习日记.md", "public": false, "note": "标题明确标注『godtree 主导』" }
+      ],
+      "responsibility_level": "参与",
+      "verification_status": "不采用",
+      "allowed_uses": [],
+      "interview_details": {
+        "decisions": [],
+        "difficulties": [],
+        "verification": ["被问『监控看板谁做的』时如实答同事主导，本人学习了拆表/状态归一思路"],
+        "result": null
+      },
+      "boundary": "严禁写成个人成果——他人主导工作冒领是简历最大诚信风险。",
+      "risk_notes": ["此条为防冒领标记，非可写主张"],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-intern-007",
+      "source_fact": "船司 API 调研：11 家船司官方 API 调研，8 家有官方 REST API（ONE/CMA/HMM/ZIM 对齐 DCSA T&T 标准）；三梯队演进方案（第一梯队弃爬改 API、第二梯队爬虫优化+商务申请、第三梯队无 API 只能爬虫）；聚合平台免费额度调研（生产级需付费）。",
+      "candidate_wording": "调研 11 家船司官方 API 可用性，产出『弃爬改 API』三梯队演进方案（8 家有 DCSA 标准接口）",
+      "sources": [
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/实习记录-2026-06-29_至_07-14.md 记录 27-28", "public": false }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["两岗面试（技术判断力展示）", "AI 岗（工具选型思维）"],
+      "interview_details": {
+        "decisions": ["优化爬虫前先确认官方 API——『弃爬改 API』一次性消灭等待/验证码/反爬", "DCSA 标准让多家船司可共用统一客户端"],
+        "difficulties": ["聚合平台『免费』标签误导：多数一次性试用不按月刷新，生产级最低 $15/月"],
+        "verification": ["逐家官网/文档调研记录（含 10 家聚合平台对比）"],
+        "result": "演进路线图（调研结论供团队决策）"
+      },
+      "boundary": "调研成果与建议，非已落地的迁移（迁移在第二/三梯队计划中）。",
       "risk_notes": [],
       "last_verified": "2026-08-28"
     }
