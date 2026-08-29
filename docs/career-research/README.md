@@ -1,11 +1,12 @@
 # 就业市场调研档案（2026-08-26）
 
-> 背景：为「AgentFlow 写上简历」做的三线调研 + 综合成稿。调研方法：3 个并行调研线（招聘平台 JD / 牛客一手帖 / GitHub API 核实），本地素材来自 `docs/developer-notes/00-interview-arsenal.md` 与 `docs/learning/Agentflow-code/` 学习档案。
+> 背景：为「AgentFlow 写上简历」做的三线调研 + 综合成稿 + /asu 亮点酥化。调研方法：3 个并行调研线（招聘平台 JD / 牛客一手帖 / GitHub API 核实），本地素材来自 `docs/developer-notes/00-interview-arsenal.md` 与 `docs/learning/Agentflow-code/` 学习档案 + `docs/business/` 业务流程文档。
 
 ## 文档导览
 
 | 文档 | 内容 | 核实状态 |
 |---|---|---|
+| [00-agentflow-highlights-asu.md](00-agentflow-highlights-asu.md) | /asu 酥化成稿：7 条主 bullet（引擎/恢复/HITL/Kafka/适配器/安全/质量）+ 两版 HR 开场白 + 主张审计表 | 与 claim-ledger 一一对应（2026-08-29） |
 | [01-job-market-jd-analysis.md](01-job-market-jd-analysis.md) | 7 份完整 JD 的技能要求汇总、AgentFlow 命中/缺口清单、薪资基准、投递方向匹配度判断 | 猎聘一手（2026-08-26 实时在招） |
 | [02-resume-writing-guide.md](02-resume-writing-guide.md) | 过筛写法 11 条、雷区 10 条、AI 时代可信度分层、造轮子定位、面试官原话摘录 | 牛客一手帖（含阿酥事件后验真升级） |
 | [03-undergrad-authenticity-check.md](03-undergrad-authenticity-check.md) | Spring AI/LangChain4j/Spring AI Alibaba 团队真相、学生先例、AI 辅助时代结论、验真手段 | GitHub API 现场核实；学生先例/英文舆论为模型知识（已标注） |

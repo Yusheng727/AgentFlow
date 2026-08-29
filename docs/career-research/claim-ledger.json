@@ -219,23 +219,23 @@
     },
     {
       "id": "claim-intern-001",
-      "source_fact": "实习项目 Report Automation（货代报表自动化）：Python/FastAPI/Playwright/pandas，14 家船司爬虫 + 6 步 Excel 流水线，服务 Meiyume Sourcing 团队；系统为接手的存量系统（十几万行），实习期 2026.06 至今，个人分支 yusheng/feat-*。",
-      "candidate_wording": "Meiyume ｜ 货代报表自动化系统（实习 2026.06–至今）：14 家船司网站数据抓取 → 标准化 → Excel 报告回填的自动化平台【待补：公司主体正式名称】",
+      "source_fact": "实习项目 Report Automation（货代报表自动化）：Python/FastAPI/Playwright/pandas，14 家船司爬虫 + 6 步 Excel 流水线，服务 Meiyume Sourcing 团队；系统为接手的存量系统（十几万行），实习期 2026.06 至今，个人分支 yusheng/feat-*。公司主体：利臻咨询服务中心（digital team），用户 2026-08-28 确认。",
+      "candidate_wording": "利臻咨询服务中心（Digital Team）｜ 货代报表自动化系统（实习 2026.06–至今）：14 家船司网站数据抓取 → 标准化 → Excel 报告回填的自动化平台，服务 Meiyume Sourcing 团队",
       "sources": [
         { "type": "document", "location": "C:/Users/Yusheng/intern-diary/CodeLearning/MYM Report/system-overview.md + XTS Report/system-overview.md", "public": false, "note": "report_automation@d2edb7b 代码分析" },
         { "type": "document", "location": "C:/Users/Yusheng/intern-diary/实习记录-2026-06-29_至_07-14.md", "public": false, "note": "主线实习工作记录" }
       ],
       "responsibility_level": "参与",
-      "verification_status": "待确认",
-      "allowed_uses": [],
+      "verification_status": "已确认",
+      "allowed_uses": ["两岗简历", "HR 开场白", "面试自我介绍"],
       "interview_details": {
-        "decisions": [],
-        "difficulties": [],
-        "verification": ["公司主体与部门名称以正式 offer/合同为准，确认前不进简历"],
-        "result": null
+        "decisions": ["接手型项目的贡献叙事：不写『搭建系统』，写『在既有系统上做了什么改变』"],
+        "difficulties": ["接手十几万行代码的冷启动：CodeGraph + Explore 子代理梳理业务，产出三层文档（业务入门/桥接/技术全图）"],
+        "verification": ["公司主体/部门已由用户确认（利臻咨询服务中心 Digital Team）", "实习期 2026.06 起，日记时间线吻合"],
+        "result": "在职实习，产出持续可查"
       },
-      "boundary": "系统整体架构为接手的存量系统，不主张搭建者身份。",
-      "risk_notes": ["成稿前置阻塞项：公司名称确认", "系统规模（十几万行）如实交代为接手"],
+      "boundary": "系统整体架构为接手的存量系统，不主张搭建者身份；各功能模块均有辅助开发参与，主导与辅助分层标注。",
+      "risk_notes": [],
       "last_verified": "2026-08-28"
     },
     {
@@ -342,22 +342,23 @@
     },
     {
       "id": "claim-intern-006b",
-      "source_fact": "「监控看板/user_feedback 拆表重构/parse_error 动态 JOIN」等数据治理工作由同事 godtree 主导（master 07-22~07-27 提交记录），本人为学习观察视角；本人不主张此部分。",
-      "candidate_wording": "（不进简历；面试中可作为『我了解系统监控反馈闭环设计』的知识储备）",
+      "source_fact": "监控看板/user_feedback 拆表重构/parse_error 动态 JOIN 等数据治理工作：同事 godtree 主导实现（master 07-22~07-27 提交记录），用户 2026-08-28 澄清本人有辅助开发参与；本人另有从该阶段提炼的『通用工程实践』学习产出（数据库迁移套路/派生列模式/contextvars/子进程异步任务模型）。",
+      "candidate_wording": "（简历弱写或以团队口径写：参与监控看板与数据质量反馈闭环的辅助开发；面试可讲从中提炼的可迁移工程模式）",
       "sources": [
-        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/monitor-dashboard-实习日记.md", "public": false, "note": "标题明确标注『godtree 主导』" }
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/monitor-dashboard-实习日记.md", "public": false, "note": "标题标注『godtree 主导』" },
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/通用工程实践-实习日记.md", "public": false, "note": "本人提炼的七类可迁移模式" }
       ],
       "responsibility_level": "参与",
-      "verification_status": "不采用",
-      "allowed_uses": [],
+      "verification_status": "已确认",
+      "allowed_uses": ["面试知识储备（不作为个人主导成果）"],
       "interview_details": {
-        "decisions": [],
+        "decisions": ["被问『监控看板谁做的』：如实答同事主导、本人辅助参与并从中学习——『我了解它的设计并能讲出为什么这么做』"],
         "difficulties": [],
-        "verification": ["被问『监控看板谁做的』时如实答同事主导，本人学习了拆表/状态归一思路"],
+        "verification": ["派生列模式（可推导状态不落库）/子进程+文件系统任务模型两项可直接讲透"],
         "result": null
       },
-      "boundary": "严禁写成个人成果——他人主导工作冒领是简历最大诚信风险。",
-      "risk_notes": ["此条为防冒领标记，非可写主张"],
+      "boundary": "主导者署 godtree；本人定位为辅助开发 + 模式提炼者，不作个人主导成果展示。",
+      "risk_notes": [],
       "last_verified": "2026-08-28"
     },
     {
@@ -377,6 +378,109 @@
         "result": "演进路线图（调研结论供团队决策）"
       },
       "boundary": "调研成果与建议，非已落地的迁移（迁移在第二/三梯队计划中）。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-intern-008",
+      "source_fact": "OOCL Cloudflare Turnstile 绕过（commit 93673fa，2026-07-16）：Turnstile checkbox 嵌套跨域 iframe + Shadow DOM，DOM 方案不可达；方案 = OpenCV 模板匹配（全页截图 → 匹配 Turnstile 框 → 裁剪 ROI → 匹配 checkbox → 人类化点击），纯视觉定位绕过 iframe/Shadow DOM 限制；三层回退链（OpenCV 优先 → frame_locator → shadowRoot 递归穿透）。",
+      "candidate_wording": "OOCL 站点 Cloudflare Turnstile 应对：跨域 iframe + Shadow DOM 下 DOM 方案不可达，改用 OpenCV 视觉模板匹配定位复选框 + 人类化点击，设计三层回退链保证降级可用",
+      "sources": [
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/oocl-cloudflare-turnstile-bypass.md", "public": false, "note": "来源提交 93673faa（fix:oocl cf验证修改）" }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["AI 岗面试（视觉方案取舍叙事）", "两岗面试"],
+      "interview_details": {
+        "decisions": ["纯视觉定位不依赖 DOM/JS——一次绕过跨域 iframe 与 Shadow DOM 两层限制", "参考 Kameleo 开源方案的思路再按站点适配（亮/暗两套模板 + 双阈值）"],
+        "difficulties": ["此前 cf_clearance cookie + stealth 方案（bc577fb）带自动化指纹经常被拦——稳定性不够才换视觉路线"],
+        "verification": ["commit 93673fa 落地（fix:oocl cf验证修改、whl去掉bl_no搜索）", "confidence ≥0.6（框）/≥0.5（checkbox）双阈值"],
+        "result": "OOCL 抓取恢复稳定"
+      },
+      "boundary": "用于公司业务授权的船司数据查询（正常验证通过场景），非攻击性绕过；回退链中 DOM 方案为团队既有，视觉方案为主增量。",
+      "risk_notes": ["面试措辞：讲『验证码场景的工程容错』而非『破解』"],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-intern-009",
+      "source_fact": "n8n 连 SharePoint 自动化 POC（2026-07-28，POC 下载+上传均验证成功，部门内首次打通）：无租户管理员权限 → Entra ID 应用注册 + 委托权限（Files.ReadWrite.All + offline_access）+ 管理员同意审批；混合路线（下载走 HTTP Request 打 SharePoint REST 按路径取二进制绕开内置节点级联选择器、上传走内置 SharePoint 节点支持文件名表达式）；定位内置节点与 HTTP Request 认证 audience 不一致的隐蔽坑（token audience 是 SharePoint 非 Graph）。",
+      "candidate_wording": "部门内首次打通 n8n 与 SharePoint 的文件自动化链路（OAuth2 委托权限 + REST/内置节点混合路线），支撑『业务上传 → 程序处理 → 结果回传』的每日自动化",
+      "sources": [
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/N8N_SHAREPOINT_INTEGRATION.md", "public": false, "note": "作者署名 Yusheng Wang，POC 已跑通" }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["AI 应用岗简历（工作流自动化）", "两岗面试"],
+      "interview_details": {
+        "decisions": ["无管理员 → 委托权限（以用户身份访问 + offline_access 续期），管理员同意走审批流程", "下载/上传分别选 REST 与内置节点——按『动态文件名表达式』与『固定 GUID』的能力差异混合"],
+        "difficulties": ["内置 SharePoint 节点（Graph audience）与 HTTP Request 打 Graph 报 401 Invalid audience——token audience 是 SharePoint，HTTP Request 只能打 _api/ REST", "Subdomain 只填子域（填完整域名/带协议都 ENOTFOUND）"],
+        "verification": ["下载 + 上传 POC 双向验证成功", "按当天日期算文件名（$now.format('yyyyMMdd')）动态取文件"],
+        "result": "部门内首个可复用的 SharePoint 自动化模板（含 10 节踩坑排错指南）"
+      },
+      "boundary": "货运工具 API 编排/点火脚本/Teams 告警属后续环节（文档明确不在本 POC 范围）。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-intern-010",
+      "source_fact": "AI 发票识别工作台（F&A，DocAgent 多模态方案）：AI 提取 10 字段 → Maker 人工核对（金额强制手填）→ Checker 独立复核 → 过账的 7 态双控闭环；可解释三件套（PDF 分屏对照/AI vs 人工逐字段比对/Notes 追溯）；% Captured（识别覆盖率）与复核准确率（采信率）分指标度量；extraction_job 落库（execution_id/attempt/error/结果快照四要素）；field_config 配置驱动（字段+AI 提示词+必查+金额标记集中维护）。本人负责前端双控工作台功能（置信度展示/PDF 平移/筛选记忆等，见 claim-intern-005），方案与数据模型为团队设计、本人辅助开发。",
+      "candidate_wording": "参与 AI 发票识别 + 人工双控过账工作台（多模态提取 → Maker/Checker 双控 → 7 态状态机）：负责前端置信度展示、PDF 对照等可解释交互；理解并实践『AI 草稿 + 人工裁决 + 全程可追溯』的高风险 AI 落地范式",
+      "sources": [
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/Invoice-PDF智能识别-实习日记.md", "public": false, "note": "PRD/原型/SQL/docagent skill 全套分析" },
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/CodeLearning/ReportAutomation-FNA工作台前端与部署排障-2026-08-19.md", "public": false, "note": "本人前端实现记录" }
+      ],
+      "responsibility_level": "负责模块",
+      "verification_status": "已确认",
+      "allowed_uses": ["AI 应用岗简历（核心 AI 场景 bullet）", "面试"],
+      "interview_details": {
+        "decisions": ["不走 OCR+正则，接 DocAgent 多模态——核心卖点不是识别准，而是识别规则（提示词）可配置可维护", "金额字段强制手填不预填 AI 值——机器值不可直接入账（设计如此，拉低采信率是预期）", "% Captured 与复核准确率分开度量——『有没有认出』与『认的对不对』是两个指标"],
+        "difficulties": ["AI/耗时任务一律『创建→轮询』异步模式，execution_id 必须持久化（服务重启可续查）", "对接外部 AI 服务四要素落库：执行凭据/尝试次数/错误原因/结果快照"],
+        "verification": ["本人前端功能已合并部署（claim-intern-005 链）", "7 态状态机 + 免复核 group 分流逻辑可完整讲出"],
+        "result": "工作台上线运行，AI 提取 + 人工双控闭环成立"
+      },
+      "boundary": "DocAgent 模型与 field_config 方案为 SDU/团队；本人主导前端工作台功能，辅助其余环节——分工分层如实标注。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-intern-011",
+      "source_fact": "子进程异步任务模型与产物治理（req-cicd-003/005，commit 673cd28/6817386，07-15~07-21 本人实现）：Web API 用子进程 + 日志文件跑 5-30 分钟流水线（非线程内存态）——stdout 写 output/{result_id}.log、前端轮询 PROGRESS 标记解析进度条、poll() 判 running 兼顾崩溃检测、CREATE_NEW_PROCESS_GROUP 防 Windows reload 杀子进程、时间戳 result_id 天然排序；产物命名加 result_id 后缀（CLI 无 env 回退无后缀）+ 7 天自动清理 + /api/history 扫磁盘推导状态（服务重启不丢）。",
+      "candidate_wording": "实现长任务异步执行与产物治理：子进程 + 日志文件做任务状态存储（重启不丢）、结构化日志标记驱动前端进度条、产物按 result_id 归档 + 7 天自动清理 + 历史记录磁盘推导",
+      "sources": [
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/cicd-实习日记.md 日记二/三（07-15~07-21 提交记录）", "public": false },
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/通用工程实践-实习日记.md §七", "public": false, "note": "本人提炼的可迁移模式" }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["Java 后端岗简历（异步任务/可靠性）", "两岗面试"],
+      "interview_details": {
+        "decisions": ["子进程而非线程：崩溃不影响主服务，文件系统做状态存储胜过内存字典", "零依赖任务通信：stdout PROGRESS 标记 + 前端轮询，比 WebSocket/SSE 简单可靠", "CLI 无 env 回退无后缀名——不强制 CLI 用户设置 RESULT_ID"],
+        "difficulties": ["uvicorn reload 的 Ctrl+C 会传播杀子进程——CREATE_NEW_PROCESS_GROUP 隔离（Windows 特有坑）", "崩溃检测靠 poll() 非 None——正常退出与崩溃统一为 running=false"],
+        "verification": ["commit 6817386（req-cicd-003/005 实现计划）+ 371 行执行记录", "mock 文件时间戳验证清理逻辑（不等真实 7 天）"],
+        "result": "任务可追溯（每次运行完整记录）、可下载、自动清理"
+      },
+      "boundary": "Windows 单机部署形态（非分布式任务队列）；设计模式与本人实现，需求编号 req-cicd-003/005 为本人登记实现。",
+      "risk_notes": [],
+      "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-intern-012",
+      "source_fact": "文档驱动开发工作流（学习并参与团队实践）：『改文档 → AI 读 → 改代码 → 回写文档』闭环，文档是唯一真相源；CLAUDE.md 路由总纲（≤80 行）+ 每模块 as-built 文档（人写需求节 + AI 回写映射表节）+ 4 个 Python hook 强制约束（route-by-tag/check-precondition/check-shared-read/check-doc-writeback）+ 3 个专用 subagent；hook 用 .py 比 .sh 强类型可调试；正式文档写完必须 Reader Testing（无上下文子 agent 重读查歧义）。",
+      "candidate_wording": "实践文档驱动 + AI 协作开发工作流：需求以文档为唯一真相源，hook 强制『改代码必回写文档』防漂移，AI 子代理按模块路由——参与该工作流的日常使用与文档维护",
+      "sources": [
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/report-automation-文档驱动开发学习笔记.md", "public": false, "note": "2026-07-10~07-15 提交记录整理" },
+        { "type": "document", "location": "C:/Users/Yusheng/intern-diary/实习记录-2026-06-29_至_07-14.md 记录 32-35", "public": false }
+      ],
+      "responsibility_level": "参与",
+      "verification_status": "已确认",
+      "allowed_uses": ["AI 应用岗面试（AI 辅助工程化叙事）", "两岗面试"],
+      "interview_details": {
+        "decisions": ["平铺不分层（共享管道跨三层，分层嵌套让跨层契约无处安放）", "soft 约束要配 hook 硬约束防 AI 跳过", "并行子代理派发必须禁止嵌套派发（层级过深被系统 kill）"],
+        "difficulties": ["Reader Testing 发现作者太熟看不见的错误（计数互换/重复行号/编号断裂）——正式文档必须有独立读者校验"],
+        "verification": ["4 hook + 3 subagent 架构可完整画出", "hook 抢 commit 的『截胡』排障经验（FNA 记录 §3）"],
+        "result": "AI 辅助下多人协作的文档-代码一致性保障"
+      },
+      "boundary": "工作流框架为团队/带教建立，本人为日常使用者与文档维护者（+按此模式产出三层学习文档）；不主张框架发明者。",
       "risk_notes": [],
       "last_verified": "2026-08-28"
     }
