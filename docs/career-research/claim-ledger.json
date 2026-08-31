@@ -6,7 +6,7 @@
       "AI 应用开发（Agent 方向）",
       "Java 后端开发"
     ],
-    "updated_at": "2026-08-28（第二批：实习项目 Report Automation 主张新增）"
+    "updated_at": "2026-08-29（第三批：AgentFlow UI 主张新增）"
   },
   "claims": [
     {
@@ -216,6 +216,27 @@
       "boundary": "本机 Docker 部署验证，非生产集群运维经验。",
       "risk_notes": [],
       "last_verified": "2026-08-28"
+    },
+    {
+      "id": "claim-agentflow-011",
+      "source_fact": "React UI 6 Tab（看板/提交编辑器/工作流定义/Pipeline 可视化/诊断/审批中心）：React 18 + TypeScript strict + Vite + Tailwind + Vitest 33 测试；api.ts 读操作 mock fallback（5s 超时降级演示数据）写操作不 fallback（5xx/toast 报错防假成功）；修复 AWAITING_APPROVAL 被 `as WorkflowStatusUi` 强转静默丢状态的真 bug（看板第四列「待审批」+ 卡片「去审批」按钮直达审批中心）；PipelineView 按 BSP super-step 分组渲染（barrier 可视）。",
+      "candidate_wording": "React 6 Tab 交付门面：读操作 mock fallback 保演示不白屏、写操作不 fallback 防假成功；顺带修复 `AWAITING_APPROVAL` 被 `as` 强转静默丢状态的真 bug——看板「待审批」列 + 直达审批中心",
+      "sources": [
+        { "type": "source_code", "location": "agentflow-ui/src/api.ts + src/components/", "public": true, "note": "降级纪律 + Vitest 33 测试" },
+        { "type": "document", "location": "docs/developer-notes/00-interview-arsenal.md（前端 React UI 节）", "public": true, "note": "KTD-1 决策与深挖钩子" }
+      ],
+      "responsibility_level": "主导方案或交付",
+      "verification_status": "已确认",
+      "allowed_uses": ["两岗简历（投递前端/全栈方向时前置）", "面试（演示诚实性 + as 强转教训两条叙事）"],
+      "interview_details": {
+        "decisions": ["读降级/写不降级：写操作 5xx 走 mock 是假成功——与 retry/审批决策同纪律", "as 强转丢枚举：AWAITING_APPROVAL lookup undefined、状态列空白——第四列独显"],
+        "difficulties": ["KTD-1 mock fallback 的边界要划清：演示可用 vs 生产诚实"],
+        "verification": ["UI Vitest 33 测试绿 + tsc strict 构建绿（npm run build）"],
+        "result": "6 Tab 门面 + 审批中心闭环"
+      },
+      "boundary": "内部工具门面 SPA（非 SSR），不写全栈夸张词；被问「前端投入」时定位为交付门面。",
+      "risk_notes": ["简历投后端岗时此条可后移；「演示诚实性」叙事比技术栈名更值得讲"],
+      "last_verified": "2026-08-29"
     },
     {
       "id": "claim-intern-001",

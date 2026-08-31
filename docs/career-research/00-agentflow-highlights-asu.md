@@ -16,7 +16,7 @@
 - **真实环境端到端**：真实 DeepSeek key 跑通 REST→DSL→引擎→适配器→LLM→Prometheus 链路（真实 token 3000+、成本落 Grafana）；真 PG / 真 Kafka / 5 容器 Docker 部署全部实跑验证过。
 - **AI 辅助开发的工程闭环**：AI 写代码、本人做架构决策与质量把关——每轮多视角 code review 修复记录 + 全部决策/坑/教训沉淀进 `docs/developer-notes/` + `docs/business/`。
 
-## 三、项目亮点改写（七条主 bullet，按「动作→系统能力→业务价值→结果证据→个人边界」）
+## 三、项目亮点改写（八条主 bullet，按「动作→系统能力→业务价值→结果证据→个人边界」）
 
 ### 亮点 1：BSP 执行引擎 + 动态扩展（引擎核心）
 
@@ -74,6 +74,14 @@
 - **追问钩子**：「记账/告警非阻断，硬防护归提交守卫」分工决议；JaCoCo 驱补并发断言
 - **账本**：claim-agentflow-008 ｜ 数字策略：报「500+」不写精确数（随时点增长）
 
+### 亮点 8：React 交付门面（演示诚实性纪律）
+
+> React 18 + TypeScript + Vite 实现 6 Tab 交付界面（看板/提交/YAML 编辑器/Pipeline 可视化/诊断/审批中心）；读操作 mock fallback 保演示不白屏、**写操作不 fallback 防假成功**；顺带修复「`AWAITING_APPROVAL` 被 `as` 强转静默丢状态」的真 bug——看板单独「待审批」列 + 卡片直达审批中心。
+
+- **证据**：`agentflow-ui/`（Vitest 33 测试 + tsc strict 构建绿）；`api.ts` 读写降级纪律；PipelineView BSP super-step 分组
+- **追问钩子**：为什么「读降级、写不降级」——写操作 5xx 走 mock 是假成功（与 retry 同纪律）；`as WorkflowStatusUi` 静默丢枚举的教训
+- **账本**：claim-agentflow-011 ｜ 边界：内部工具门面 SPA（非 SSR/深层前端）；KTD-1 定位为「API 优先 + 降级保演示」，不写全栈夸张词
+
 ## 四、HR 开场白（两版）
 
 **短版（约 90 字）**：
@@ -82,7 +90,7 @@
 **完整版（约 140 字）**：
 > 您好，我是 27 届计算机科班应届生，方向是后端工程 + Agent 工程化。核心项目 AgentFlow：Java 21 从 0 实现 BSP 执行引擎 + 两级 Checkpoint 崩溃恢复（防 LLM 重复计费），扩动态路由/循环/Kafka 解耦/HITL 审批，双框架适配器（Spring AI + LangChain4j）实证可移植性。500+ 测试 / JaCoCo 80% 门禁 / CI 全绿，真实 DeepSeek 端到端验证。GitHub 公开可查，期待进一步交流。
 
-## 五、主张审计表（原始说法 → 建议写法 → 证据 → 边界 → 风险）
+## 五、主张审计表（原始说法 → 建议写法 → 证据 → 边界 → 风险，UI 主张见 #10）
 
 | # | 原始说法（痛点） | 建议写法（简历版） | 事实证据 | 个人边界 | 风险/待确认 |
 |---|---|---|---|---|---|
@@ -95,6 +103,7 @@
 | 7 | 「测试很多」 | 「500+ 测试 / JaCoCo 80% 门禁 / CI 全绿 + 成本两道防线」 | ci.yml + 提交守卫/预算 | 无压测数据 | 不编造延迟/吞吐数字 |
 | 8 | 「AI 辅助开发」 | （面试口径，不进简历正文）「AI 写代码，我做架构决策与质量把关」 | review 修复记录 + 真实环境验证 | 不虚构手写每行 | 诺姆四达 JD 列为加分项，主动说不回避 |
 | 9 | 「有真实 LLM 接入」 | 「真实 DeepSeek 端到端（token 3000+、成本落 Grafana）；env 读 key、缺 key fail-fast」 | DeepSeekE2eIT 实跑记录 | 门控 IT（无 key 跳过） | 凭证安全叙事一并讲 |
+| 10 | 「做了一个前端」 | 「React 6 Tab 门面 + 演示诚实性纪律（读降级/写不降级）+ 修复 AWAITING_APPROVAL 静默丢状态真 bug」 | agentflow-ui Vitest 33 + api.ts 降级纪律 + PipelineView BSP 分组 | 内部工具 SPA，不写全栈 | `as` 枚举强转丢状态的教训被追问时主动讲 |
 
 ## 六、证据补强清单与可能追问（U5/U7/U14 等单元另有深挖钩子，全索引见 `docs/developer-notes/00-interview-arsenal.md`）
 

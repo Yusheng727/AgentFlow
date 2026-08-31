@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>王永盛｜AI 应用 / Agent 开发 · 27 届计科</title><link rel="stylesheet" href="frame/base.css"></head>
+<body class="variant-blue-line variant-compact variant-two-column variant-two-page design-preview">
+<main class="resume-page" contenteditable="false">
+  <header class="resume-header">
+    <div class="identity"><h1>王永盛</h1><p class="headline">AI 应用开发 · Agent 工程化方向（27 届）</p><div class="contact-grid"><span>城市：杭州（可迁移）</span><span>电话：18948454835</span><span>邮箱：2150237860@qq.com</span><span>GitHub：github.com/Yusheng727</span></div></div>
+    <figure class="photo-frame"><img src="../fictional-resume-photo.png" alt="证件照（请替换）"></figure>
+  </header>
+  <div class="layout-two-column">
+    <div>
+      <section class="resume-section"><h2 class="section-title"><span>项目经历</span></h2>
+        <article class="entry"><div class="entry-head"><span class="date">2026.06–至今</span><strong class="org">AgentFlow — Java 原生 Multi-Agent 编排引擎</strong><strong class="role">个人项目</strong></div>
+          <ul class="bullet-list">
+            <li><strong>从 0 实现 BSP 执行引擎</strong>：YAML DSL 声明 DAG 经最长路径分层，Virtual Threads 层内并行 + barrier 确定性合并（免锁并发）；扩条件路由（when 谓词 + 可达性剪枝）与有界循环（回边）不破坏 BSP 不变量</li>
+            <li><strong>两级 Checkpoint 崩溃恢复</strong>：节点级完成即写防 LLM 重复计费 + 路由决策 BFS 重放；修复 4 名独立 reviewer 确认的两个正确性 P0（off-by-one/stray COMPLETED 防护）</li>
+            <li><strong>HITL 人工审批全链路</strong>：上下文快照随审批单落库（只含兄弟输出防恢复双跑），REST/Web UI 决策后重跑待批节点续跑；decidedBy 服务端推导防审计身份伪造</li>
+            <li><strong>双框架适配器</strong>：Spring AI 2.0 与 LangChain4j 收敛同一 AgentFunction 窄接口——core 零 LLM 框架依赖（构建级证明）+ RAG 扩展点引擎零改动；真实 DeepSeek 端到端（token 3000+ 落 Grafana）</li>
+            <li><strong>质量与安全</strong>：170+ commits / 500+ 测试 / JaCoCo 80% 门禁 / CI 全绿；工具授权（config ∪ DB）+ 5 列 AES-GCM 静态加密（生产 fail-closed）+ 提交守卫 422 硬拦截</li>
+          </ul>
+        </article>
+      </section>
+      <section class="resume-section"><h2 class="section-title"><span>实习经历</span></h2>
+        <article class="entry"><div class="entry-head"><span class="date">2026.06–至今</span><strong class="org">利臻咨询服务中心 · Digital Team</strong><strong class="role">货代报表自动化（Report Automation）</strong></div>
+          <ul class="bullet-list">
+            <li><strong>反爬与浏览器自动化攻坚</strong>：针对 14 家异构船司站点（SPA/整页/API/验证码各异）定制策略——OOCL 验证码改用 OpenCV 视觉模板匹配 + 三层回退；ZIM 真 Chrome + API 预热绕 Cloudflare；沉淀「数据加载机制 → 等待策略」决策矩阵</li>
+            <li><strong>爬虫稳定性重构</strong>：清理 142 处固定盲等替换为条件驱动等待（接口拦截/元素出现/AJAX 行数稳定）；多候选选择器合并单次等待，消除最坏 22s 串行探测</li>
+            <li><strong>AI 发票识别 + 人工双控工作台</strong>：AI 字段旁展示置信度（服务端平行 confidence 结构 + 兜底防白屏），PDF 分屏对照与 AI vs 人工逐字段比对的可解释交互</li>
+            <li><strong>工作流自动化（n8n × SharePoint）</strong>：部门内首次打通 n8n 与 SharePoint 文件链路；定位「内置节点与 HTTP Request 的 token audience 不一致」隐蔽坑</li>
+            <li><strong>离线部署与长任务工程化</strong>：内网零网络部署（离线 wheelhouse + 配置外置）；子进程 + 日志文件长任务模型（重启不丢记录、PROGRESS 驱动进度条）</li>
+          </ul>
+        </article>
+      </section>
+    </div>
+    <div class="side-card">
+      <section class="resume-section"><h2 class="section-title"><span>技能</span></h2>
+        <ul class="bullet-list">
+          <li><strong>后端</strong>：Java 21 / Spring Boot 4.1 / Spring AI 2.0 / LangChain4j / PostgreSQL / Kafka / Flyway</li>
+          <li><strong>Agent / LLM</strong>：RAG / Tool Calling / MCP / ReAct / Prompt Engineering（InterviewCoach）</li>
+          <li><strong>工程实践</strong>：JaCoCo 80% 门禁 / GitHub Actions CI / Kafka 幂等 / Micrometer + Grafana</li>
+          <li><strong>Python</strong>：FastAPI / Playwright / pandas（实习）</li>
+          <li><strong>工具</strong>：Git / Maven / Docker / Vue 3 / Vite</li>
+        </ul>
+      </section>
+      <section class="resume-section"><h2 class="section-title"><span>教育背景</span></h2>
+        <article class="entry"><div class="entry-head"><span class="date">2023.09–2027.06</span><strong class="org">双一流高校（211）</strong><strong class="role">计算机科学与技术 本科</strong></div>
+          <ul class="bullet-list"><li>27 届应届（2027 年 6 月毕业）；英语 CET-6</li></ul>
+        </article>
+      </section>
+      <section class="resume-section"><h2 class="section-title"><span>校园与荣誉</span></h2>
+        <ul class="bullet-list"><li>项目：ToyRush 高并发电商（JVM/Redis 缓存优化）、InterviewCoach AI 面试教练（ReAct 工程化 + Tool Calling）</li><li>技术分享：Claude Code / GitHub Copilot 实践；简历成稿前经历 10 persona 多视角 code review 修复闭环</li></ul>
+      </section>
+    </div>
+  </div>
+</main>
+</body></html>
