@@ -240,7 +240,7 @@
     },
     {
       "id": "claim-intern-001",
-      "source_fact": "实习项目 Report Automation（货代报表自动化）：Python/FastAPI/Playwright/pandas，14 家船司爬虫 + 6 步 Excel 流水线，服务 Meiyume Sourcing 团队；系统为接手的存量系统（十几万行），实习期 2026.06 至今，个人分支 yusheng/feat-*。公司主体：利臻咨询服务中心（digital team），用户 2026-08-28 确认。",
+      "source_fact": "实习项目 Report Automation（货代报表自动化）：Python/FastAPI/Playwright/pandas，14 家船司爬虫 + 6 步 Excel 流水线，服务 Meiyume Sourcing 团队；系统为接手的存量系统（几万行），实习期 2026.06 至今，个人分支 yusheng/feat-*。公司主体：利臻咨询服务中心（digital team），用户 2026-08-28 确认。",
       "candidate_wording": "利臻咨询服务中心（Digital Team）｜ 货代报表自动化系统（实习 2026.06–至今）：14 家船司网站数据抓取 → 标准化 → Excel 报告回填的自动化平台，服务 Meiyume Sourcing 团队",
       "sources": [
         { "type": "document", "location": "C:/Users/Yusheng/intern-diary/CodeLearning/MYM Report/system-overview.md + XTS Report/system-overview.md", "public": false, "note": "report_automation@d2edb7b 代码分析" },
@@ -251,7 +251,7 @@
       "allowed_uses": ["两岗简历", "HR 开场白", "面试自我介绍"],
       "interview_details": {
         "decisions": ["接手型项目的贡献叙事：不写『搭建系统』，写『在既有系统上做了什么改变』"],
-        "difficulties": ["接手十几万行代码的冷启动：CodeGraph + Explore 子代理梳理业务，产出三层文档（业务入门/桥接/技术全图）"],
+        "difficulties": ["接手几万行代码的冷启动：CodeGraph + Explore 子代理梳理业务，产出三层文档（业务入门/桥接/技术全图）"],
         "verification": ["公司主体/部门已由用户确认（利臻咨询服务中心 Digital Team）", "实习期 2026.06 起，日记时间线吻合"],
         "result": "在职实习，产出持续可查"
       },

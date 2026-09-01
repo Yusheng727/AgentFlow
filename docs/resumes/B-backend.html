@@ -139,7 +139,7 @@
       <div class="company">
         <img class="company-logo" src="../career-research/resume/agentflow-resume/icons/graduation-cap.svg" alt="教育图标">
         <div class="company-name education-name">双一流高校（211）<span class="education-major">· 计算机科学与技术 · 本科（27 届）</span></div>
-        <div class="company-meta">2023.09 - 2027.06 ｜ CET-6</div>
+        <div class="company-meta">2023.09 - 2027.06 ｜ CET-4</div>
       </div>
     </section>
 
@@ -151,11 +151,10 @@
       </div>
       <article class="project">
         <div class="project-title">货代报表自动化平台（Report Automation）｜FastAPI + Playwright + 数据流水线 + 监控看板</div>
-        <div class="lead">在既有系统（十几万行 Python 代码）上主导四个模块的改造——爬虫稳定性 / 反爬攻坚 / 长任务异步模型 / 部署工程化，全部为「没有这部分会不一样」的可辩护差异；另深度参与 AI 发票工作台后端。</div>
+        <div class="lead">在既有系统（几万行 Python 代码）上主导四个模块的改造——长任务异步模型 / 监控看板 / 反爬攻坚 / 部署工程化，全部为「没有这部分会不一样」的可辩护差异；另深度参与 AI 发票工作台后端。</div>
         <ul>
           <li><strong>数据管道与长任务异步模型（主导）：</strong>子进程 + 日志文件承载 5-30 分钟 Excel 流水线——进程隔离崩溃不影响主服务、文件系统做状态存储（服务重启任务记录不丢）、stdout 结构化标记驱动前端进度条、产物按 result_id 归档 + 7 天自动清理；两层流水线（编排层 / 纯数据层 / 展示层）+ 分桶缓存（batch_key 隔离）+ 重试只存非空防坏数据污染好缓存。</li>
           <li><strong>监控看板与数据质量闭环（主导）：</strong>拆分监控表并建立派生列模式（可推导状态不落库）——抓取成功率 / 数据延迟 / 异常分布实时可视化，人工反馈落库驱动抓取规则迭代，形成「程序 vs 手工全列对比 → 反馈落库 → 看板观测」的数据质量闭环。</li>
-          <li><strong>爬虫稳定性重构（主导）：</strong>系统性清理 11 家船司脚本 142 处固定盲等，按站点数据加载机制（SPA / 整页 / API / 验证码）替换为条件驱动等待（接口响应拦截 / 元素出现 / AJAX 行数稳定判定）；多候选选择器合并单次等待，消除最坏 22 秒串行探测——抓取从「靠超时兜底」变为可判定成功失败。</li>
           <li><strong>反爬与浏览器自动化攻坚（主导）：</strong>OOCL 的 Cloudflare Turnstile 嵌套跨域 iframe + Shadow DOM、DOM 方案不可达，改用 OpenCV 视觉模板匹配定位复选框并设计三层回退链；ZIM 真 Chrome 通道 + API 预热 + 页面上下文 XHR 绕 Cloudflare 与 CORS；WHL 导出真人登录 Cookie 复用信誉跳过验证码——沉淀「数据加载机制 → 等待策略」决策矩阵。</li>
           <li><strong>部署工程化（主导）：</strong>内网 Windows 零网络环境部署——离线 wheelhouse + 配置外置（12-Factor，一份包 N 份配置消除测试/生产两套包）；定位并修复部署双重前缀登录 404（构建产物 diff 锁定单行根因）。</li>
           <li class="nested"><strong>AI 发票工作台（深度参与后端）：</strong>七态审批流为数据驱动状态机（流转规则存表，加环节不改代码只插配置）+ 双轨鉴权（Microsoft SSO 内省模式）+ 幂等键两层防重 + append-only 留痕审计；前端主导 PDF 字段级精准高亮可解释层，功能已合并部署。</li>
@@ -178,10 +177,10 @@
       </ul>
       <div class="company">
         <img class="company-logo" src="../career-research/resume/agentflow-resume/logos/github.svg" alt="GitHub Logo">
-        <div class="company-name">个人开源项目 · AgentFlow — Multi-Agent 编排引擎（工程深度背书）</div>
+        <div class="company-name">个人开源项目 · AgentFlow — Multi-Agent 编排引擎</div>
         <div class="company-meta">2026.06 - 至今 ｜ <a href="https://github.com/Yusheng727/AgentFlow" style="color:inherit;">github.com/Yusheng727/AgentFlow</a></div>
       </div>
-      <div class="lead">Java 21 从 0 实现 BSP 执行引擎：并发模型 / 分布式解耦 / 安全横切 / 质量闭环四条工程主线；13 Maven 模块、500+ 测试、JaCoCo 80% 门禁、CI 全绿，真 PostgreSQL / 真 Kafka / 真实 DeepSeek 三环境验证。</div>
+      <div class="lead">Java 21 从 0 实现 BSP 执行引擎：并发模型 / 分布式解耦 / 安全横切 / 质量闭环四条工程主线；13 Maven 模块、500+ 测试、JaCoCo 80% 门禁、CI 全绿，PostgreSQL / Kafka / DeepSeek 三环境验证。</div>
       <article class="project">
         <div class="project-title">并发模型设计（BSP 执行引擎）</div>
         <ul>
