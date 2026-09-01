@@ -151,7 +151,7 @@
       </div>
       <article class="project">
         <div class="project-title">货代报表自动化平台（Report Automation）｜FastAPI + Playwright + 数据流水线</div>
-        <div class="lead">在既有系统（十几万行）上主导四个模块的改造：爬虫稳定性 / 反爬攻坚 / 长任务异步模型 / 离线部署——所有产出都是「没有这部分会不一样」的可辩护差异。</div>
+        <div class="lead">在既有系统（十几万行 Python 代码）上主导四个模块的改造——爬虫稳定性 / 反爬攻坚 / 长任务异步模型 / 离线部署，全部为「没有这部分会不一样」的可辩护差异；另深度参与 AI 发票工作台后端。</div>
         <ul>
           <li><strong>数据管道与长任务异步模型（主导）：</strong>子进程 + 日志文件承载 5-30 分钟 Excel 流水线——进程隔离崩溃不影响主服务、文件系统做状态存储（服务重启任务记录不丢）、stdout 结构化标记驱动前端进度条、产物按 result_id 归档 + 7 天自动清理；两层流水线（编排层 / 纯数据层 / 展示层）+ 分桶缓存（batch_key 隔离）+ 重试只存非空防坏数据污染好缓存。</li>
           <li><strong>爬虫稳定性重构（主导）：</strong>系统性清理 11 家船司脚本 142 处固定盲等，按站点数据加载机制（SPA / 整页 / API / 验证码）替换为条件驱动等待（接口响应拦截 / 元素出现 / AJAX 行数稳定判定）；多候选选择器合并单次等待，消除最坏 22 秒串行探测——抓取从「靠超时兜底」变为可判定成功失败。</li>
@@ -165,12 +165,15 @@
     <section class="section">
       <h2 class="section-title">项目经历</h2>
       <div class="company">
-        <div class="company-name">个人项目 · ToyRush — 高并发玩具电商</div>
-        <div class="company-meta">SpringBoot + MySQL + Redis + Lua + Kafka + Caffeine + MyBatis-Plus</div>
+        <div class="company-name">个人项目 · ToyRush — 潮玩闪购与社区交流平台</div>
+        <div class="company-meta">技术栈：SpringBoot + MySQL + Redis + Lua + Kafka + Caffeine + MyBatis-Plus</div>
       </div>
+      <div class="lead">为用户提供潮玩限量秒杀、优惠券抢购、商家信息查询及社区交流功能，同时帮助商家精准推广潮玩优惠信息，打造潮玩爱好者的专属社区。</div>
       <ul>
-        <li><strong>性能优化：</strong>Redis 缓存直读优化 + Lua 脚本原子扣减防超卖；Caffeine 本地缓存 + Redis 分布式缓存组合，TTL 配合 Kafka 消息解决缓存一致性。</li>
-        <li><strong>异步化：</strong>Kafka 消息队列削峰下单流量、解数据库行锁与并发抢购冲突；Spring Task 定时任务处理超时未支付订单。</li>
+        <li><strong>秒杀防超卖与一人一单：</strong>使用 Redis 存储库存和订单信息，通过 Lua 脚本判断用户下单资格，保证库存不超卖且同一用户仅能下一单。</li>
+        <li><strong>秒杀流程异步优化：</strong>用户下单后使用 Kafka 消息队列异步处理库存扣减和订单生成，提高秒杀场景的并发性能。</li>
+        <li><strong>未支付订单自动关闭与并发控制：</strong>使用 Spring Task 定时任务扫描超时未支付订单，自动关闭并回滚库存。为防止支付回调与定时关单发生数据冲突，在订单表状态更新时引入乐观锁（版本号机制），确保支付和关单仅一个成功，避免资金或库存异常。</li>
+        <li><strong>多级缓存与数据一致性：</strong>采用 Caffeine 本地缓存 + Redis 二级缓存架构提升热点数据访问速度；结合逻辑过期方案防缓存击穿、缓存空值防穿透；更新数据库后删除缓存，配合消息队列补偿重试及 TTL 兜底，保证缓存与数据库最终一致性。</li>
       </ul>
       <div class="company">
         <img class="company-logo" src="../career-research/resume/agentflow-resume/logos/github.svg" alt="GitHub Logo">

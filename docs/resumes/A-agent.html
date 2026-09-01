@@ -150,11 +150,12 @@
         <div class="company-meta">2026.06 - 至今</div>
       </div>
       <article class="project">
-        <div class="project-title">货代报表自动化平台（Report Automation）｜14 家船司数据抓取 → 报告回填 · AI 发票工作台</div>
-        <div class="lead">实习主打「与不可控外部系统打交道」的真实生产手感：AI 提取不可信要人工双控兜底、船司站点反爬要换范式破冰——这正是 Agent 工程里「工具调用结果不可靠时的容错与可解释」同一问题的两个现场。</div>
+        <div class="project-title">货代报表自动化平台（Report Automation）｜AI 发票工作台 · 数据自动化</div>
+        <div class="lead">在真实生产环境（服务美妆供应链客户 Meiyume Sourcing 团队）实践 AI 落地与数据自动化：AI 提取不可信需人工双控兜底、外部 AI 服务与船司站点均为不可控外部依赖——容错、可解释、可追溯贯穿全部产出。</div>
         <ul>
-          <li><strong>AI 发票识别 + 人工双控工作台（主导前端可解释层）：</strong>发票 PDF 经外部 AI 提取字段后进入「制单核对 + 复核审批」双控过账的资金安全场景。基于 PDF 文本层坐标实现字段级精准高亮（值匹配四级降级链：精确 → 紧凑 → 跨空白正则 → 分词容错，坐标百分比化与缩放旋转解耦），复核员点开详情即见 AI 值在原件的位置；AI 置信度展示（服务端平行结构 + 无置信度兜底防白屏）、AI vs 人工逐字段差异比对弹窗前置提交——「AI 提取 + 人工确认 + 全程可追溯」的高风险 AI 落地范式，功能已合并部署。</li>
-          <li class="nested"><strong>后端深度参与：</strong>七态审批流为数据驱动状态机（流转规则存表、加环节不改代码只插配置）+ 双轨鉴权（Microsoft SSO 令牌无法本地验签，走「调官方接口证真再读声明」内省模式）。</li>
+          <li><strong>AI 发票识别 + 人工双控工作台（主导前端可解释层，深度参与后端集成）：</strong>发票 PDF 经外部 AI 服务（DocAgent 多模态）提取字段后进入「制单核对 + 复核审批」双控过账的资金安全场景。基于 PDF 文本层坐标实现字段级精准高亮（值匹配四级降级链：精确 → 紧凑 → 跨空白正则 → 分词容错，坐标百分比化与缩放旋转解耦），复核员点开详情即见 AI 值在原件的位置；AI 置信度展示（服务端平行结构 + 无置信度兜底防白屏）、AI vs 人工逐字段差异比对弹窗前置提交——「AI 提取 + 人工确认 + 全程可追溯」的高风险 AI 落地范式，功能已合并部署。</li>
+          <li class="nested"><strong>后端深度参与：</strong>七态审批流为数据驱动状态机（流转规则存表、加环节不改代码只插配置）+ 双轨鉴权（Microsoft SSO 令牌无法本地验签，走「调官方接口证真再读声明」内省模式）+ 权能模型驱动菜单/数据/动作三层权限。</li>
+          <li class="nested"><strong>异步 AI 提取管道（参与联调）：</strong>上传「三段式事务」（落库 → 调外部 AI → 回填任务号）+ 后台轮询回写 + 指数退避有限重试——理解并能讲清跨事务非原子的代价与轮询型集成的补偿口径。</li>
           <li><strong>反爬与浏览器自动化攻坚（主导）：</strong>针对 14 家异构船司站点（SPA / 整页 / API / 验证码各异）定制策略——OOCL 验证码跨域 iframe + Shadow DOM 下 DOM 方案不可达，改用 OpenCV 视觉模板匹配 + 三层回退链；ZIM 真 Chrome 通道 + API 预热绕 Cloudflare——沉淀「数据加载机制 → 等待策略」决策矩阵。</li>
           <li><strong>爬虫稳定性重构（主导）：</strong>清理 11 家船司脚本 142 处固定盲等，按站点加载机制替换为条件驱动等待（接口拦截 / 元素出现 / AJAX 行数稳定）；多候选选择器合并单次等待，消除最坏 22s 串行探测——抓取从「靠超时兜底」变为可判定成功失败。</li>
           <li><strong>工作流自动化与长任务工程化（主导）：</strong>部门内首次打通 n8n × SharePoint 文件链路（OAuth2 委托权限 + REST/内置节点混合路线）；子进程 + 日志文件承载 5-30 分钟流水线（重启不丢记录、结构化标记驱动进度条）；内网零网络离线部署（wheelhouse + 配置外置）。</li>
@@ -193,9 +194,14 @@
         </ul>
       </article>
       <article class="project">
-        <div class="project-title">InterviewCoach — AI 面试教练（应用级 Agent 实践）</div>
+        <div class="project-title">InterviewCoach — AI 智能面试训练助手</div>
+        <div class="lead">技术栈：Spring Boot 3、Java 21、Spring AI、DashScope、Ollama、RAG、Tool Calling、MCP、SSE、Docker</div>
         <ul>
-          <li>ReAct 工程化 + Tool Calling 的应用级实践：与 AgentFlow 分工互补——AgentFlow 做框架级工具布线（注册 / 授权 / 防死循环），InterviewCoach 做应用级工具使用与对话编排；RAG 用真实 embedding 模型（对应 AgentFlow 的确定性最小验证实现）。</li>
+          <li><strong>自主规划面试流程：</strong>设计 ReAct 风格智能体框架，抽象 BaseAgent / ReActAgent / ToolCallAgent，支持多步推理、工具选择、结果回写、终止工具和最大步数控制。</li>
+          <li><strong>多工具集成与实时抓取：</strong>基于 Spring AI ChatClient、Advisor 和 ChatMemory 实现多轮对话，使用会话 ID 隔离上下文，并通过窗口记忆控制上下文长度。</li>
+          <li><strong>RAG 八股题库精准检索：</strong>实现 RAG 知识库问答链路，支持 Markdown 文档加载、元信息补充、查询重写和向量检索增强；预留 PgVector 持久化向量库配置。</li>
+          <li><strong>多轮追问与记忆持久化：</strong>集成 Tool Calling 工具体系，提供联网搜索、网页抓取、资源下载、文件读写、终端执行和 PDF 生成等工具，并通过统一注册机制交给模型动态调用。</li>
+          <li><strong>流式反馈与工程化部署：</strong>支持 Flux SSE 和 SseEmitter 流式响应，分别用于普通对话增量输出和智能体多步骤执行进度推送；通过 Dockerfile 支持容器化构建部署。</li>
         </ul>
       </article>
     </section>
@@ -204,7 +210,7 @@
       <h2 class="section-title">技能与其他</h2>
       <div>
         <strong>语言与后端：</strong>Java 21（Virtual Threads / 并发 / BSP）· Python（FastAPI / pandas / Playwright）· SQL（PostgreSQL / 幂等 upsert）<br>
-        <strong>Agent / AI 工程：</strong>Spring AI 2.0 · LangChain4j · RAG · Tool Calling · MCP（学习中）· Prompt 模板（SpEL 安全求值）· 结构化输出校验 · LLM 成本核算<br>
+        <strong>Agent / AI 工程：</strong>Spring AI 2.0 · LangChain4j · RAG · Tool Calling · MCP · ReAct · Prompt 模板（SpEL 安全求值）· 结构化输出校验 · LLM 成本核算<br>
         <strong>中间件与可观测：</strong>Kafka（at-least-once 幂等消费）· Micrometer / Prometheus / Grafana · Flyway 迁移<br>
         <strong>工程实践：</strong>Maven 多模块 · JaCoCo 门禁 · GitHub Actions CI · 多视角代码评审 · Vue 3 / Vite · React 18 · Docker Compose · AI 辅助开发（Claude Code：架构决策与质量把关）
       </div>
