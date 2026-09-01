@@ -213,7 +213,7 @@ body { margin:0; padding:76px 18px 42px !important; color:var(--ink); font-famil
           <ul class="bullet-list">
             <li><strong>反爬与浏览器自动化攻坚</strong>：针对 14 家异构船司站点（SPA/整页/API/验证码各异）定制策略——OOCL 验证码改用 OpenCV 视觉模板匹配 + 三层回退；ZIM 真 Chrome + API 预热绕 Cloudflare；沉淀「数据加载机制 → 等待策略」决策矩阵</li>
             <li><strong>爬虫稳定性重构</strong>：清理 142 处固定盲等替换为条件驱动等待（接口拦截/元素出现/AJAX 行数稳定）；多候选选择器合并单次等待，消除最坏 22s 串行探测</li>
-            <li><strong>AI 发票识别 + 人工双控工作台</strong>（资金安全场景）：主导前端可解释层——基于 PDF 文本层坐标的字段级精准高亮（值匹配四级降级链：精确 → 紧凑 → 跨空白正则 → 分词容错），AI 置信度展示（无置信度兜底防白屏）、AI vs 人工逐字段差异比对弹窗前置提交——AI 提取 + 人工确认 + 全程可追溯</li>
+            <li><strong>AI 发票识别 + 人工双控工作台</strong>（资金安全场景）：主导前端可解释层——基于 PDF 文本层坐标的字段级精准高亮（值匹配四级降级链：精确 → 紧凑 → 跨空白正则 → 分词容错，坐标百分比化与缩放旋转解耦），复核员点开详情即见 AI 值在原件的位置；AI 置信度展示（无置信度兜底防白屏）、AI vs 人工逐字段差异比对弹窗前置提交——AI 提取 + 人工确认 + 全程可追溯</li>
             <li><strong>工作流自动化（n8n × SharePoint）</strong>：部门内首次打通 n8n 与 SharePoint 文件链路；定位「内置节点与 HTTP Request 的 token audience 不一致」隐蔽坑</li>
             <li><strong>离线部署与长任务工程化</strong>：内网零网络部署（离线 wheelhouse + 配置外置）；子进程 + 日志文件长任务模型（重启不丢记录、PROGRESS 驱动进度条）</li>
           </ul>

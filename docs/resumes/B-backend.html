@@ -223,7 +223,7 @@ body { margin:0; padding:76px 18px 42px !important; color:var(--ink); font-famil
             <li><strong>数据管道设计</strong>：两层 Excel 流水线（编排层/纯数据层/展示层）+ 分桶缓存（batch_key 隔离）+ 重试只存非空防毒化缓存</li>
             <li><strong>长任务异步模型</strong>：子进程 + 日志文件承载 5-30min 流水线（进程隔离崩溃不影响主服务）；PROGRESS 标记驱动进度条</li>
             <li><strong>反爬</strong>：Playwright 142 处固定等待重构成条件等待；ZIM/OOCL/WHL 破冰方法（真 Chrome + API 预热 + Cookie 复用）</li>
-            <li><strong>AI 发票工作台</strong>：深度参与七态审批流（数据驱动状态机：流转规则存表，加环节不改代码只插配置）+ 双轨鉴权（Microsoft SSO 令牌无法本地验签，走「调官方接口证真再读声明」内省模式）；前端主导置信度展示 + PDF 字段级高亮（主导前端可解释层）</li>
+            <li><strong>AI 发票工作台</strong>：深度参与七态审批流（数据驱动状态机：流转规则存表，加环节不改代码只插配置；幂等键先查后插 + DB 唯一约束两层防重；append-only 留痕支撑全程审计回放）+ 双轨鉴权（Microsoft SSO 令牌无法本地验签，走「调官方接口证真再读声明」内省模式；权能模型下身份随动作切换，自审禁令防同人同票既提交又审批）；前端主导置信度展示 + PDF 字段级高亮可解释层</li>
             <li><strong>部署工程化</strong>：内网零网络离线 wheelhouse + 配置外置消除两套包；修复双重前缀登录 404（diff 锁定单行根因）</li>
           </ul>
         </article>
