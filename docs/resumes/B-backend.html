@@ -9,7 +9,7 @@
     :root { --blue: #2458b8; --text: #151515; --muted: #596273; --band: #f2f3f5; }
     * { box-sizing: border-box; }
     html, body { margin: 0; padding: 0; background: #fff; }
-    body { color: var(--text); font-family: "Times New Roman", "SimHei", "黑体", "Microsoft YaHei", sans-serif; font-size: 10.5pt; line-height: 1.34; }
+    body { color: var(--text); font-family: "Times New Roman", "SimHei", "黑体", "Microsoft YaHei", sans-serif; font-size: 8.8pt; line-height: 1.24; }
     .toolbar { position: sticky; z-index: 10; top: 6px; display: flex; align-items: center; gap: 7px; width: max-content; max-width: calc(100vw - 32px); margin: 6px auto 8px; padding: 7px 10px; border: 1px solid #d3d7df; border-radius: 8px; background: #fff; box-shadow: 0 4px 14px rgba(15, 23, 42, .12); color: #334155; font: 13px/1 Arial, "Microsoft YaHei", sans-serif; }
     .toolbar label, .toolbar-title { color: #475569; font-weight: 700; white-space: nowrap; }
     .toolbar button, .toolbar select { height: 32px; border-radius: 5px; font: inherit; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease, transform .15s ease; }
@@ -28,7 +28,7 @@
     .color-control input { width: 21px; height: 21px; padding: 0; border: 0; background: transparent; cursor: pointer; }
     @media screen and (max-width: 980px) { .toolbar { top: 6px; max-width: calc(100vw - 20px); flex-wrap: wrap; justify-content: center; } }
     @media print { .toolbar { display: none; } }
-    .sheet { width: 210mm; min-height: 0; padding: 7mm 10mm 8mm; border-top: 0; margin: 0 auto; }
+    .sheet { width: 210mm; min-height: 0; padding: 4mm 9mm 5mm; border-top: 0; margin: 0 auto; }
     .page-break { break-before: auto; }
     body[data-page-mode="continuous"] { width: 100%; }
     body[data-page-mode="continuous"] .sheet { width: 210mm; }
@@ -45,9 +45,9 @@
       body[data-page-mode="continuous"] .sheet { min-height: 0; margin: 0; box-shadow: none; }
     }
     [contenteditable="true"]:focus { outline: 2px solid #b7caf3; outline-offset: 2px; }
-    h1 { margin: 0 0 3px; font-family: "Microsoft YaHei", "Arial", sans-serif; font-size: 24pt; line-height: 1.08; font-weight: 700; }
-    .header-grid { display: grid; grid-template-columns: minmax(0, 1fr) 28mm; gap: 8mm; align-items: start; }
-    .profile-photo-slot { position: relative; width: 28mm; height: 36mm; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px dashed #a8adb7; background: #fafafa; color: #8b919c; font: 9pt/1.2 Arial, sans-serif; text-align: center; cursor: pointer; }
+    h1 { margin: 0 0 2px; font-family: "Microsoft YaHei", "Arial", sans-serif; font-size: 21pt; line-height: 1.08; font-weight: 700; }
+    .header-grid { display: grid; grid-template-columns: minmax(0, 1fr) 24mm; gap: 6mm; align-items: start; }
+    .profile-photo-slot { position: relative; width: 24mm; height: 29mm; display: flex; align-items: center; justify-content: center; overflow: hidden; border: 1px dashed #a8adb7; background: #fafafa; color: #8b919c; font: 9pt/1.2 Arial, sans-serif; text-align: center; cursor: pointer; }
     .profile-photo-slot:hover, .profile-photo-slot:focus-visible { border-color: #2458b8; outline: none; }
     .profile-photo-slot::after { content: "点击上传"; position: absolute; inset: auto 0 0; padding: 4px 2px; background: rgba(36, 88, 184, .88); color: #fff; font: 8pt/1.2 Arial, "Microsoft YaHei", sans-serif; opacity: 0; transition: opacity .15s ease; }
     .profile-photo-slot:hover::after, .profile-photo-slot:focus-visible::after { opacity: 1; }
@@ -55,26 +55,26 @@
     .photo-placeholder { pointer-events: none; }
     .photo-input { display: none; }
     .profile-photo-slot img { display: block; width: 100%; height: 100%; object-fit: cover; }
-    .meta-row { display: flex; align-items: center; gap: 4px; margin: 2px 0; font-size: 11.5pt; line-height: 1.42; white-space: nowrap; }
+    .meta-row { display: flex; align-items: center; gap: 4px; margin: 1px 0; font-size: 10.5pt; line-height: 1.38; white-space: nowrap; }
     .meta-icon { width: 16px; height: 16px; object-fit: contain; flex: 0 0 auto; }
     .meta-row strong { font-weight: 700; }
     .separator { color: #2d2d2d; padding: 0 5px; }
-    .section { margin-top: 8px; }
-    .section-title { margin: 0 0 4px; padding-bottom: 2px; border-bottom: 2px solid var(--blue); color: var(--blue); font-family: "Microsoft YaHei", "Arial", sans-serif; font-size: 18.5pt; line-height: 1.03; font-weight: 700; }
-    .lead { margin: 3px 0 4px; color: #1d448f; font-size: 10.8pt; line-height: 1.35; font-weight: 700; }
+    .section { margin-top: 3px; }
+    .section-title { margin: 0 0 2px; padding-bottom: 1px; border-bottom: 2px solid var(--blue); color: var(--blue); font-family: "Microsoft YaHei", "Arial", sans-serif; font-size: 13.5pt; line-height: 1.05; font-weight: 700; }
+    .lead { margin: 2px 0 3px; color: #1d448f; font-size: 9.8pt; line-height: 1.32; font-weight: 700; }
     .evidence-link { margin: 2px 0 5px; color: #2458b8; font-size: 11.5pt; font-weight: 700; }
     .evidence-link a { color: inherit; }
     .evidence-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .evidence-link { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; }
-    .company { display: flex; align-items: center; gap: 7px; min-height: 31px; margin: 6px 0 4px; padding: 5px 8px; border-radius: 6px; background: var(--band); page-break-inside: avoid; }
-    .company-logo { width: 27px; height: 27px; object-fit: contain; flex: 0 0 auto; }
-    .company-name { flex: 1; min-width: 0; font-size: 11.2pt; font-weight: 700; }
-    .company-meta { color: #202020; font-size: 9.5pt; white-space: nowrap; }
+    .company { display: flex; align-items: center; gap: 7px; min-height: 26px; margin: 4px 0 3px; padding: 4px 8px; border-radius: 6px; background: var(--band); page-break-inside: avoid; }
+    .company-logo { width: 22px; height: 22px; object-fit: contain; flex: 0 0 auto; }
+    .company-name { flex: 1; min-width: 0; font-size: 10.2pt; font-weight: 700; }
+    .company-meta { color: #202020; font-size: 9pt; white-space: nowrap; }
     .education-name .education-major { margin-left: 18px; }
-    .project { margin: 3px 0 4px; page-break-inside: avoid; }
-    .project-title { margin: 3px 0 2px; color: #244b9b; font-size: 11.5pt; line-height: 1.12; font-weight: 700; }
-    ul { margin: 1px 0 3px 17px; padding: 0; }
-    li { margin: 1px 0; }
+    .project { margin: 2px 0 3px; page-break-inside: avoid; }
+    .project-title { margin: 2px 0 1px; color: #244b9b; font-size: 10.5pt; line-height: 1.12; font-weight: 700; }
+    ul { margin: 1px 0 2px 17px; padding: 0; }
+    li { margin: 0; }
     li::marker { font-size: .8em; }
     .nested { margin-left: 18px; }
     .nested::marker { content: "○ "; }
@@ -150,14 +150,15 @@
         <div class="company-meta">2026.06 - 至今</div>
       </div>
       <article class="project">
-        <div class="project-title">货代报表自动化平台（Report Automation）｜FastAPI + Playwright + 数据流水线</div>
-        <div class="lead">在既有系统（十几万行 Python 代码）上主导四个模块的改造——爬虫稳定性 / 反爬攻坚 / 长任务异步模型 / 离线部署，全部为「没有这部分会不一样」的可辩护差异；另深度参与 AI 发票工作台后端。</div>
+        <div class="project-title">货代报表自动化平台（Report Automation）｜FastAPI + Playwright + 数据流水线 + 监控看板</div>
+        <div class="lead">在既有系统（十几万行 Python 代码）上主导四个模块的改造——爬虫稳定性 / 反爬攻坚 / 长任务异步模型 / 部署工程化，全部为「没有这部分会不一样」的可辩护差异；另深度参与 AI 发票工作台后端。</div>
         <ul>
           <li><strong>数据管道与长任务异步模型（主导）：</strong>子进程 + 日志文件承载 5-30 分钟 Excel 流水线——进程隔离崩溃不影响主服务、文件系统做状态存储（服务重启任务记录不丢）、stdout 结构化标记驱动前端进度条、产物按 result_id 归档 + 7 天自动清理；两层流水线（编排层 / 纯数据层 / 展示层）+ 分桶缓存（batch_key 隔离）+ 重试只存非空防坏数据污染好缓存。</li>
+          <li><strong>监控看板与数据质量闭环（主导）：</strong>拆分监控表并建立派生列模式（可推导状态不落库）——抓取成功率 / 数据延迟 / 异常分布实时可视化，人工反馈落库驱动抓取规则迭代，形成「程序 vs 手工全列对比 → 反馈落库 → 看板观测」的数据质量闭环。</li>
           <li><strong>爬虫稳定性重构（主导）：</strong>系统性清理 11 家船司脚本 142 处固定盲等，按站点数据加载机制（SPA / 整页 / API / 验证码）替换为条件驱动等待（接口响应拦截 / 元素出现 / AJAX 行数稳定判定）；多候选选择器合并单次等待，消除最坏 22 秒串行探测——抓取从「靠超时兜底」变为可判定成功失败。</li>
           <li><strong>反爬与浏览器自动化攻坚（主导）：</strong>OOCL 的 Cloudflare Turnstile 嵌套跨域 iframe + Shadow DOM、DOM 方案不可达，改用 OpenCV 视觉模板匹配定位复选框并设计三层回退链；ZIM 真 Chrome 通道 + API 预热 + 页面上下文 XHR 绕 Cloudflare 与 CORS；WHL 导出真人登录 Cookie 复用信誉跳过验证码——沉淀「数据加载机制 → 等待策略」决策矩阵。</li>
-          <li><strong>AI 发票工作台（深度参与后端 + 主导前端可解释层）：</strong>七态审批流为数据驱动状态机（流转规则存表，加环节不改代码只插配置；幂等键先查后插 + DB 唯一约束两层防重；append-only 留痕支撑全程审计回放）+ 双轨鉴权（Microsoft SSO 令牌无法本地验签，走「调官方接口证真再读声明」内省模式；权能模型下身份随动作切换）；前端主导置信度展示 + PDF 字段级精准高亮可解释层，功能已合并部署。</li>
           <li><strong>部署工程化（主导）：</strong>内网 Windows 零网络环境部署——离线 wheelhouse + 配置外置（12-Factor，一份包 N 份配置消除测试/生产两套包）；定位并修复部署双重前缀登录 404（构建产物 diff 锁定单行根因）。</li>
+          <li class="nested"><strong>AI 发票工作台（深度参与后端）：</strong>七态审批流为数据驱动状态机（流转规则存表，加环节不改代码只插配置）+ 双轨鉴权（Microsoft SSO 内省模式）+ 幂等键两层防重 + append-only 留痕审计；前端主导 PDF 字段级精准高亮可解释层，功能已合并部署。</li>
         </ul>
       </article>
     </section>
@@ -168,11 +169,11 @@
         <div class="company-name">个人项目 · ToyRush — 潮玩闪购与社区交流平台</div>
         <div class="company-meta">技术栈：SpringBoot + MySQL + Redis + Lua + Kafka + Caffeine + MyBatis-Plus</div>
       </div>
-      <div class="lead">为用户提供潮玩限量秒杀、优惠券抢购、商家信息查询及社区交流功能，同时帮助商家精准推广潮玩优惠信息，打造潮玩爱好者的专属社区。</div>
+      <div class="lead">为用户提供潮玩限量秒杀、优惠券抢购、商家信息查询及社区交流功能，打造潮玩爱好者的专属社区。</div>
       <ul>
         <li><strong>秒杀防超卖与一人一单：</strong>使用 Redis 存储库存和订单信息，通过 Lua 脚本判断用户下单资格，保证库存不超卖且同一用户仅能下一单。</li>
         <li><strong>秒杀流程异步优化：</strong>用户下单后使用 Kafka 消息队列异步处理库存扣减和订单生成，提高秒杀场景的并发性能。</li>
-        <li><strong>未支付订单自动关闭与并发控制：</strong>使用 Spring Task 定时任务扫描超时未支付订单，自动关闭并回滚库存。为防止支付回调与定时关单发生数据冲突，在订单表状态更新时引入乐观锁（版本号机制），确保支付和关单仅一个成功，避免资金或库存异常。</li>
+        <li><strong>未支付订单自动关闭与并发控制：</strong>使用 Spring Task 定时任务扫描超时未支付订单，自动关闭并回滚库存；为防止支付回调与定时关单数据冲突，引入乐观锁（版本号机制）确保两者仅一个成功。</li>
         <li><strong>多级缓存与数据一致性：</strong>采用 Caffeine 本地缓存 + Redis 二级缓存架构提升热点数据访问速度；结合逻辑过期方案防缓存击穿、缓存空值防穿透；更新数据库后删除缓存，配合消息队列补偿重试及 TTL 兜底，保证缓存与数据库最终一致性。</li>
       </ul>
       <div class="company">
@@ -180,7 +181,7 @@
         <div class="company-name">个人开源项目 · AgentFlow — Multi-Agent 编排引擎（工程深度背书）</div>
         <div class="company-meta">2026.06 - 至今 ｜ <a href="https://github.com/Yusheng727/AgentFlow" style="color:inherit;">github.com/Yusheng727/AgentFlow</a></div>
       </div>
-      <div class="lead">Java 21 从 0 实现 BSP 执行引擎：并发模型 / 分布式解耦 / 安全横切 / 质量闭环四条工程主线；13 Maven 模块、500+ 测试、JaCoCo 80% 门禁、CI 全绿，真 PostgreSQL / 真 Kafka / 真实 DeepSeek 三环境端到端验证。</div>
+      <div class="lead">Java 21 从 0 实现 BSP 执行引擎：并发模型 / 分布式解耦 / 安全横切 / 质量闭环四条工程主线；13 Maven 模块、500+ 测试、JaCoCo 80% 门禁、CI 全绿，真 PostgreSQL / 真 Kafka / 真实 DeepSeek 三环境验证。</div>
       <article class="project">
         <div class="project-title">并发模型设计（BSP 执行引擎）</div>
         <ul>
@@ -191,16 +192,15 @@
       <article class="project">
         <div class="project-title">分布式解耦与幂等（Kafka）</div>
         <ul>
-          <li><strong>机制：</strong>提交 / 执行经 Kafka 解耦；消费端单条条件 UPDATE 原子认领执行权，at-least-once 投递下防重复消费双跑双计费；提交守卫事前拦截失控 DAG（节点数 / 预估成本 422）+ per-workflow 预算事后告警两道防线。</li>
-          <li class="nested"><strong>真 bug 故事：</strong>显式 retry 最初被幂等跳过逻辑吞掉静默失效——本地单测全绿、真 Kafka 端到端才暴露，修复后沉淀「测试绿 ≠ 生产生效」案例。</li>
+          <li><strong>机制：</strong>提交 / 执行经 Kafka 解耦；消费端单条条件 UPDATE 原子认领执行权，at-least-once 投递下防重复消费双跑双计费；提交守卫事前拦截失控 DAG（节点数 / 预估成本 422）+ per-workflow 预算逐轮记账与阈值告警两道防线。</li>
         </ul>
       </article>
       <article class="project">
         <div class="project-title">安全横切 + 崩溃恢复 + 质量闭环</div>
         <ul>
           <li><strong>安全横切：</strong>工具级授权（config ∪ DB、admin-only、防自授）+ 5 列 AES-256-GCM 静态加密（生产 fail-closed）+ API Key 只存 SHA-256 哈希防越权。</li>
-          <li><strong>崩溃恢复：</strong>节点级完成即写防 LLM 重复计费 + 路由决策 BFS 重放；修复 4 名独立 reviewer 确认的两个正确性 P0（off-by-one / stray COMPLETED 防护）。</li>
-          <li><strong>质量：</strong>500+ 测试 / JaCoCo 80% 门禁 / CI 全绿；踩坑主打：预算记账原只记成功末次、低估 ≤3x——评审抓到改逐轮记账；AI 辅助开发（AI 写代码、本人负责架构决策与质量把关）。</li>
+          <li><strong>崩溃恢复：</strong>节点级完成即持久化输出防 LLM 重复计费 + 路由决策 BFS 重放恢复，崩溃 / 审批 / 循环三条恢复路径共用同一套重放续跑骨架。</li>
+          <li><strong>质量：</strong>500+ 测试 / JaCoCo 80% 门禁 / CI 全绿；Micrometer 指标 + Grafana 6 面板可观测；深度使用 AI 辅助开发进行架构设计与多视角代码评审。</li>
         </ul>
       </article>
     </section>
@@ -210,9 +210,8 @@
       <div>
         <strong>JVM / 并发：</strong>JUC / GC / JVM 排查 · Java 21 Virtual Threads · BSP 并行模型（barrier / 只读快照 / Reducer）<br>
         <strong>框架：</strong>Spring Boot 4.1 · MyBatis-Plus · Spring AI 2.0 · FastAPI（实习）<br>
-        <strong>存储与中间件：</strong>MySQL · Redis（缓存一致性 / Lua 原子）· Kafka（at-least-once 幂等消费）· PostgreSQL · Flyway<br>
-        <strong>可观测：</strong>Micrometer + Prometheus + Grafana（6 面板真实部署验证）<br>
-        <strong>工程实践：</strong>Maven 多模块 · JaCoCo 门禁 · GitHub Actions CI · 离线部署 / 12-Factor 配置管理 · AI 辅助开发（Claude Code：架构决策与质量把关）
+        <strong>存储与中间件：</strong>MySQL · Redis（缓存一致性 / Lua 原子）· Kafka（at-least-once 幂等）· PostgreSQL · Flyway · Micrometer / Prometheus / Grafana<br>
+        <strong>工程实践：</strong>Maven 多模块 · JaCoCo 门禁 · GitHub Actions CI · 离线部署 / 12-Factor 配置管理 · AI 辅助开发（Claude Code：架构设计与代码评审）
       </div>
     </section>
   </main>
