@@ -9,6 +9,10 @@ agentflow:
 spring:
   application:
     name: demo-supplier-risk
+  # JDBC DataSource 自动配置位于 spring-boot-jdbc 模块（Boot 4.1 包 org.springframework.boot.jdbc.autoconfigure），
+  # 不在本模块编译类路径，故字符串排除（mock 用 InMemoryCheckpointManager，无 DB——避免无 driver/URL 时 Hikari 启动失败，对齐 demo-api）。
+  autoconfigure:
+    exclude: "org.springframework.boot.jdbc.autoconfigure.DataSourceAutoConfiguration"
   # 真实模式需配 OpenAI key（从环境变量读，禁止入 yml——R22）
   # ai:
   #   openai:

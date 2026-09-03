@@ -9,6 +9,12 @@ import com.agentflow.engine.ChannelReducer;
 import com.agentflow.engine.WorkflowContext;
 import com.agentflow.engine.checkpoint.InMemoryCheckpointManager;
 
+import org.springframework.ai.model.openai.autoconfigure.OpenAiChatAutoConfiguration;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiEmbeddingAutoConfiguration;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiImageAutoConfiguration;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiAudioTranscriptionAutoConfiguration;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiAudioSpeechAutoConfiguration;
+import org.springframework.ai.model.openai.autoconfigure.OpenAiModerationAutoConfiguration;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
@@ -31,10 +37,20 @@ import java.util.Map;
  *       （{@link com.agentflow.demo.supplier.agents.FinancialAnalysisAgent} 等）走 Spring AI ChatClient</li>
  * </ul>
  *
+ * <p>mock 模式排除 spring-ai OpenAI 六自动配置（对齐 demo-api 的注解级权威排除）：classpath 引入
+ * spring-ai-starter-model-openai 但无 API key，不排除会在启动期报
+ * "At least one credential source must be specified"——README 快速开始缺 key 跑不通的根因。
+ *
  * <p>U10 范围（v4.3 解耦）：编程式组装引擎跑通 mock 模式，验证引擎核心能力。
  * {@code @EnableAgentFlow} 一键启动 + REST 端点在 U13 Starter 封装落地。
  */
-@SpringBootApplication
+@SpringBootApplication(exclude = {
+        OpenAiChatAutoConfiguration.class,
+        OpenAiEmbeddingAutoConfiguration.class,
+        OpenAiImageAutoConfiguration.class,
+        OpenAiAudioTranscriptionAutoConfiguration.class,
+        OpenAiAudioSpeechAutoConfiguration.class,
+        OpenAiModerationAutoConfiguration.class})
 public class SupplierRiskApplication {
 
     public static void main(String[] args) {
