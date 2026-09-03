@@ -1,7 +1,7 @@
 # 实现过程中的 Bug 与修复
 
 > 按 Unit 记录开发中真实踩到的坑：根因 → 发现过程 → 修复 → 量化结果。
-> **面试用途**：「遇到最难的问题」「线上 bug 怎么排查」「怎么保证代码质量」类问题的弹药。
+> **用途**：排查同类问题的根因索引——「遇到最难的问题」「怎么保证代码质量」类话题的原始记录。
 > 每条遵循 Situation→Task→Action→Result，深挖细节备查。
 
 ---
@@ -114,7 +114,7 @@
 
 **Result**: 4 个 reviewer 独立确认（adversarial + correctness + reliability + testing）。新增 `BspEngineRecoveryTest.recoverReplaysCrashLayerOutput` 端到端验证：崩溃层 B 已 COMPLETED，恢复后 B 不重跑但下游 C 能读到 B 的 channel 输出。
 
-**面试讲法**：「我发现 checkpoint 恢复有个语义漏洞——崩溃层已完成节点的输出虽然持久化了，但因为没进 barrier，恢复时跳过这些节点会导致下游读到陈旧 channel。这不是普通的 bug，是恢复协议设计层面的缺陷：off-by-one 修复只解决了重复执行，没解决输出丢失。我加了 replayOutputs 机制，恢复时把崩溃层输出重放进 context。」
+**复盘**：「我发现 checkpoint 恢复有个语义漏洞——崩溃层已完成节点的输出虽然持久化了，但因为没进 barrier，恢复时跳过这些节点会导致下游读到陈旧 channel。这不是普通的 bug，是恢复协议设计层面的缺陷：off-by-one 修复只解决了重复执行，没解决输出丢失。我加了 replayOutputs 机制，恢复时把崩溃层输出重放进 context。」
 
 ---
 
@@ -139,7 +139,7 @@
 
 **Result**: 4 reviewer 独立确认。新增 `RecoveryProtocolTest.abortedWorkflowIgnoresStrayCompleted` + `BspEngineRecoveryTest.abortedWorkflowRerunsCrashLayer` 验证。
 
-**面试讲法**：「代码 Javadoc 承诺了一个防护机制但实际没实现——这是文档与代码不一致的典型。我两层修复：引擎 abort 时显式标记 FAILED，Recovery 查到 FAILED 就整体重跑崩溃层。这里有个设计决策：stray 记录和正常 COMPLETED 在数据层无法区分，我选择牺牲 LLM 成本（R3 经济约束）换正确性。」
+**复盘**：「代码 Javadoc 承诺了一个防护机制但实际没实现——这是文档与代码不一致的典型。我两层修复：引擎 abort 时显式标记 FAILED，Recovery 查到 FAILED 就整体重跑崩溃层。这里有个设计决策：stray 记录和正常 COMPLETED 在数据层无法区分，我选择牺牲 LLM 成本（R3 经济约束）换正确性。」
 
 ---
 
@@ -198,7 +198,7 @@
 - 修复：`resolvePath` 开头加 `if (path.endsWith(".")) return null;`——末尾点直接返回 null 保留占位符。
 - 加测试 `trailingDotPlaceholderPreserved` 覆盖。
 
-**Result**: 测试通过。**面试讲法**：「code review 用 max-effort 多 angle 审查，一个 finder 逐行扫出 `String.split` 丢弃末尾空段导致畸形占位符解析不一致——这种边界 case 单测很难想到，靠 review 的 recall 模式捕获。」
+**Result**: 测试通过。**复盘**：「code review 用 max-effort 多 angle 审查，一个 finder 逐行扫出 `String.split` 丢弃末尾空段导致畸形占位符解析不一致——这种边界 case 单测很难想到，靠 review 的 recall 模式捕获。」
 
 ---
 
@@ -206,7 +206,7 @@
 
 plan U9 列了 `MockAdvisor` 文件，但实现时判断 v1 非必要——mock 模式不走 ChatClient/advisor 链，MockAgentFunction 直接返回 AgentOutput，advisor 无参与点。强行加 MockAdvisor 是无消费者的过度抽象（maintainability 反模式）。记此决策在 CLAUDE.md + handoff，U13 若需要 trace 记录再补。
 
-**面试讲法**：「plan 里列了 MockAdvisor，我实现时判断它是过度设计——mock 模式根本不走 advisor 链，加一个空 advisor 是无消费者的抽象。我跳过它并在文档记决策。工程深度不是照单全收 plan，是判断哪些是必要复杂度。」
+**复盘**：「plan 里列了 MockAdvisor，我实现时判断它是过度设计——mock 模式根本不走 advisor 链，加一个空 advisor 是无消费者的抽象。我跳过它并在文档记决策。工程深度不是照单全收 plan，是判断哪些是必要复杂度。」
 
 ---
 
@@ -214,7 +214,7 @@ plan U9 列了 `MockAdvisor` 文件，但实现时判断 v1 非必要——mock 
 
 ce-code-review cross-file finder 指出：原实现注册了 `mockBspEngine` Bean，但 BspEngine 无参构造不持有 resolver（resolver 按 `execute()` 调用传入），孤立注册的 Bean 无人 wire，会误导调用方「Bean 存在即可用」。修复：删 `mockBspEngine` Bean，只保留 `mockAgentResolver`（有效可注入）。完整 Bean 装配（BspEngine + Parser + Registry + Controller）留给 U13 Starter 封装。CLAUDE.md 已记此范围限制。
 
-**面试讲法**：「review 发现我注册了一个孤立的 BspEngine Bean——它无参构造、不持有 resolver、没人 wire，是无效注册。我删掉它，避免误导调用方。这体现 review 的价值：不光找 bug，也找『有 Bean 但不能用』的设计误导。」
+**复盘**：「review 发现我注册了一个孤立的 BspEngine Bean——它无参构造、不持有 resolver、没人 wire，是无效注册。我删掉它，避免误导调用方。这体现 review 的价值：不光找 bug，也找『有 Bean 但不能用』的设计误导。」
 
 ---
 
@@ -249,7 +249,7 @@ ce-code-review cross-file finder 指出：原实现注册了 `mockBspEngine` Bea
 
 U10 的 4 个 Agent 类在 mock 模式下不被调用（MockAgentFunction 接管），0% 行覆盖。demo 的性质是验证场景，不是核心引擎——覆盖率门禁应由 core/adapters 模块承担。修复：demo pom 设 `<jacoco.skip>true</jacoco.skip>`。
 
-**面试讲法**：「demo 模块是验证引擎能力的，它的作用是被手工跑通而不是被自动化测试覆盖。我不给 demo 设覆盖率门禁——这是一个工程判断：门禁应该保护核心代码，而不是让 demo 代码凑覆盖率。」
+**复盘**：「demo 模块是验证引擎能力的，它的作用是被手工跑通而不是被自动化测试覆盖。我不给 demo 设覆盖率门禁——这是一个工程判断：门禁应该保护核心代码，而不是让 demo 代码凑覆盖率。」
 
 ---
 
@@ -257,7 +257,7 @@ U10 的 4 个 Agent 类在 mock 模式下不被调用（MockAgentFunction 接管
 
 U10 的 demo 用代码直接 `new WorkflowDSLParser()` + `new BspEngine()` + `new InMemoryCheckpointManager()` 跑通工作流，不依赖 U13 的 `@EnableAgentFlow` 一键启动。v4.3 解耦约定：U13 做 Starter 封装，U10 证明引擎能独立跑通的「原子性」——引擎核心 + mock 模式 + YAML 定义即可运行。U13 再做 Starter 封装和 REST 端点整合。
 
-**面试讲法**：「我让 demo 自包含——不依赖任何还没做的自动配置。你只需要一个 BspEngine、一个 YAML 解析器、一份 mock 数据，就能看到 3 并行专家分析到汇总评级的完整链路。这体现了引擎的『原子可用』——核心概念自洽，封装是锦上添花。」
+**复盘**：「我让 demo 自包含——不依赖任何还没做的自动配置。你只需要一个 BspEngine、一个 YAML 解析器、一份 mock 数据，就能看到 3 并行专家分析到汇总评级的完整链路。这体现了引擎的『原子可用』——核心概念自洽，封装是锦上添花。」
 
 ---
 
@@ -267,13 +267,13 @@ U10 的 demo 用代码直接 `new WorkflowDSLParser()` + `new BspEngine()` + `ne
 
 U9 的 `MockAgentFunction` 在 `agentflow-adapters/spring-ai` 模块，而 DryRunEngine 在 `agentflow-core` 模块——如果 core 引用 adapter，会产生反向依赖。修复：core 内置一个更轻量的 `DryRunMockAgentFunction`（package-private）：有 `mock_response` 用预设、无 `mock_response` 自动生成 schema 描述。消除 core→adapter 依赖，保持模块依赖方向单向。
 
-**面试讲法**：「dry-run 引擎在核心模块，不能依赖适配器模块的 MockAgentFunction——那会造成反向依赖。我写了一个更轻量的内置版：有 mock 数据用 mock，没 mock 数据自动生成 input/output schema 描述。这样 dry-run 不需要任何外部依赖就能跑通。」
+**复盘**：「dry-run 引擎在核心模块，不能依赖适配器模块的 MockAgentFunction——那会造成反向依赖。我写了一个更轻量的内置版：有 mock 数据用 mock，没 mock 数据自动生成 input/output schema 描述。这样 dry-run 不需要任何外部依赖就能跑通。」
 
 ### 设计决策：DiagnosisService 分析 ExecutionTrace.Snapshot，5 类问题
 
 U3 的 `ExecutionTrace` 记录了每个节点的 token/耗时/status/error，但只有数据没有分析。U6 的 `DiagnosisService` 读 `Snapshot`（不可变快照）做模式识别：连续超时（FAILED + error 含 timeout）、Token 异常消耗（> 均值 ×3 + >100 token 阈值）、SpEL 解析失败（error 含 SpelEvaluation）、Channel 缺失（error 含 channel/null）、节点重复执行（同一 nodeId SUCCESS > 1 次）。每种问题输出 description + suggestion（修复方向）。
 
-**面试讲法**：「执行轨迹只是数据，诊断服务做的是模式识别——比如某个节点的 token 消耗是其他节点的 3 倍以上，它会告诉你'这个 Agent 的 prompt 可能太长或模型参数需要调'。它不是替代人工排查，而是把常见问题自动分类、给排查方向。」
+**复盘**：「执行轨迹只是数据，诊断服务做的是模式识别——比如某个节点的 token 消耗是其他节点的 3 倍以上，它会告诉你'这个 Agent 的 prompt 可能太长或模型参数需要调'。它不是替代人工排查，而是把常见问题自动分类、给排查方向。」
 
 ---
 
@@ -287,7 +287,7 @@ U10 用了连字符 channel 名但 aggregate 节点的 mock_response 没引用�
 
 修复：字符类扩展为 `[\\w.-]`（连字符放末位是字面量，非范围）。加 `hyphenatedChannelResolves` 测试锁定。
 
-**面试讲法**：「这是个潜伏 bug——U10 用连字符 channel 名但没引用上游，bug 没暴露。U11 第一个用 `${contract-parse}` 引用上一步，立即发现占位符不解析。正则字符类漏了连字符，一行修复。说明 demo 不只是演示功能，也是真实的集成测试——每个 demo 都会暴露前一单元的隐藏问题。」
+**复盘**：「这是个潜伏 bug——U10 用连字符 channel 名但没引用上游，bug 没暴露。U11 第一个用 `${contract-parse}` 引用上一步，立即发现占位符不解析。正则字符类漏了连字符，一行修复。说明 demo 不只是演示功能，也是真实的集成测试——每个 demo 都会暴露前一单元的隐藏问题。」
 
 ---
 

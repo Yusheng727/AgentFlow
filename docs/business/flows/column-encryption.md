@@ -6,7 +6,7 @@
 
 checkpoint 存储里躺着业务敏感数据：LLM 的完整输出（node output）、channel 全局上下文（barrier 快照）、路由决策、工作流定义（prompt 业务话术）、审批载荷与上下文快照。数据库文件/备份/快照泄露时，这些明文即业务泄露。本能力对**5 处敏感列**做应用层 AES-256-GCM 静态加密——密文落库、边界加解密（存前 encrypt/读后 decrypt），DB 层零改动感知。
 
-扩列判据（面试口径，代码佐证）：**列内含业务敏感数据**——node output（LLM 输出全文）、channel values（上下文）、approval payload/snapshot（待审载荷+暂停点快照）、routing decisions（含输出推断的路由）、workflow definition（prompt 话术）。
+扩列判据（工程口径，代码佐证）：**列内含业务敏感数据**——node output（LLM 输出全文）、channel values（上下文）、approval payload/snapshot（待审载荷+暂停点快照）、routing decisions（含输出推断的路由）、workflow definition（prompt 话术）。
 
 生产纪律：**fail-closed**——生产装配缺 key 直接启动失败，拒绝明文落库；开发宽松（Noop + warn 不阻塞）。
 

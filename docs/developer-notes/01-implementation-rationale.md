@@ -1,7 +1,7 @@
 # 实现思路与技术决策
 
 > 回答「为什么这么设计」类问题的弹药。每条是「决策 + 为什么 + 替代方案 + 为什么不选」。
-> 面试官最爱深挖的就是「为什么」，这里备好有证据的答案。
+> 回答「为什么这么设计」类问题的记录。每条是「决策 + 为什么 + 替代方案 + 为什么不选」。
 
 ---
 
@@ -220,7 +220,7 @@
 **决策**：用 LangChain4j 1.0.0 写 `LangChain4jAgentAdapter`，依赖面**仅 core + langchain4j、零 Spring AI**。
 
 **为什么**：
-- **KTD-7 的承诺要有实证不是口号**："所有框架调用收敛在适配器窄表面、换框架只动适配器"——用一个完全不依赖 Spring AI 的第二个适配器，从**构建级**证明（引擎/DSL/上游零改动），面试官问"换框架怎么办"时有代码可指。
+- **KTD-7 的承诺要有实证不是口号**："所有框架调用收敛在适配器窄表面、换框架只动适配器"——用一个完全不依赖 Spring AI 的第二个适配器，从**构建级**证明（引擎/DSL/上游零改动），被问"换框架怎么办"时有代码可指。
 - **零 Spring AI 依赖是刻意的**：若新 module 依赖 spring-ai 模块去复用 `OutputSchemaValidator`，会把 Spring AI 拉进 LangChain4j 的 classpath，可移植性证明就掺水。
 
 **为什么不选**：在 spring-ai 模块里加一个 LangChain4j 适配器重逢（框架同仓，哈希不了隔离）；或用 AiServices 那套接口抽象（与 Spring 适配器的 ChatModel 窄表面不同构）。保持两适配器**同构窄表面**（AgentFunction → SpEL → ChatClient/ChatModel → usage → AgentOutput），对比才成立。
@@ -263,4 +263,4 @@
 - **KTD-6 核心命题是「引擎扩展点成立」，不是「向量库多先进」**：引擎应能编排任何 AgentFunction，RAG 是 Agent 内部实现细节。用确定性 embedder（无外部服务、离线可测）恰好把「引擎不感知 RAG」这件事测到最干净——若接真实向量库，`mvn verify` 会因网络/服务依赖变红，偏离命题。
 - **与 InterviewCoach（RAG 项目）分工**：AgentFlow 只做编排侧接入，不重复造 RAG 后端。
 
-**为什么不选**：项目主价值在后端工程化（BSP/DAG/恢复/加密），RAG 是 KTD-6 验证样例 + 面试叙事加分项，真实向量库/embedding 属于 InterviewCoach 的领域。Deferred：`agentflow.rag.real.*` 真实模型接入、rag 接进 demo-api REST 的跨模块依赖（demo-rag 自包含可跑）。
+**为什么不选**：项目主价值在后端工程化（BSP/DAG/恢复/加密），RAG 是 KTD-6 验证样例，真实向量库/embedding 属于 InterviewCoach 的领域。Deferred：`agentflow.rag.real.*` 真实模型接入、rag 接进 demo-api REST 的跨模块依赖（demo-rag 自包含可跑）。

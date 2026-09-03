@@ -33,12 +33,12 @@ AgentFlow 是一个 Java 原生的轻量级 Multi-Agent 编排引擎。YAML DSL 
 
 | 分片 | 文件 | 内容 |
 |:---|:---|:---|
-| 1 | [`01-problem-frame.md`](./01-problem-frame.md) | Problem Frame、简历定位、现有方案对比、目标用户 |
+| 1 | [`01-problem-frame.md`](./01-problem-frame.md) | Problem Frame、项目定位、现有方案对比、目标用户 |
 | 2 | [`02-requirements.md`](./02-requirements.md) | R1–R22 全部需求 + Deferred + Outside Identity |
 | 3 | [`03-key-technical-decisions.md`](./03-key-technical-decisions.md) | KTD-1 ~ KTD-9 |
 | 4 | [`04-high-level-design.md`](./04-high-level-design.md) | 架构图、BSP 模型、分层算法、时序、ER 图、状态机 |
 | 5 | [`05-implementation-units.md`](./05-implementation-units.md) | Unit Priority 矩阵 + U0–U14 全部实现单元（Phase 1/2/3） |
 | 6 | [`06-open-questions-risks-metrics.md`](./06-open-questions-risks-metrics.md) | Open Questions（含 2026-06-28 review）、Risks、Success Metrics |
-| 7 | [`07-sources-revision-interview.md`](./07-sources-revision-interview.md) | Sources、Revision History、Interview Value |
+| 7 | [`07-sources-revision-interview.md`](./07-sources-revision-interview.md) | Sources、Revision History、对外口径与技术决策 |
 
 > **拆分说明**：本主文件保留 frontmatter、Summary、修订要点摘要与导航。完整内容在各分片中。两轮 ce-doc-review（v4.2）的全部修订已落在分片内相应位置。

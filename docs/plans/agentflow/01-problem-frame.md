@@ -6,15 +6,14 @@
 
 Multi-Agent 编排是 AI 落地的核心工程问题——多个专业 Agent 如何并行执行、状态如何持久化、失败如何恢复、成本如何追踪。业界已有成熟方案（LangGraph4j、Spring AI Alibaba Agent Framework、Spring AI 2.0 原生 Agentic Patterns），但我选择**从0用 Java 重新实现一个轻量级编排引擎**，借此展示后端工程能力：并发模型设计（BSP）、状态持久化与崩溃恢复（两级 Checkpoint + Recovery Protocol）、容错链路（Timeout/Retry/ErrorHandler）、DSL 设计与校验、可观测性、Spring Boot Starter 封装。
 
-### 简历定位（七三开）
+### 项目定位（工程深度优先）
 
-本项目是简历三个项目之一，承担**后端工程能力 + Agent 工程化**展示，与另外两个项目形成互补：
+本项目以**从0复现展示后端工程能力**为目标，重点在后端工程化 + Agent 工程化：
 
-| 项目 | 定位 | 主打维度 |
+| 能力面 | 占比 | 覆盖 |
 |:---|:---|:---|
-| ToyRush | 高并发后端基础 | Redis/Kafka/多级缓存 |
-| InterviewCoach | AI Agent + RAG 应用 | Agent 应用能力（ReAct/RAG/Tool Calling/MCP） |
-| **AgentFlow（本项目）** | **后端工程化 + Agent 工程化（七三开）** | **后端 70%（BSP/Checkpoint/容错/可观测/DSL）+ Agent 30%（Spring AI 集成）** |
+| **后端工程化** | 约 70% | BSP 执行模型 / Checkpoint 与崩溃恢复 / 容错链路 / 可观测性 / DSL |
+| **Agent 工程化** | 约 30% | Spring AI / LangChain4j 集成、Schema 校验、Mock 模式、RAG 扩展点 |
 
 ### 现有方案对比（诚实版）
 
@@ -26,7 +25,7 @@ Multi-Agent 编排是 AI 落地的核心工程问题——多个专业 Agent 如
 | LangGraph | Python | StateGraph+BSP | ❌ | Python 生态，不能嵌入 Java 后端 |
 | **AgentFlow（本项目）** | **Java** | **DAG+BSP+两级Checkpoint** | **✅** | **从0复现，展示后端工程能力，非填补空白** |
 
-> **诚实声明**：AgentFlow 不声称"Java 生态没有同类产品"——LangGraph4j 等已存在。本项目的价值在于**从0实现编排引擎核心**所展示的后端工程深度，而非生态空白填补。面试叙事以此为准。
+> **诚实声明**：AgentFlow 不声称"Java 生态没有同类产品"——LangGraph4j 等已存在。本项目的价值在于**从0实现编排引擎核心**所展示的后端工程深度，而非生态空白填补。对外叙事以此为准。
 
 ### 目标用户
 

@@ -11,7 +11,7 @@ AgentFlow P0 全交付后，补齐交付门面与验证场景：① React UI 把
 ## Problem Frame
 
 P0 引擎核心已完成（BSP/Checkpoint/Recovery/Mock/容错/鉴权/调试），但缺三块：
-- **交付门面**：只有 REST API + 控制台输出，无可视化界面，演示和简历展示弱
+- **交付门面**：只有 REST API + 控制台输出，无可视化界面，演示与展示弱
 - **可观测性**：ExecutionTrace 已有数据结构但 mock 模式不写入，无 Micrometer 指标、无成本核算、无 Grafana
 - **拓扑验证**：只有 U10 单层并行 Demo，串行依赖链和复杂混合拓扑未验证
 

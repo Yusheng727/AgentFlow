@@ -22,7 +22,7 @@
 **A**：
 1. **`NodeRegistry` 加 fallback resolver**：`resolve()` 未知名先委托 `fallback`（null 才抛错）——把"mock 任意名复用"从不可行的 Map 语义里解出来，`new NodeRegistry(name -> mock)` 即可。U2 的 seam 第一次真正落地。
 2. **新模块 `demo-api`**：`AgentFlowApiApplication` + `ApiConfig` 显式接 Bean（`BspEngine` 带 `ExecutionTraceRegistry`、`NodeRegistry` mock fallback、`ApiKeyAuthFilter` 含 UI 默认 demo key）+ `application.yml`（port 8080）。
-3. **踩掉 3 个 Spring Boot 4.1 的包重构坑**（这条最有面试价值）：
+3. **踩掉 3 个 Spring Boot 4.1 的包重构坑**（最有参考价值）：
    - `spring-boot-test-autoconfigure` 4.1 只含 jdbc/json/package——**MockMvc/web 测试自动配置被移出核心 test 模块**；`TestRestTemplate` 也从 `spring-boot-test` 消失 → `@SpringBootTest(RANDOM_PORT)+java.net.http.HttpClient`（Java 21 内置）或 MockMvc standalone 更稳。
    - spring-ai OpenAI 自动配置要求"至少一个 credential"，否则 `OpenAiAudioSpeechModel` 启动即炸 → mock-only 应用在**注解级 `@SpringBootApplication(exclude=...)`** 排除 6 个 OpenAi 自动配置。
    - JDBC `DataSourceAutoConfiguration` 在 4.1 挪到 `org.springframework.boot.jdbc.autoconfigure`（`spring-boot-jdbc` 模块），不在 demo-api 编译类路径——注解引用编译不过，改**字符串 `spring.autoconfigure.exclude`**（runtime 生效，编译不需要类路径）。
@@ -67,7 +67,7 @@
 
 ---
 
-## 5. 面试可讲的故事（Result 量化）
+## 5. 结果量化（Result）
 
 - **"真实 API 路径为什么之前跑不通"**：不是引擎 bug，是**装配缺失**（无 wiring、NodeRegistry 空）——找出"接口存在但从未被接起来"的工程判断力。
 - **Spring Boot 4.1 激进重构**：MockMvc/web 测试自动配置和 JDBC autoconfig 都**移出了原包**——用 diagnostic 思路（`ClassNotFoundException` → 找真实类在哪个 jar）定位，而非盲目 +依赖。

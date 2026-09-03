@@ -1,6 +1,6 @@
 # AgentFlow v1 交付状态 · 剩余工作 · v2 路线图
 
-> 本文档是 2026-08-07 对 v1 的交付盘点与 v2 边界的一手来源，供接手/面试口径自洽。
+> 本文档是 2026-08-07 对 v1 的交付盘点与 v2 边界的一手来源，供接手与口径自洽。
 > 更新日期：2026-08-07（2026-08-10 更新：WorkflowSubmissionGuard + per-workflow budget 已交付，见档 B；2026-08-14 更新：档 A Grafana/Prometheus/Kafka 环境落地已部署验证，见档 A；2026-08-17 更新：真 PG `verify` 实跑绿，档 A 全闭环）。计划权威件：`docs/plans/agentflow/`（本文档不替代 plan，只做状态与路线的快照）。
 
 ---
@@ -36,7 +36,7 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 | **per-workflow 预算字段** `budget_tokens`/`budget_cost` | R10 | ✅ **已交付**（2026-08-10，`4072b3e`）——`AgentflowMeta` 加预算字段 + `WorkflowBudget`（observability，edge-triggered 累加器）+ BspEngine 穿线 AgentInput → mock 逐节点记账触发 `budget_exceeded`；无预算时回落全局阈值向后兼容 |
 | **Reducer 冲突路径刻意演练**（overwrite/concat/max/custom 触发测试） | 06 OQ `Reducer 冲突无 demo` | ⛔ **明确不做**（2026-08-10 决策）——抽象已有单测覆盖各策略语义，冲突演示性价比低，v1 砍单 |
 
-### 档 C — 叙事 / 面试口径 ✅ 已定稿（2026-08-18）
+### 档 C — 项目叙事 / 对外讲述口径 ✅ 已定稿（2026-08-18）
 - **30s/5min 自述稿已附** `07-sources-revision-interview.md`（主线「静态 DAG → 动态路由 → 迭代收敛 → 分布式解耦」，收口 13 条叙事追问：buy-vs-build / 七三开折算 / KTD-1 BSP vs Actor/CSP / @Tool 与 InterviewCoach 边界 / Spring AI 差异化 / KTD-3 防重复计费 / v1.1 Kafka 解耦）。
 - API Key 完整签发/轮换 registry：现为 demo key + env `AGENTFLOW_API_API_KEYS` 追加，完整签发/轮换属 ops。
 
@@ -66,7 +66,7 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 | **完整 Human-in-the-Loop 审批中间件** | ✅ **已交付**（2026-08-20/21，`feat/hitl-r22-rag` U4–U8）：U4 引擎暂停（`AWAITING_APPROVAL` + 审批单快照落库）+ U5 `approveAndResume` 恢复 + U6 REST 审批端点（`ApprovalController` 待批投影/决策，decidedBy 服务端推导）+ U7 R22 列加密 + U8 demo-rag；**审批 Web UI → ✅ 已交付**（2026-08-23，`feat/r22-extend-approval-ui` U3/U4）：`ApprovalCenterController` 跨工作流聚合端点（`GET /api/approvals/pending`，admin/创建者可见域）+ React UI 第 6 Tab「审批中心」（决策无 mock fallback）+ 看板 AWAITING_APPROVAL 独立第四列；**Kafka 跨节点审批恢复 Deferred** |
 | **Web 可视化工作流编辑器** | |
 | **多租户 SaaS 平台** | v2+ |
-| **Spring Cloud 接入（Nacos/Gateway/Sentinel）** | ⛔ **明确不做**（2026-08-25 调研拍板）——考察了 Dify / Coze Studio 开源版 / Spring AI Alibaba / LangGraph4j 的架构与依赖树：**没有一个把 Spring Cloud 织进编排内核**（Dify=Flask 单体+celery worker；Coze=单 Go 二进制+nginx，etcd 是 Milvus 的；SAA 的 graph-core/agent-framework 零 Spring Cloud 依赖，Nacos 只在可选 side starter）。赛道共识形态 = 无状态执行层 + 队列分发 + 共享状态存储——AgentFlow 的 Kafka 解耦 + tryClaim 幂等 + PG checkpoint 已是该形态。注册中心/网关属 executor 多节点时的接入层决策，不进引擎内核；面试口径见 `07-sources-revision-interview.md` ⑬「为什么不接 Spring Cloud」 |
+| **Spring Cloud 接入（Nacos/Gateway/Sentinel）** | ⛔ **明确不做**（2026-08-25 调研拍板）——考察了 Dify / Coze Studio 开源版 / Spring AI Alibaba / LangGraph4j 的架构与依赖树：**没有一个把 Spring Cloud 织进编排内核**（Dify=Flask 单体+celery worker；Coze=单 Go 二进制+nginx，etcd 是 Milvus 的；SAA 的 graph-core/agent-framework 零 Spring Cloud 依赖，Nacos 只在可选 side starter）。赛道共识形态 = 无状态执行层 + 队列分发 + 共享状态存储——AgentFlow 的 Kafka 解耦 + tryClaim 幂等 + PG checkpoint 已是该形态。注册中心/网关属 executor 多节点时的接入层决策，不进引擎内核；决策详见 `plans/agentflow/07-sources-revision-interview.md` ⑬「为什么不接 Spring Cloud」 |
 | **RAG 演示加分项**（2026-08-10 拍板） | ✅ **已交付**（2026-08-21，`feat/hitl-r22-rag` U8）——新模块 `demo-rag`：`InMemoryVectorStore`（确定性 token 集合 embedder + 余弦 top-k）+ `RagAgentFunction`（检索→增强→委托 wrapped agent）。**KTD-6 证明**：`RagEngineZeroChangeTest` 用 BspEngine 直跑 `agent: rag` 节点零改动成立。与 InterviewCoach（RAG 项目）分工不重复：AgentFlow 只做编排侧接入 |
 
 > 注意：v1 只做**静态 DAG**（KTD-9）；条件分支（动态路由 + on_error 跳转）已交付 v2（2026-08-14）；Human-in-the-Loop 审批 + RAG 演示已交付（2026-08-20/21，`feat/hitl-r22-rag`）；其余（Web 编辑器、多租户）仍属 v2。
@@ -78,4 +78,4 @@ Grafana 6 面板现均有数据，指标通路 engine → exporter 端到端打�
 1. **WorkflowSubmissionGuard**（档 B，真安全缺口）—— ✅ 已交付（2026-08-10，`a37d9dc`，见档 B 表）。
 2. Grafana / 真 PG 部署验证（档 A）—— ✅ 均已交付：Grafana（2026-08-14，`54e5415`）；真 PG `verify` 实跑绿（2026-08-17，本地 PG 容器，IT 真跑非跳过）。
 3. ~~R20 archetypes、Reducer 冲突演练~~（档 B，2026-08-10 决策明确不做）→ **档 B 已全部闭环**。
-4. 档 C 面试口径 → ✅ **已定稿**（2026-08-18，30s/5min 自述稿已附 `07-sources-revision-interview.md`）——v1 收尾档 A/B/C 全闭环。
+4. 档 C 叙事口径 → ✅ **已定稿**（2026-08-18，自述稿已附 `plans/agentflow/07-sources-revision-interview.md`）——v1 收尾档 A/B/C 全闭环。

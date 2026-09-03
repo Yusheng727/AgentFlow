@@ -17,7 +17,7 @@
 
 ## Problem Frame
 
-- **R22 扩列**：`docs/ROADMAP.md` §3 把「checkpoint 列级加密」标 ✅ 但 residual 记录「R22 加密扩到 routing_decisions」为 Deferred。现状：`workflow_routing_decisions.decisions`（JSONB，存已走边列表，条目含节点输出派生的路由信息）与 `workflow_definitions.definition`（JSONB，存完整 DSL——`prompt_template` 含业务敏感话术、`mock_response` 含演示数据）**明文落库**。面试叙事缺口：「列级加密」若只覆盖一处表，被追问「哪些列？为什么只有这些？」时答案是「做了个 demo」而非「系统性方案」。
+- **R22 扩列**：`docs/ROADMAP.md` §3 把「checkpoint 列级加密」标 ✅ 但 residual 记录「R22 加密扩到 routing_decisions」为 Deferred。现状：`workflow_routing_decisions.decisions`（JSONB，存已走边列表，条目含节点输出派生的路由信息）与 `workflow_definitions.definition`（JSONB，存完整 DSL——`prompt_template` 含业务敏感话术、`mock_response` 含演示数据）**明文落库**。方案完整性缺口：「列级加密」若只覆盖一处表，「哪些列？为什么只有这些？」的答案是「做了个 demo」而非「系统性方案」。
 - **审批 UI**：HITL U4–U6 已交付引擎暂停/恢复 + REST 端点，但操作路径是 curl/Postman——「人机协同」的「人」没有界面。`docs/plans/2026-08-20-001-feat-hitl-r22-rag-plan.md` 明确把「审批 Web UI」记 Deferred；ROADMAP §4 HITL 行同样标注。UI 现有 5 Tab 无审批入口，且 `api.ts` 状态归一把 `AWAITING_APPROVAL` 静默丢进 `failed`（`raw as WorkflowStatusUi` 不含该值 → 三列分桶 lookup undefined）——**这是实际 bug**，不只是缺功能。
 
 ### 需求反面（本计划不做什么）
@@ -126,7 +126,6 @@ UI 需要跨工作流的待批聚合视图，但既有 `GET /api/workflows/{id}/
 - **Files**：
   - Modify: `CLAUDE.md`（当前状态段新增本轮）
   - Modify: `docs/ROADMAP.md`（§3 R22 行补扩列 + §4 HITL 行补审批 UI + residual 更新）
-  - Modify: `docs/developer-notes/00-interview-arsenal.md`（R22 系统性叙事：哪些列、为什么、fail-closed 纪律；HITL 全链路含 UI）
   - Modify: `docs/developer-notes/01-implementation-rationale.md`（若选型记录需补扩列决策）
   - Modify: `docs/developer-notes/04-glossary.md`（若新术语）
 - **Approach**：按「文档随开发同步（强制）」约定，每个 feature 落地即写
@@ -144,7 +143,7 @@ UI 需要跨工作流的待批聚合视图，但既有 `GET /api/workflows/{id}/
 2. **审批全链路 UI 可见**：提交含审批节点的工作流 → 看板出现「待审批」列 → 审批中心 Tab 看到待批单 → APPROVE → 看板流转到已完成
 3. **向后兼容**：无 key（Noop）行为与现状 byte-level 等价（明文 JSON）；legacy 明文行升级后读得动；InMemory/demo 路径零变化
 4. **质量门禁**：全仓 `mvn verify` 绿 + JaCoCo 达标 + `npm test`/`npm run build` 绿
-5. **文档**：CLAUDE.md/ROADMAP/developer-notes 同步，面试叙事升级（R22「系统性列加密」+ HITL「全链路含 UI」）
+5. **文档**：CLAUDE.md/ROADMAP/developer-notes 同步，叙事口径升级（R22「系统性列加密」+ HITL「全链路含 UI」）
 
 ---
 

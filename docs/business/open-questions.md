@@ -22,7 +22,7 @@
 | Q8 | P2 | 预算超限告警的运维响应预案——事件后人工介入 SLA 与动作（kill/联系提交方/仅记录）？ | flows/cost-budget-control.md | 非阻断语义下系统无动作；响应流程是运维制度问题 | 运维/产品 | Grafana 告警通道；运维手册 |
 | Q9 | P2 | DryRunEngine 与 diagnosis 已建但生产入口缺失（dryRun 零生产调用）——是否补「服务端按 id 诊断」「干跑端点/CLI」？ | flows/observability-diagnosis.md | CodeGraph 证实 dryRun 4 处调用全为测试；补入口属产品范围决策 | 产品/架构师 | UI 诊断 Tab 数据来源；开发者调试工作流 | 待确认 |
 | Q10 | P1 | 列加密 key 轮换策略——当前单钥，换 key 即旧行全部不可解（聚合端点跳过、恢复损坏）；需双钥并行解密或信封加密？ | flows/column-encryption.md | 代码只有单钥；轮换周期/应急流程是安全运维制度且实现成本需权衡 | 安全负责人/架构师 | 合规轮换 mandate；数据保留期与重写迁移成本 | 待确认 |
-| Q11 | P2 | RAG 是否从 demo 升级核心能力（pgvector/嵌入模型/动态知识库/多租户隔离）？ | flows/rag-retrieval.md | 当前内存库/静态文档是有意最小验证实现；升级取决于产品叙事中 RAG 权重 | 产品/架构师 | 简历/产品叙事；真实知识库接入需求 | 待确认 |
+| Q11 | P2 | RAG 是否从 demo 升级核心能力（pgvector/嵌入模型/动态知识库/多租户隔离）？ | flows/rag-retrieval.md | 当前内存库/静态文档是有意最小验证实现；升级取决于产品叙事中 RAG 权重 | 产品/架构师 | 产品叙事；真实知识库接入需求 | 待确认 |
 
 ## 已解决问题归档
 

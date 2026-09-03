@@ -14,7 +14,7 @@ title: v2 条件分支（运行时动态路由 + on_error 兜底）需求
 
 v1 的工作流是**静态 DAG**：`WorkflowDefinition` 只有固定 `nodes` + `edges`，`DAGLayerer.computeSuperSteps` 在执行前用最长路径一次性算出所有节点的层号，`BspEngine` 逐层「并行执行 → barrier」。这意味着 v1 无法表达「节点 A 的输出决定下一步走 B 还是 C」，也无法表达「节点失败时跳 cleanup 而非整体 abort」——这两点正是 `02-requirements.md` 明列的 v2 能力（KTD-9：`on_error: goto cleanupNode`；Deferred 项：Agent 输出动态决定下一步）。
 
-这是当前最尖锐的面试追问点：「你 v1 只做静态 DAG，动态路由怎么办？」。本需求把这条从「承认是边界」变成「有实现深度的一章」。**先做条件分支而非直攻循环/反思**，是因为条件分支是通往循环的必经最小步——在保住「无环」不变量的前提下先落运行时路由；循环/反思（回边）是更远的差异化能力，不是被无限搁置。
+这是对 v1 边界最尖锐的追问点：「你 v1 只做静态 DAG，动态路由怎么办？」。本需求把这条从「承认是边界」变成「有实现深度的一章」。**先做条件分支而非直攻循环/反思**，是因为条件分支是通往循环的必经最小步——在保住「无环」不变量的前提下先落运行时路由；循环/反思（回边）是更远的差异化能力，不是被无限搁置。
 
 ---
 
@@ -26,7 +26,7 @@ v1 的工作流是**静态 DAG**：`WorkflowDefinition` 只有固定 `nodes` + `
 - **`when` 谓词用 SpEL，但新增布尔求值入口，不复用 `SpelPromptResolver` 本体**。项目已有 `com.agentflow.prompt.SpelPromptResolver`，但它只做 `${...}` 字符串模板替换（返回 `String`，根对象 `Root(context, inputs)`），无 `output` 根、不返回 boolean，不能直接当谓词求值器。真正复用的是它那几行 hardened `SimpleEvaluationContext`（禁 `T()`、禁方法调用、`DataBindingPropertyAccessor` + `MapAccessor`，KTD-2 安全）；需要**新增一个谓词求值入口**（原始表达式 → boolean，根对象为 from 节点的输出，`output.<field>` 引用）。
 - **`on_error: goto <nodeId>` 是节点属性，不是边，但作为隐式边参与环校验**。语义对齐 KTD-9；触发时机是「节点**终态失败**」（retry 耗尽或 Fatal）。**「下游」定义为静态图可达性**（含正常边 + on_error 隐式边），on_error 的回边同样被环校验捕获。
 - **同一节点可同时声明条件边与 on_error，两者互斥不叠加**。成功时按谓词选分支；终态失败时走 on_error。`on_error` 目标自身失败不触发二次跳转，走终态失败路径。
-- **承认确定性的取舍**：数据驱动路由使「执行哪些节点」取决于运行时输出，BSP 保留的是静态分层 + barrier，失去的是执行路径的确定性；R10 的 checkpoint 路由决策重放把它买回来——这是「BSP 怎么在动态路由下保留」的面试叙事核心。
+- **承认确定性的取舍**：数据驱动路由使「执行哪些节点」取决于运行时输出，BSP 保留的是静态分层 + barrier，失去的是执行路径的确定性；R10 的 checkpoint 路由决策重放把它买回来——这是「BSP 怎么在动态路由下保留」的叙事核心。
 
 ---
 

@@ -1,7 +1,7 @@
 # feat: HITL 审批 + R22 列级加密 + RAG demo（v2/v1.1 收尾三件套）
 
 > 类型：feat ｜ 日期：2026-08-20 ｜ 深度：Deep（跨 engine / checkpoint / api / 新 demo 模块）
-> 定位：v2「完整 Human-in-the-Loop 审批中间件」→ ✅、v1.1「checkpoint 列级加密（R22）」→ ✅、v2「RAG 演示加分项」→ ✅。这是 agentflow 简历叙事「静态 DAG → 动态路由 → 迭代收敛 → 分布式解耦」之上的最后三块拼图，交付后进入文档整理 + 提交推送收尾。
+> 定位：v2「完整 Human-in-the-Loop 审批中间件」→ ✅、v1.1「checkpoint 列级加密（R22）」→ ✅、v2「RAG 演示加分项」→ ✅。这是 agentflow 能力主线「静态 DAG → 动态路由 → 迭代收敛 → 分布式解耦」之上的最后三块拼图，交付后进入文档整理 + 提交推送收尾。
 > 前置：本项目已有的 engine checkpoint seam（U5/KTD-3）、`WorkflowExecutionService`（KTD-B）、`NodeResult` sealed 结果、postgres Flyway V1–V6、demo-api `ApiConfig` 显式 Bean wiring、`NodeRegistry` fallback→mock 均作为本计划的复用地基。
 
 ---
@@ -422,7 +422,7 @@ InMemory 用 `ConcurrentHashMap<approvalId, ApprovalRequest>` + per-workflow 索
 
 ### U9. [文档系统收尾：CLAUDE.md / ROADMAP / developer-notes / README / GRAFANA]
 
-**Goal**: 把三件套 + 工程现状完整沉淀进文档，保持「文档随开发同步」约定，供简历/面试/接手。
+**Goal**: 把三件套 + 工程现状完整沉淀进文档，保持「文档随开发同步」约定，供接手与复盘。
 
 **Requirements**: 仓库「文档随开发同步（强制）」约定；用户「把文档系统整理好，写好每一个文档，沉淀下来」。
 

@@ -12,9 +12,9 @@ title: v2 循环/回边（有界有环图 + 迭代轮次执行）需求
 
 v2 条件分支已把「静态 DAG」扩成「无环 + 运行时路由」，但循环/回边仍被排除在硬边界之外：`SemanticValidator.checkAcyclic` 用 Kahn 拓扑强制无环，`DAGLayerer` 依赖无环做最长路径分层，`BspEngine` 用「一次性 for 遍历预分层」执行、superStep 是有限静态层号。三者共同构成「不能循环」的边界。
 
-循环是条件分支的自然延伸，也是 Multi-Agent 编排的经典模式（Anthropic「Building Effective Agents」把 reflection 列为核心 pattern）。面试追问链从「动态路由怎么办」自然延伸到「那迭代收敛怎么办」——这正是条件分支 brainstorm 的 Scope Boundaries 明示的「更远的差异化能力，不是被无限搁置」。
+循环是条件分支的自然延伸，也是 Multi-Agent 编排的经典模式（Anthropic「Building Effective Agents」把 reflection 列为核心 pattern）。能力追问链从「动态路由怎么办」自然延伸到「那迭代收敛怎么办」——这正是条件分支 brainstorm 的 Scope Boundaries 明示的「更远的差异化能力，不是被无限搁置」。
 
-三个候选切入（反思 / 重试闭环 / 迭代到收敛）本质相同：一个带终止条件的循环，区别在环的规模和收敛判据位置。选反思循环切入，因为它是最小增量、复用条件边谓词最多、面试叙事最完整；重试闭环是它的退化形式，迭代到收敛留作后续。
+三个候选切入（反思 / 重试闭环 / 迭代到收敛）本质相同：一个带终止条件的循环，区别在环的规模和收敛判据位置。选反思循环切入，因为它是最小增量、复用条件边谓词最多、叙事最完整；重试闭环是它的退化形式，迭代到收敛留作后续。
 
 ## Key Decisions
 

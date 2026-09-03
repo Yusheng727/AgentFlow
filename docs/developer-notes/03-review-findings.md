@@ -1,7 +1,7 @@
 # Code Review 发现与修复
 
 > 记录 ce-code-review 多 agent 审查的高价值发现 + 修复思路。
-> **面试用途**：「怎么保证代码质量」「有没有做 code review」「工程 rigor」类问题的核心证据。
+> **用途**：「怎么保证代码质量」「有没有做 code review」「工程 rigor」的原始记录。
 > ce-code-review 是 compound-engineering 插件的审查 skill：派 10 个 persona reviewer 并行审，交叉验证后 merge/dedup。
 
 ---
@@ -13,7 +13,7 @@
 - **reviewer 清单**：correctness / testing / maintainability / project-standards / performance / api-contract / data-migration / reliability / adversarial / agent-native / learnings-researcher
 - **关键机制**：cross-reviewer agreement——多个 reviewer 独立报告同一问题，confidence 提权。U5 最严重的两个 P0 被 **4 个 reviewer 独立确认**（adversarial + correctness + reliability + testing），可信度极高。
 
-**面试讲法**：「我不只写测试，还跑了多 agent code review——10 个不同视角的 reviewer（correctness、security、adversarial 等）并行审我的 diff，交叉验证发现的问题。最严重的两个 P0 是 adversarial reviewer 用混沌工程思路构造的崩溃时序攻击场景，另外 3 个 reviewer 独立佐证了同一根因，我才确信这是真问题不是误报。」
+**复盘**：「我不只写测试，还跑了多 agent code review——10 个不同视角的 reviewer（correctness、security、adversarial 等）并行审我的 diff，交叉验证发现的问题。最严重的两个 P0 是 adversarial reviewer 用混沌工程思路构造的崩溃时序攻击场景，另外 3 个 reviewer 独立佐证了同一根因，我才确信这是真问题不是误报。」
 
 ---
 
@@ -45,7 +45,7 @@
 
 ---
 
-## Review 方法论的面试价值
+## Review 方法论的价值
 
 ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 交叉验证」。这套机制的价值：
 
@@ -53,7 +53,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 2. **Cross-reviewer agreement 提权**：同一问题被 N 个独立 reviewer 报告，confidence 提升。U5 的两个 P0 被 4 个 reviewer 独立确认——如果只有 adversarial 报，可能是它构造的场景太极端；但 correctness/reliability/testing 都从各自视角独立得出同样结论，可信度就极高。
 3. **Confidence 门控**：anchor 50 以下的 finding 被 suppress（除非 P0），避免低信号噪音淹没真问题。
 
-**面试讲法**：「我的 code review 不是人肉 review，是用多 agent 编排做的——10 个 persona reviewer 并行，每个有专属视角（逻辑正确性、安全、混沌攻击、数据迁移等），独立报告后交叉验证。这模仿了真实团队里不同角色（SRE、DBA、安全工程师）的 review 视角，但能并行跑、且每个 reviewer 都是深度专家。」
+**复盘**：「我的 code review 不是人肉 review，是用多 agent 编排做的——10 个 persona reviewer 并行，每个有专属视角（逻辑正确性、安全、混沌攻击、数据迁移等），独立报告后交叉验证。这模仿了真实团队里不同角色（SRE、DBA、安全工程师）的 review 视角，但能并行跑、且每个 reviewer 都是深度专家。」
 
 ---
 
@@ -64,7 +64,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - **reviewer 清单**：correctness / testing / maintainability / project-standards / agent-native / learnings-researcher（always-on 6）+ security / performance / api-contract / reliability / adversarial（cross-cutting 5）
 - **关键机制**：cross-reviewer agreement——同一问题被多个 reviewer 独立报告，confidence 提权。本次最严重的 P0（recoverAndExecute 不接 trace）被 **4 个 reviewer 独立确认**（adversarial + correctness + reliability + agent-native），与 U5 的两个 P0 同等可信度。
 
-**面试讲法**：「U7 这次 review 又复现了 U5 的模式——最严重的 P0 被 4 个 reviewer 从不同视角独立确认：adversarial 构造了 checkpoint=SUCCESS 但 trace=FAILED 的状态分裂场景，correctness 从代码路径看出 recoverAndExecute 不引用 traceRegistry，reliability 指出 trace 终态与恢复路径不一致，agent-native 指出恢复工作流对 TraceController 不可见。四个视角独立得出同一根因，我才确信这是真问题——和 U5 的 ADV-1/ADV-2 一模一样的 cross-reviewer 交叉验证模式。」
+**复盘**：「U7 这次 review 又复现了 U5 的模式——最严重的 P0 被 4 个 reviewer 从不同视角独立确认：adversarial 构造了 checkpoint=SUCCESS 但 trace=FAILED 的状态分裂场景，correctness 从代码路径看出 recoverAndExecute 不引用 traceRegistry，reliability 指出 trace 终态与恢复路径不一致，agent-native 指出恢复工作流对 TraceController 不可见。四个视角独立得出同一根因，我才确信这是真问题——和 U5 的 ADV-1/ADV-2 一模一样的 cross-reviewer 交叉验证模式。」
 
 ### P0-1: TraceController 缺 ownership check → IDOR
 
@@ -91,7 +91,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 **发现**：security（R1）+ performance（perf-1）+ reliability（REL-1）+ correctness（residual）+ api-contract（residual）**5 票**——本次最高票数。
 **问题**：ConcurrentHashMap 永不清理，BspEngine.execute 每次 register 一个新 trace，无 remove。生产长跑 OOM。
 **处置**：**保留现状记为 residual**（非不修，是设计权衡）。理由：若 finally 里 remove，TraceController 在工作流完成后就查不到 trace（破坏核心用例）。正确解法是 TTL eviction 或 Caffeine LRU，属 v1.1 范围（plan 已声明"v1 不主动清理"）。5 票共识是"需生产前解决"，不是"现在阻断合并"。
-**面试讲法**：「5 个 reviewer 都指出了 registry 无清理会 OOM。但我没盲改——简单 remove 会破坏 TraceController 的核心用例（工作流跑完查 trace）。正确解法是 TTL eviction，记为 v1.1。这体现 review 修复要懂设计权衡，不是机械执行 reviewer 建议。」
+**复盘**：「5 个 reviewer 都指出了 registry 无清理会 OOM。但我没盲改——简单 remove 会破坏 TraceController 的核心用例（工作流跑完查 trace）。正确解法是 TTL eviction，记为 v1.1。这体现 review 修复要懂设计权衡，不是机械执行 reviewer 建议。」
 
 ### P2: CostCalculator 畸形 JSON → ClassCastException 阻断启动
 
@@ -123,7 +123,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - **REL-002**: `JdbcTemplate` 无 `setQueryTimeout`——DB 操作可无限阻塞 VT。生产前加 `jdbc.setQueryTimeout(5)`。
 - **PG 零测试**: `PostgresCheckpointManager` 的 Semaphore/ON CONFLICT/JSONB/Flyway 全未测试（当前只用 InMemory 测）。需 H2 或 Testcontainers 补集成测试。这是 U5 最大的测试缺口。
 
-**面试讲法（被问「还有什么没做好」时）**：「我清楚知道哪些是 known risk：比如 PostgresCheckpointManager 还没有集成测试（只有 InMemory 覆盖），Recovery 的版本检查依赖 U8 的 workflow_definitions 表还没建。这些不是 bug，是 v1 范围外的 stretch，我记在 handoff 文档里，演示前补。」——主动暴露 known gap 比假装完美更可信。
+**复盘（问「还有什么没做好」时）**：「我清楚知道哪些是 known risk：比如 PostgresCheckpointManager 还没有集成测试（只有 InMemory 覆盖），Recovery 的版本检查依赖 U8 的 workflow_definitions 表还没建。这些不是 bug，是 v1 范围外的 stretch，我记在 handoff 文档里，演示前补。」——主动暴露 known gap 比假装完美更可信。
 
 ---
 
@@ -162,7 +162,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - **预算未在真实 LLM 路径强制执行**：R10 `WorkflowBudget` 经 `AgentInput.budget()` 穿线，但只有 `MockAgentFunction` 消费；Spring 与 LangChain4j 两真实适配器都不读——YAML `budget_*` 在真实路径不生效。
 - **`redactor` 默认 `Function.identity()`** 不脱敏；生产应注入 PromptRedactionFilter。
 
-**面试讲法**：「这个 P1 bug 是两个 reviewer 独立抓到同一处（交叉确认提到 100）——我把有界循环的『终止态表达』拎出来讲：上限不能只防死循环，还要决定超限时以什么状态结束。这正好体现 review 交叉验证的价值。」
+**复盘**：「这个 P1 bug 是两个 reviewer 独立抓到同一处（交叉确认提到 100）——我把有界循环的『终止态表达』拎出来讲：上限不能只防死循环，还要决定超限时以什么状态结束。这正好体现 review 交叉验证的价值。」
 
 ---
 
@@ -176,7 +176,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 **Bug**：LangChain4j 的 `ExceptionMapper` 构造 status marker 时**携带 cause**——真实形状是 `RateLimitException(cause=HttpException)`（marker 在**外层**，内层是 `HttpException`）。而适配器 `mapException` 先 unwrap 一层（`cause = e.getCause()`）再对 cause 判 `instanceof RetriableException` → 剥掉外层 marker，对内层 `HttpException` 判 → **HttpException 直接继承 LangChain4jException（非 Retriable，javap 证实）→ FatalException → 真实 429/5xx/超时仍不重试**。
 **为何测试漏了**：新增测试用 **message-only 构造器**（`getCause()==null`），所以绿——是 **false-confidence 测试**（testing + reliability 两位评审各自 javap 字节码独立证实，交叉确认提到 conf 100）。
 **修复**（`bf09771`）：`ErrorClassifier.toExecutionException(classifier, e)` **沿 cause 兜底分类**（判 e 与其 getCause()），两适配器把**原始异常 `e`**（未 unwrap）传给分类器；LC4j RateLimit 测试改用真实 cause 形状（TDD——修前会红）。
-**教训（面试核心）**：「断言测试绿 ≠ 生产行为生效」是最隐蔽的缺陷形态，尤其当**异常是 marker-外层-包裹结构**时——unwrap 剥掉标记、测试又用无 cause 构造器，双重重叠出假绿。正确姿势：测试用**框架真实产出的形状**（含 cause 装载）。
+**教训**：「断言测试绿 ≠ 生产行为生效」是最隐蔽的缺陷形态，尤其当**异常是 marker-外层-包裹结构**时——unwrap 剥掉标记、测试又用无 cause 构造器，双重重叠出假绿。正确姿势：测试用**框架真实产出的形状**（含 cause 装载）。
 
 ### 其余应用（同 `bf09771`）
 
@@ -197,7 +197,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - `LangChain4jAgentAdapter`：在既有 `metrics.recordTokens` 处并记 `recordBudget`（它无 advisor，`recordTokens` 本就是单一来源）。
 - `SpringAiAgentAdapter`：新增 8-arg 构造注入 `AgentFlowMetrics`+`model`（6-arg 委托 null，构造点零改动），成功路径 `recordBudget`。
 
-**面试讲法**：「我给 YAML 预算补上真实路径的闭环。难点是成本记账与现有 advisor 的**双计冲突**——Spring 路径 token/cost 已被 TokenCountingAdvisor 记过，直接再 record 会重复。解法是把『预算累加 + 超限事件』抽成 `recordBudget` 助手，成本用 costCalculator **纯算不落 counter**，与指标记账正交；这样 same-DSL-same-result（KTD-7）在两个框架真实路径都成立。」——这是「改动要绕开既有记账路径避免双计」的体现。
+**复盘**：「我给 YAML 预算补上真实路径的闭环。难点是成本记账与现有 advisor 的**双计冲突**——Spring 路径 token/cost 已被 TokenCountingAdvisor 记过，直接再 record 会重复。解法是把『预算累加 + 超限事件』抽成 `recordBudget` 助手，成本用 costCalculator **纯算不落 counter**，与指标记账正交；这样 same-DSL-same-result（KTD-7）在两个框架真实路径都成立。」——这是「改动要绕开既有记账路径避免双计」的体现。
 
 ## v1.1 回顾 · B1 工具异常防泄漏到模型（2026-08-12）
 
@@ -206,7 +206,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 **关键技术点（为什么不能包装 DefaultToolExecutor）**：用 `javap -c` 反编译确认——框架把异常转成**字符串返回**而非抛出，**外部包一层 catch 根本拦不到**。所以必须**自持 bean + method 自行反射 invoke**，在异常边界拦截：真实 cause 只 `log.warn` 进服务端，返回泛化 `{"error":"tool execution failed"}` 给模型。参数处理对齐框架语义（`@ToolMemoryId` 透传、String/primitive 强转、record 走 Jackson；void→"Success"、null→"null"、非 String→JSON）。`collectTools` 从 `DefaultToolExecutor(bean, m)` 换成 `SafeToolExecutor(bean, m)`。
 - 覆盖：`SafeToolExecutor` 37%→93.3%（补 typed 参数渲染 / ToolMemoryId / 畸形 JSON 等分支测试）。
 
-**面试讲法**：「安全 review 抓到一个真漏洞：LangChain4j 的默认工具执行器把 @Tool 抛的**原始异常消息直接当结果回给模型**，异常里的 DB 连接串/内网地址会被模型在回复里复述出来。我反编译确认它是『吞异常返回字符串』而非抛出，所以**包一层 catch 没用**，只能自己反射 invoke 在异常边界截——真实原因进服务端日志，给模型泛化错误。这展示『先反编译确认框架真实行为再动手，而不是靠猜』的严谨性。」——这是「防 prompt-injection 侧信道泄漏 + 反编译定边界」的强表达。
+**复盘**：「安全 review 抓到一个真漏洞：LangChain4j 的默认工具执行器把 @Tool 抛的**原始异常消息直接当结果回给模型**，异常里的 DB 连接串/内网地址会被模型在回复里复述出来。我反编译确认它是『吞异常返回字符串』而非抛出，所以**包一层 catch 没用**，只能自己反射 invoke 在异常边界截——真实原因进服务端日志，给模型泛化错误。这展示『先反编译确认框架真实行为再动手，而不是靠猜』的严谨性。」——这是「防 prompt-injection 侧信道泄漏 + 反编译定边界」的强表达。
 
 ## v1.1 回顾 · B3 继承/接口 @Tool 不注册（2026-08-12）
 
@@ -214,7 +214,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 
 **陷阱（为什么不能简单换 getMethods()）**：`getMethods()` 只返回 **public** 方法，会**丢掉非 public @Tool**（本项目工具多为包私有，`SafeToolExecutor` 测试的工具也是）→ 改成 getMethods() 会更糟。故**必须全层级遍历**：`collectToolMethods(Class)` 逐层用 `getDeclaredMethods()` 扫（本类 + 基类 + 接口含父接口），保留非 public + 覆盖继承面；`signature()`（名+参数类型）作去重键，`LinkedHashMap` + `putIfAbsent` 让**类实现优先于接口抽象**、同一逻辑方法不重复注册。
 
-**面试讲法**：「工具注册有个隐蔽坑：反射只用 getDeclaredMethods 会漏基类/接口上的 @Tool；但换 getMethods 又会丢包私有的 @Tool（工具常写包私有）。所以不能二选一，得**全层级遍历 + 签名去重**——既补上继承/接口面，又保住非 public 方法。这是个『看似一行改动、实则两个方向都会踩坑』的典型。」——「反射工具注册的完整边界」的强表达。
+**复盘**：「工具注册有个隐蔽坑：反射只用 getDeclaredMethods 会漏基类/接口上的 @Tool；但换 getMethods 又会丢包私有的 @Tool（工具常写包私有）。所以不能二选一，得**全层级遍历 + 签名去重**——既补上继承/接口面，又保住非 public 方法。这是个『看似一行改动、实则两个方向都会踩坑』的典型。」——「反射工具注册的完整边界」的强表达。
 
 ## v1.1 回顾 · C1+B1+B3 ce-code-review 复审与应用修复（2026-08-12，10 评审）
 
@@ -232,9 +232,9 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - **Spring 适配器预算路径**（正确性上同样存在 schema last-wins / 失败路径缺口，且 8-arg 构造无生产接线）：本批只修了 LC4j（工具循环所在地），Spring 因 advisors + 无生产消费者未动——若后续接真实 Spring 路径需补。
 - **metrics==null 静默停用预算**（adversarial，conf 50 → residual）：两真实适配器把 recordBudget 挂 metrics 非空之后，手配/极简部署无 Micrometer bean 时预算被静默禁用；且仓库内 demo-api/starter **均不构造真实适配器**（无生产接线）——端到端预算强制在仓库内不可验证（同 B2「retryPolicy wired null」模式）。→ **✅ 档 1（2026-08-13）已补生产接线 + 真实端到端跑通**：demo-api `ApiConfig.nodeRegistry` 加 `agentflow.real.enabled` + env `DEEPSEEK_API_KEY` 条件装配真实 DeepSeek 适配器；`DeepSeekE2eIT` 用真实 key 跑通（DSL→BspEngine→真实适配器→DeepSeek，`metrics.totalCost()>0`）。
 
-**面试讲法**：「审自己前一轮的代码，10 个 persona 抓到一个共性：C1 预算只在成功路径记**末次** token——schema 重试（3 次真实付费）只算最后一次，重试花的 2/3 成本被静默剔除，正是『测试绿 ≠ 生产生效』的又一形态。修复是把记账从『成功路径收尾』改成『每轮真实调用即记』，重试和失败轮自然都进预算。另外自写 coerce 想对齐 DefaultToolExecutor 却漏了字符串数字→CCE——教训是**尽量复用框架/Jackson 语义，别手写易碎的强转**。」——这是「跨评审互证抓分数账 bug + 复用而非重造」的强表达。
+**复盘**：「审自己前一轮的代码，10 个 persona 抓到一个共性：C1 预算只在成功路径记**末次** token——schema 重试（3 次真实付费）只算最后一次，重试花的 2/3 成本被静默剔除，正是『测试绿 ≠ 生产生效』的又一形态。修复是把记账从『成功路径收尾』改成『每轮真实调用即记』，重试和失败轮自然都进预算。另外自写 coerce 想对齐 DefaultToolExecutor 却漏了字符串数字→CCE——教训是**尽量复用框架/Jackson 语义，别手写易碎的强转**。」——这是「跨评审互证抓分数账 bug + 复用而非重造」的强表达。
 
-**面试讲法**：「我写过 update 打的 P1 是『测试全绿但功能没生效』——根因是框架异常是 marker-外层-包裹结构，适配器 unwrap 剥掉了可重试标记，而测试用了无 cause 的构造器给了假确认。两位评审各自对 jar 做 javap 独立证实同一处，交叉提到 conf 100。教训：测试必须用框架真实产出的形状。」——这是「怎么防止假绿测试」的强表达。
+**复盘**：「我写过 update 打的 P1 是『测试全绿但功能没生效』——根因是框架异常是 marker-外层-包裹结构，适配器 unwrap 剥掉了可重试标记，而测试用了无 cause 的构造器给了假确认。两位评审各自对 jar 做 javap 独立证实同一处，交叉提到 conf 100。教训：测试必须用框架真实产出的形状。」——这是「怎么防止假绿测试」的强表达。
 
 ---
 
@@ -249,7 +249,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - **`recoverAndExecute` 丢 on_error 三终态 + 不重建 onErrorActivated（5 票，最高共识）**：恢复路径硬编码 `STATUS_SUCCESS`、不标 `markCompletedViaOnError`、级联守卫从空集重建——`execute`/`recoverAndExecute` 双路径已开始漂移。修复：从 takenEdges 重建 `onErrorActivated`，终态对齐 execute（FALLBACK + markCompletedViaOnError）。
 - **`PredicateEvaluator` 只 catch SpelEvaluationException（correctness，conf 100）**：`SpelParseException`（语法错误）与 `SpelEvaluationException`（求值错误）是兄弟类，语法错误泄漏为裸异常。修复：catch `ExpressionException` 超类。
 
-**面试讲法**：「这轮审出最有价值的两个 P1 都是『测试全绿但生产不生效』：一是 Postgres 路由持久化是接口 default no-op、只有内存实现，生产崩溃恢复直接丢路由——这正是我项目里反复出现的那类『mock 绿 ≠ 部署生效』坑，这次 4 个 reviewer 独立命中同一处；二是 execute 和 recoverAndExecute 两条 BSP 主循环复制粘贴后开始漂移，恢复路径漏了 on_error 三终态，5 个 reviewer 都抓到——教训是**核心循环要抽共享方法，复制必然漂移**。还有一个纯逻辑 bug：恢复期 BFS 判定节点是 fan-out 还是路由只看『有无 when 边』，漏了『已走 on_error』这一维，把失败节点当成并行 fan-out、复活了本应跳过的下游——单测全过因为恢复+on_error 组合路径根本没覆盖到。」
+**复盘**：「这轮审出最有价值的两个 P1 都是『测试全绿但生产不生效』：一是 Postgres 路由持久化是接口 default no-op、只有内存实现，生产崩溃恢复直接丢路由——这正是我项目里反复出现的那类『mock 绿 ≠ 部署生效』坑，这次 4 个 reviewer 独立命中同一处；二是 execute 和 recoverAndExecute 两条 BSP 主循环复制粘贴后开始漂移，恢复路径漏了 on_error 三终态，5 个 reviewer 都抓到——教训是**核心循环要抽共享方法，复制必然漂移**。还有一个纯逻辑 bug：恢复期 BFS 判定节点是 fan-out 还是路由只看『有无 when 边』，漏了『已走 on_error』这一维，把失败节点当成并行 fan-out、复活了本应跳过的下游——单测全过因为恢复+on_error 组合路径根本没覆盖到。」
 
 **待人工/后续**：`execute`/`recoverAndExecute` 循环仍有 ~15 行重复（本次只修行为、未抽共享方法，见 maintainability P1）；`"from->to"` 边键字符串 4 处手写无单一真相源；`STATUS_FALLBACK` 指标 tag 无 metrics-registry 断言（当前 on_error 测试均 metrics=null）。
 
@@ -273,7 +273,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - Postgres round 维度 SQL（V5 + ON CONFLICT/SELECT round 过滤）零集成测试（multi-reviewer testing_gaps）——历史 PG 零测试缺口延续，需补 Failsafe IT。
 - backedge 源节点缺退出边校验（correctness P3）——忘记退出边时运行时 Fatal 而非解析期拒绝。
 
-**面试讲法**：「这轮 10-persona 审查抓到 2 个 P1，都在恢复路径，第三次印证『execute 和 recoverAndExecute 两条主循环复制粘贴必然漂移』——这次是轮次转换检测：mid-round 崩溃（回边命中但末层 barrier 未写）不触发转换，恢复报 SUCCESS 但退出节点从未执行；final-barrier 后被从层 0 整体重跑导致 LLM 双计费。修复方向是判断『该轮实质完成』要按该轮路由是否含回边，而不是看崩溃层号——恢复的 round 模型是 execute 的简化副本，边界情况处理不完整。测试全绿是因为这些崩溃窗口在 mock/恢复路径根本没覆盖到。」
+**复盘**：「这轮 10-persona 审查抓到 2 个 P1，都在恢复路径，第三次印证『execute 和 recoverAndExecute 两条主循环复制粘贴必然漂移』——这次是轮次转换检测：mid-round 崩溃（回边命中但末层 barrier 未写）不触发转换，恢复报 SUCCESS 但退出节点从未执行；final-barrier 后被从层 0 整体重跑导致 LLM 双计费。修复方向是判断『该轮实质完成』要按该轮路由是否含回边，而不是看崩溃层号——恢复的 round 模型是 execute 的简化副本，边界情况处理不完整。测试全绿是因为这些崩溃窗口在 mock/恢复路径根本没覆盖到。」
 
 ---
 
@@ -298,7 +298,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - `agentflowKafkaObjectMapper` 是裸 `new ObjectMapper()` 无 JavaTimeModule——java.time inputs 序列化会失败（multi-reviewer residual，E2E 只用 Map.of() 未覆盖）。
 - demo-api 加 kafka-starter 后即使 disabled，Boot KafkaAutoConfiguration 仍因 classpath 惰性装配额外 bean（correctness/adversarial P3）——懒连接不炸启动，默认路径测试验证过无碍。
 
-**面试讲法**：「这轮 10-persona 审查最有价值的是两个『测试绿但生产不生效』：一是 Kafka 模式的 retry——`WorkflowController.retry` 派发消息但 FAILED 是终态，消费者幂等跳过把重试消息吞了，返回 202 但永远不重跑，3 个 reviewer 独立置信 100 命中同一处，而本地 dispatcher 直跑 run() 所以单测全绿；二是 `auto.offset.reset` 默认 latest 的新消费组冷启动会丢订阅前 produce 的提交——E2E 靠显式 earliest 覆盖才绿，生产默认路径没人测。两个都是『配置/装配层的生产默认 vs 测试显式覆盖』的落差，和项目里反复出现的 mock 绿 ≠ 部署生效是同一族教训。」
+**复盘**：「这轮 10-persona 审查最有价值的是两个『测试绿但生产不生效』：一是 Kafka 模式的 retry——`WorkflowController.retry` 派发消息但 FAILED 是终态，消费者幂等跳过把重试消息吞了，返回 202 但永远不重跑，3 个 reviewer 独立置信 100 命中同一处，而本地 dispatcher 直跑 run() 所以单测全绿；二是 `auto.offset.reset` 默认 latest 的新消费组冷启动会丢订阅前 produce 的提交——E2E 靠显式 earliest 覆盖才绿，生产默认路径没人测。两个都是『配置/装配层的生产默认 vs 测试显式覆盖』的落差，和项目里反复出现的 mock 绿 ≠ 部署生效是同一族教训。」
 
 ---
 
@@ -318,7 +318,7 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - **`Set.copyOf` 打乱顺序**——`findGrantedTools` 保留 SQL ORDER BY 需 `LinkedHashSet`，否则管理 API 列表/测试顺序不确定。
 - **Spring 宽松绑定 env 名**（live 起服踩坑）：`agentflow.api.api-keys` 的 env 是 **`AGENTFLOW_API_API_KEYS`**（非 `AGENTFLOW_API_KEYS`）；`agentflow.admin.api-keys` → `AGENTFLOW_ADMIN_API_KEYS`。用错名静默 401（filter 白名单没加进 key）。
 
-**面试讲法**：「Kafka 消费者幂等从 check-then-act 升级成原子 claim——`tryClaim` 用条件 UPDATE 在 DB 层做 PENDING→RUNNING 独占转移，10 线程并发只有 1 个成功；R21 把工具级授权从配置硬编码升级成 DB 表 + 管理 API，admin key 门控变更，提交时强制即时生效——这是把安全从『静态配置』推进到『可运营的运行时授权』。」
+**复盘**：「Kafka 消费者幂等从 check-then-act 升级成原子 claim——`tryClaim` 用条件 UPDATE 在 DB 层做 PENDING→RUNNING 独占转移，10 线程并发只有 1 个成功；R21 把工具级授权从配置硬编码升级成 DB 表 + 管理 API，admin key 门控变更，提交时强制即时生效——这是把安全从『静态配置』推进到『可运营的运行时授权』。」
 
 ---
 
@@ -340,4 +340,4 @@ ce-code-review 的核心不是「找 bug」，是「用不同视角的 reviewer 
 - **`assertThatCode(...doesNotThrowAnyException())` 包 catch-all try = 恒绿**——starter 装配测试把唯一可抛语句吞进 try/catch 再断言不抛，即便 `fromEnvStrict()` 缺 key 抛错也照样绿，测不出声称验证的 fail-closed 构造。诚心修法：断言「mock DataSource 下确实抛连库错」（证明走真库路径）。
 - **hashKeys/admin-key 三处逐字重复**——`ApprovalCenterController`/`ApprovalController`/`ToolGrantController` 各一份「CSV→split→sha256→LinkedHashSet」。抽 `AdminApiKeys` 单一真相源。
 
-**面试讲法**：「我给已合 main 的功能也补跑了完整 code review——11 个 persona reviewer。最重的 P1 是 adversarial 用故障注入找到的：审批聚合端点遍历所有工作流时，一个损坏的审批行（比如 key 轮换后解不开）会让整个聚合 500，还剩过 mock fallback 掩盖成假数据。我加了 per-workflow 错误隔离 + 让 5xx 不降级 mock。另一个七人一致命中的是投影字段 workflowName 恒为 null——写代码时循环里明明有值却没用，这类『看着有字段其实没填』的契约陷阱，正是多视角 review 能扫出来的。」
+**复盘**：「我给已合 main 的功能也补跑了完整 code review——11 个 persona reviewer。最重的 P1 是 adversarial 用故障注入找到的：审批聚合端点遍历所有工作流时，一个损坏的审批行（比如 key 轮换后解不开）会让整个聚合 500，还剩过 mock fallback 掩盖成假数据。我加了 per-workflow 错误隔离 + 让 5xx 不降级 mock。另一个七人一致命中的是投影字段 workflowName 恒为 null——写代码时循环里明明有值却没用，这类『看着有字段其实没填』的契约陷阱，正是多视角 review 能扫出来的。」
