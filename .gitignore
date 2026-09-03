@@ -61,3 +61,14 @@ settings.xml
 
 # CodeGraph 本地索引（重建产物，不入版本控制）
 .codegraph/
+
+# 个人求职/面试材料与本地接手文档（存档于私有 learning 仓，不入公开仓库）
+CLAUDE.md
+导学-*.md
+面经-*.md
+docs/career-research/
+docs/resumes/
+docs/learning/
+docs/developer-notes/00-interview-arsenal.md
+docs/王永盛-27届计科专业.pdf
+*.pdf
