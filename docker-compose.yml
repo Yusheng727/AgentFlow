@@ -28,6 +28,21 @@ services:
     profiles:
       - mock
 
+  # ── MVP：合同审查雏形（demo-api 可执行 JAR，单容器零依赖）──
+  #   构建前提：先在宿主机 `mvn -s settings.xml -B -ntp -pl demo-api -am package -DskipTests`
+  #   起服务：  docker compose --profile mvp up -d --build
+  #   不需要 PG / Redis / Kafka / LLM key —— demo-api 用 InMemoryCheckpointManager，
+  #   agent 走 mock，dispatcher 走本地虚拟线程。
+  demo-api:
+    build:
+      context: .
+      dockerfile: demo-api/Dockerfile
+    image: agentflow-demo-api:local
+    ports:
+      - "8080:8080"
+    profiles:
+      - mvp
+
   # ── 生产模式：PG + Redis ──
   postgres:
     image: postgres:16-alpine
