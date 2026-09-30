@@ -62,4 +62,16 @@
         <!-- 跳过 JaCoCo 门禁：demo 模块是验证场景，核心引擎覆盖率由 core/adapters/api/starter 保证 -->
         <jacoco.skip>true</jacoco.skip>
     </properties>
+
+    <build>
+        <plugins>
+            <!-- 打成可独立运行的可执行 JAR（spring-boot-starter-parent 已管理版本并默认绑定 repackage）。
+                 没有它 `mvn package` 只出普通 JAR——无 Main-Class、无 BOOT-INF/lib，`java -jar` 直接报
+                 "no main manifest attribute"，容器里也就起不来。 -->
+            <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
 </project>

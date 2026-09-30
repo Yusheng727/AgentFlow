@@ -1,0 +1,15 @@
+# 构建上下文瘦身：只把 demo-api 的可执行 JAR 交给 docker 守护进程。
+#
+# 不加这个文件，`docker build .` 会把 13 个模块的 target/ 和 .git 一起打包上传——
+# 光 demo-api/target 就 126M（fat jar），加上 agentflow-core/target 39M、
+# agentflow-api/target 21M、.git 14M，上下文 200MB+，每次构建都白传一遍。
+#
+# 规则顺序有意义：先排除一切，再逐级放行 JAR 所在的那一条路径。
+# docker 不允许「父目录被排除时再放行里面的文件」，所以每一级父目录都要显式放行。
+*
+!demo-api
+demo-api/*
+!demo-api/Dockerfile
+!demo-api/target
+demo-api/target/*
+!demo-api/target/demo-api-*.jar
