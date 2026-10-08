@@ -73,6 +73,25 @@ curl -X POST localhost:8080/api/workflows/<wfId>/approvals/<approvalId> \
   -d '{"decision":"APPROVE"}'
 ```
 
+### Docker 部署（单容器，零依赖）
+
+`demo-api` 不需要 PostgreSQL / Redis / Kafka / LLM key，单容器即可起。
+
+```bash
+# 1. 先打可执行 JAR。镜像里不含 Maven（13 模块在容器内构建易 OOM/超时），
+#    且 131MB 的 fat jar 不入库——所以这一步不能省。
+mvn -B -ntp -pl demo-api -am package -DskipTests
+
+# 2. 构建并启动
+docker compose --profile mvp up -d --build
+curl localhost:8080/actuator/health
+
+# 3. 端到端验证：提交工作流 → 停在审批门 → 批复 → 从中断处续跑
+python deploy/smoke/smoke.py --url http://localhost:8080
+```
+
+冒烟脚本逐条打印实际耗时与状态；失败时退出码区分「断言失败」与「服务没起来」，便于排查。国内网络构建可在第 1 步加 `-s settings.xml`（见「构建」）。
+
 ## 接入：三步用上引擎
 
 **1. 加 Starter 依赖**（本地构建时 `mvn install` 后可引用）：
@@ -244,7 +263,8 @@ AgentFlow/
 ├── demo-conditional/             # 条件路由 + on_error 兜底
 ├── demo-loop/                    # 反思循环（draft → critique 回边 → finalize）
 ├── demo-rag/                     # RAG 检索增强（引擎零改动证明）
-├── demo-api/                     # 可启动 REST server + UI 后端
+├── demo-api/                     # 可启动 REST server + UI 后端（含 Dockerfile）
+├── deploy/                       # Prometheus/Grafana 配置 + demo-api 端到端冒烟脚本
 ├── docs/
 │   ├── design/                   # 架构图（分层 + BSP 时序）与渲染脚本
 │   ├── developer-notes/          # 实现取舍 / 踩坑记录 / review 发现
@@ -252,7 +272,7 @@ AgentFlow/
 │   ├── plans/agentflow/          # 设计决策件（KTD-1~9）
 │   ├── USER_GUIDE.md / TROUBLESHOOTING.md / GRAFANA.md / ROADMAP.md
 │   └── CONTRIBUTING 指引见根目录 CONTRIBUTING.md
-└── docker-compose.yml            # mock / production / distributed / observability profiles
+└── docker-compose.yml            # mock / mvp / production / distributed / observability profiles
 ```
 
 ## 构建

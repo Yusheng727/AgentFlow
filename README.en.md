@@ -73,6 +73,26 @@ curl -X POST localhost:8080/api/workflows/<wfId>/approvals/<approvalId> \
   -d '{"decision":"APPROVE"}'
 ```
 
+### Docker deployment (single container, zero dependencies)
+
+`demo-api` needs no PostgreSQL / Redis / Kafka / LLM key — one container is enough.
+
+```bash
+# 1. Build the executable JAR first. The image ships no Maven (building 13 modules
+#    in-container tends to OOM/time out), and the 131MB fat JAR is not committed —
+#    so this step is mandatory.
+mvn -B -ntp -pl demo-api -am package -DskipTests
+
+# 2. Build and start
+docker compose --profile mvp up -d --build
+curl localhost:8080/actuator/health
+
+# 3. End-to-end check: submit → pause at approval gate → approve → resume
+python deploy/smoke/smoke.py --url http://localhost:8080
+```
+
+The smoke script prints per-step timings and statuses, and its exit code distinguishes "assertion failed" from "service never came up". Add `-s settings.xml` to step 1 on slow networks in China.
+
 ## Core features
 
 **Orchestration**
@@ -167,13 +187,14 @@ AgentFlow/
 ├── agentflow-ui/                 # React 18 six-tab console
 ├── demo-*/                       # 7 runnable demos (parallel fan-out, serial chain, fork-join,
 │                                 #   conditional routing, reflection loop, RAG, REST server)
+├── deploy/                       # Prometheus/Grafana config + demo-api end-to-end smoke script
 ├── docs/
 │   ├── design/                   # Architecture diagrams + render scripts
 │   ├── developer-notes/          # Implementation rationale / bugs & fixes / review findings
 │   ├── business/                 # Business-flow docs (11 flows)
 │   ├── plans/agentflow/          # Design decision records (KTD-1~9)
 │   └── USER_GUIDE.md / TROUBLESHOOTING.md / GRAFANA.md / ROADMAP.md
-└── docker-compose.yml            # mock / production / distributed / observability profiles
+└── docker-compose.yml            # mock / mvp / production / distributed / observability profiles
 ```
 
 ## Build
