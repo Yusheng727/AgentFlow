@@ -343,6 +343,56 @@ class LangChain4jAgentAdapterTest {
     }
 
     @Test
+    @DisplayName("构造器参数化 maxToolRounds：缺省 5 不变，显式传 2 时第 2 轮即判 Fatal")
+    void maxToolRoundsConstructorConfigurable() {
+        ChatModel infiniteTools = new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                return ChatResponse.builder()
+                        .aiMessage(AiMessage.from(ToolExecutionRequest.builder()
+                                .id("r").name("notRegistered").arguments("{}").build()))
+                        .tokenUsage(new TokenUsage(1, 1))
+                        .build();
+            }
+        };
+        // 缺省构造：仍为 5 轮（chat 调 5 次）
+        AtomicInteger calls5 = new AtomicInteger();
+        LangChain4jAgentAdapter defaultAdapter = new LangChain4jAgentAdapter(counting(infiniteTools, calls5));
+        assertThatThrownBy(() -> defaultAdapter.execute(input("I1", "t", new WorkflowContext())))
+                .isInstanceOf(FatalException.class);
+        assertThat(calls5.get()).isEqualTo(5);
+
+        // 显式 maxToolRounds=2：第 2 轮即判 Fatal
+        AtomicInteger calls2 = new AtomicInteger();
+        LangChain4jAgentAdapter twoRoundAdapter = new LangChain4jAgentAdapter(
+                counting(infiniteTools, calls2), List.of(), null, null, null, null, null, 2);
+        assertThatThrownBy(() -> twoRoundAdapter.execute(input("I2", "t", new WorkflowContext())))
+                .isInstanceOf(FatalException.class)
+                .hasMessageContaining("轮数达上限");
+        assertThat(calls2.get()).isEqualTo(2);
+    }
+
+    /** 包一层计数 stub（chat 调用计数，验证轮次上限真实生效）。 */
+    private static ChatModel counting(ChatModel delegate, AtomicInteger counter) {
+        return new ChatModel() {
+            @Override
+            public ChatResponse chat(ChatRequest request) {
+                counter.incrementAndGet();
+                return delegate.chat(request);
+            }
+        };
+    }
+
+    @Test
+    @DisplayName("maxToolRounds 非法值（<1）→ IllegalArgumentException 快速失败")
+    void maxToolRoundsMustBePositive() {
+        assertThatThrownBy(() -> new LangChain4jAgentAdapter(
+                new StubChatModel(), List.of(), null, null, null, null, null, 0))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("maxToolRounds");
+    }
+
+    @Test
     @DisplayName("注入 metrics → 记账令 tokens.consumed/cost.estimated 可观测（Grafana 数据源）")
     void metricsRecordedWhenProvided() throws Exception {
         var registry = new SimpleMeterRegistry();

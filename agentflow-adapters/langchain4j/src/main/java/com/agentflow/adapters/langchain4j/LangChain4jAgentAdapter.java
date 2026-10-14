@@ -57,8 +57,8 @@ import java.util.function.Function;
  *       {@link SpelPromptResolver}，KTD-2 安全，与 Spring 适配器同一条解析路径）</li>
  *   <li>{@code chatModel.chat(ChatRequest)} 调用 LLM；节点声明 tools 时反射
  *       {@code @Tool} 方法注册 {@link ToolSpecification}，模型返回 toolExecutionRequests
- *       时执行本地工具并把结果回填消息（有界循环 ≤ {@link #MAX_TOOL_ROUNDS} 轮防死循环，
- *       usage 跨轮累加计费）</li>
+ *       时执行本地工具并把结果回填消息（有界循环 ≤ {@link #DEFAULT_MAX_TOOL_ROUNDS} 轮防死循环，
+ *       v1.0.1 起可经构造器参数化，usage 跨轮累加计费）</li>
  *   <li>从 {@link ChatResponse#tokenUsage()} 取 usage，构造 {@link AgentOutput}
  *       （metadata 写 token 统计，不挤占 channelWrites/structuredOutput）</li>
  *   <li>异常经 core {@link ErrorClassifier} 映射 Transient/Fatal（U4 单一真相源，与 Spring 适配器一致）</li>
@@ -75,8 +75,8 @@ public class LangChain4jAgentAdapter implements AgentFunction {
 
     private static final Logger log = LoggerFactory.getLogger(LangChain4jAgentAdapter.class);
 
-    /** 工具执行循环上限：防模型反复发起 toolExecutionRequests 死循环。 */
-    static final int MAX_TOOL_ROUNDS = 5;
+    /** 工具执行循环上限缺省值：防模型反复发起 toolExecutionRequests 死循环。 */
+    static final int DEFAULT_MAX_TOOL_ROUNDS = 5;
 
     private final ChatModel chatModel;
     private final List<Object> toolBeans;
@@ -89,6 +89,9 @@ public class LangChain4jAgentAdapter implements AgentFunction {
     /** v1.1 C2 结构化输出 schema 校验器（可空；非空且节点声明 output_schema 时带反馈重试校验）。
      *  core 复用件（与 Spring 适配器共用），补上 KTD-7 "相同 DSL 相同结果"对价。 */
     private final OutputSchemaValidator schemaValidator;
+    /** 本节点工具循环轮次上限（v1.0.1 参数化，缺省 {@link #DEFAULT_MAX_TOOL_ROUNDS}）。
+     *  工具密集型业务（RAG 审查"引用前必须核实"类契约）天然需要 >5 轮，硬常量会让整案失败。 */
+    private final int maxToolRounds;
     private final SpelPromptResolver promptResolver = new SpelPromptResolver();
 
     /** 便捷构造：无工具、无 trace、不脱敏、不记账、不校验（测试/最小用法）。 */
@@ -136,6 +139,25 @@ public class LangChain4jAgentAdapter implements AgentFunction {
                                    AgentFlowMetrics metrics,
                                    String model,
                                    OutputSchemaValidator schemaValidator) {
+        this(chatModel, toolBeans, trace, redactor, metrics, model, schemaValidator, DEFAULT_MAX_TOOL_ROUNDS);
+    }
+
+    /**
+     * v1.0.1 最全构造：在 schema 校验之上参数化工具循环轮次上限。
+     *
+     * @param maxToolRounds 工具执行轮次上限（&gt;=1；业务按场景放宽，如 RAG 审查传 15）
+     */
+    public LangChain4jAgentAdapter(ChatModel chatModel,
+                                   List<Object> toolBeans,
+                                   ExecutionTrace trace,
+                                   Function<String, String> redactor,
+                                   AgentFlowMetrics metrics,
+                                   String model,
+                                   OutputSchemaValidator schemaValidator,
+                                   int maxToolRounds) {
+        if (maxToolRounds < 1) {
+            throw new IllegalArgumentException("maxToolRounds 必须 >= 1，收到: " + maxToolRounds);
+        }
         this.chatModel = Objects.requireNonNull(chatModel, "chatModel");
         this.toolBeans = toolBeans == null ? List.of() : List.copyOf(toolBeans);
         this.trace = trace;
@@ -145,6 +167,7 @@ public class LangChain4jAgentAdapter implements AgentFunction {
         this.metrics = metrics;
         this.model = model;
         this.schemaValidator = schemaValidator;
+        this.maxToolRounds = maxToolRounds;
     }
 
     @Override
@@ -283,12 +306,12 @@ public class LangChain4jAgentAdapter implements AgentFunction {
             if (!hasToolRequests) {
                 return new LlmResult(aiMessage == null ? null : aiMessage.text(), promptTokens, completionTokens);
             }
-            if (round >= MAX_TOOL_ROUNDS - 1) {
+            if (round >= maxToolRounds - 1) {
                 // v1.1 review ADV-1/correctness-1：轮数耗尽仍要工具 = 工具链未完成。绝不能当"成功"返回
                 // （截断会静默丢弃已排期工具 + content=null 让下游 SpEL 崩溃）——以 FAILED 明示失败。
                 log.error("工具执行轮数达上限 {} 仍有 {} 个 toolExecutionRequest 未执行，判定节点失败",
-                        MAX_TOOL_ROUNDS, aiMessage.toolExecutionRequests().size());
-                throw new FatalException("工具执行轮数达上限 " + MAX_TOOL_ROUNDS + "，工具链未完成");
+                        maxToolRounds, aiMessage.toolExecutionRequests().size());
+                throw new FatalException("工具执行轮数达上限 " + maxToolRounds + "，工具链未完成");
             }
             messages.add(aiMessage);
             for (ToolExecutionRequest req : aiMessage.toolExecutionRequests()) {
